@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.9 (2026-09-03)
+
+### 🐛 Bug Fixes
+- **Poprawka z 0.2.8 jako czysty 0.2.9:** `Wykryj niedostępny` + `Bank unavailable` wymagały czystego tagu (poprzedni 0.2.8 force-push myli HACS cache). Wydano 0.2.9 bez nadpisywania tagu.
+
 ## v0.2.8 (2026-09-03)
 
 ### 🐛 Bug Fixes
