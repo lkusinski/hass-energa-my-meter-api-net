@@ -486,6 +486,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             return self.async_abort(reason="integration_not_ready")
 
         if user_input is not None:
+            from . import _import_meter_history
+
             # User confirmed the detected date, start history import from there
             start_date = datetime.strptime(user_input["start_date"], "%Y-%m-%d")
             days = (datetime.now() - start_date).days
