@@ -16,6 +16,9 @@ from .api import EnergaAPI, EnergaAuthError, EnergaConnectionError
 from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
+    CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_PLN,
+    CONF_BANK_RCE_PRICE,
     CONF_DEVICE_TOKEN,
     CONF_EXPORT_PRICE,
     CONF_IMPORT_PRICE,
@@ -23,13 +26,18 @@ from .const import (
     CONF_IMPORT_PRICE_2,
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
+    CONF_RCE_AUTO_FETCH,
     CONF_USERNAME,
     DEFAULT_BALANCE_BASELINE,
+    DEFAULT_BANK_INITIAL_KWH,
+    DEFAULT_BANK_INITIAL_PLN,
+    DEFAULT_BANK_RCE_PRICE,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
     DEFAULT_PROSUMER_COEFFICIENT,
+    DEFAULT_RCE_AUTO_FETCH,
     DOMAIN,
 )
 
@@ -347,6 +355,10 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             # G12w: show zone-specific prices
             current_price_1 = self._config_entry.options.get(CONF_IMPORT_PRICE_1, DEFAULT_IMPORT_PRICE_1)
             current_price_2 = self._config_entry.options.get(CONF_IMPORT_PRICE_2, DEFAULT_IMPORT_PRICE_2)
+            current_rce = self._config_entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)
+            current_initial_kwh = self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH)
+            current_initial_pln = self._config_entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN)
+            current_rce_auto = self._config_entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
 
             return self.async_show_form(
                 step_id="prices",
@@ -370,12 +382,28 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BALANCE_BASELINE_EXPORT, default=current_bl_export
                         ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_RCE_PRICE, default=current_rce
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_KWH, default=current_initial_kwh
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_PLN, default=current_initial_pln
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_RCE_AUTO_FETCH, default=current_rce_auto
+                        ): bool,
                     }
                 ),
             )
         else:
             # Single-zone: show single import price
             current_import = self._config_entry.options.get(CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE)
+            current_rce = self._config_entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)
+            current_initial_kwh = self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH)
+            current_initial_pln = self._config_entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN)
+            current_rce_auto = self._config_entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
 
             return self.async_show_form(
                 step_id="prices",
@@ -396,6 +424,18 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BALANCE_BASELINE_EXPORT, default=current_bl_export
                         ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_RCE_PRICE, default=current_rce
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_KWH, default=current_initial_kwh
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_PLN, default=current_initial_pln
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_RCE_AUTO_FETCH, default=current_rce_auto
+                        ): bool,
                     }
                 ),
             )

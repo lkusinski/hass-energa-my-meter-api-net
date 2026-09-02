@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.7 (2026-09-03)
+
+### 🐛 Bug Fixes
+- **Bank nie działał w ogóle:** `CONF_BANK_INITIAL_KWH`, `CONF_BANK_RCE_PRICE`, `CONF_BANK_INITIAL_PLN` nie były zaimportowane w `sensor.py` → `NameError` przy każdej aktualizacji → encje banku nigdy się nie tworzyły. Dodano brakujące importy.
+- **`activationDate` na złym poziomie:** API zwraca `activationDate` na poziomie `response`, nie `meterPoints`. Kod szukał `meter.get("activationDate")` → zawsze `None`. Dodano `activation_date` do `meter_obj` pobierane z `response.activationDate`.
+- **Bank PLN — błędna cena eksportu:** Używał `0.95` jako ceny eksportu zamiast `get_price_for_key()` z konfiguracji. Naprawiono.
+
+### ✨ New Features
+- **Auto-detekcja stare/nowe po `prosumer_coefficient`:** `coefficient >= 0.7` = stare (net-metering, Bank kWh), `< 0.7` = nowe (net-billing, Bank PLN). Tylko jeden bank na licznik, zależnie od typu. `activationDate` nie jest wiarygodnym wskaźnikiem — to data umowy, nie data przejścia na system prosumentencki.
+- **Auto-fetch RCEm z PSE API:** Nowy sensor `EnergaRceSensor` pobiera RCEm z `api.raporty.pse.pl/api/rce-pln` (opcja `rce_auto_fetch` w konfiguracji). Fallback na ręczny `bank_rce_price` jeśli pobieranie się nie powiedzie.
+- **Opcje banku w konfiguracji:** `bank_rce_price`, `bank_initial_kwh`, `bank_initial_pln`, `rce_auto_fetch` dodane do formularza cen w Options → Set Energy Prices.
+- **Atrybuty stanu banku:** Bank kWh i PLN pokazują teraz szczegółowe atrybuty (`net_import_kwh`, `net_export_kwh`, `coefficient`, `bilans_kwh`, `initial_kwh`, `source`).
+- **`obis_balance` (BP) i `obis_yearly` (WytworzonaOddana):** Dodano wykrywanie dodatkowych kodów OBIS z API.
+- **`is_prosumer` w meter_obj:** Detekcja prosumenta po `type: "Wytwórca"` w agreementPoints.
+
+### 🔧 Changes
+- `api.py`: `meter_obj` zawiera teraz `activation_date`, `is_prosumer`, `obis_balance`, `obis_yearly`
+- `api.py`: `async_find_first_data_date` używa `activation_date` zamiast `activationDate`
+- `sensor.py`: Dodano `EnergaRceSensor` — sensor RCEm z auto-fetch z PSE
+- `config_flow.py`: Dodano opcje banku w formularzu cen (G12W i G11)
+- `strings.json`, `pl.json`: Dodano tłumaczenia nowych opcji banku
+
 ## v0.2.6 (2026-09-02)
 
 ### 🐛 Bug Fixes

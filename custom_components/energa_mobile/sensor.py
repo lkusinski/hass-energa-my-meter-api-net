@@ -38,9 +38,17 @@ from .api import EnergaAuthError, EnergaConnectionError, EnergaTokenExpiredError
 from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
+    CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_PLN,
+    CONF_BANK_RCE_PRICE,
     CONF_PROSUMER_COEFFICIENT,
+    CONF_RCE_AUTO_FETCH,
     DEFAULT_BALANCE_BASELINE,
+    DEFAULT_BANK_INITIAL_KWH,
+    DEFAULT_BANK_INITIAL_PLN,
+    DEFAULT_BANK_RCE_PRICE,
     DEFAULT_PROSUMER_COEFFICIENT,
+    DEFAULT_RCE_AUTO_FETCH,
     DOMAIN,
     get_price_for_key,
 )
@@ -378,25 +386,44 @@ async def async_setup_entry(
             )
 
         # === BANK SENSORS (native, per strefa, old kWh + new PLN, issue #37) ===
+        # Auto-detect old (net-metering, coeff 0.8/0.7) vs new (net-billing, coeff < 0.7)
+        # coefficient 0.8 = old system (roczny bilans kWh)
+        # coefficient 0.7 = old system with 0.7 opłata (przejściowy)
+        # coefficient 0.0 = new system (net-billing, RCE×1.23, miesięczny PLN)
         if meter.get("obis_minus"):
-            sensors.append(
-                EnergaBankKwhSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    device_info=device_info,
-                    entry=entry,
-                    has_zones=has_zones,
+            coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            is_old_system = coeff >= 0.7  # 0.8 or 0.7 = old net-metering
+
+            if is_old_system:
+                sensors.append(
+                    EnergaBankKwhSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        has_zones=has_zones,
+                    )
                 )
-            )
-            sensors.append(
-                EnergaBankPlnSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    device_info=device_info,
-                    entry=entry,
-                    has_zones=has_zones,
+            else:
+                sensors.append(
+                    EnergaBankPlnSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        has_zones=has_zones,
+                    )
                 )
-            )
+                # RCEm auto sensor only for new system (net-billing)
+                sensors.append(
+                    EnergaRceSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        api=api,
+                    )
+                )
             sensors.append(
                 EnergaFirstDataDateSensor(
                     coordinator=coordinator,
@@ -914,9 +941,9 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
 class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
     """Virtual storage in kWh for old prosumer (net-metering, per strefa G12W).
 
-    Auto-detects old vs new based on activationDate < 2022-03-31 or coefficient 0.8/0.7.
-    For old: bank = max(0, Bilans) + initial_kwh (e.g. 783/1358 from invoice).
-    Uses per-zone meter totals if G12W, with 1.23 NOT applied (old).
+    For old system (coefficient 0.8/0.7): bank = max(0, Bilans) + initial_kwh.
+    Bilans = (export - baseline_export) * coefficient - (import - baseline_import).
+    Uses per-zone meter totals if G12W. 1.23 NOT applied (old system).
     """
 
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
@@ -937,41 +964,67 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         totals = self.coordinator._meter_totals.get(str(self._meter_id))
         if not totals:
             return None
-        # Use per-zone if G12W for accurate import
+
+        opts = self._entry.options
+        mid = self._meter_id
+
+        # Get baselines
+        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+
         if self._has_zones:
-            imp1 = totals.get("import_1", totals.get("import", 0))
-            imp2 = totals.get("import_2", 0)
-            exp1 = totals.get("export_1", totals.get("export", 0))
-            exp2 = totals.get("export_2", 0)
-            # Need baselines per zone - fallback to global if not set
-            bi1 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_1", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE)))
-            bi2 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_2", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE)))
-            be1 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_export_1", self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE)))
-            be2 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_export_2", self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE)))
-            # If per-zone baselines not set, use total baselines proportionally
-            if bi1 == 0 and bi2 == 0:
-                bi1 = bi2 = 0
-                be1 = be2 = 0
-                net_imp = totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))
-                net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+            # Per-zone baselines if available, else global
+            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
+            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
+            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
+            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+
+            imp1 = float(totals.get("import_1", totals.get("import", 0)))
+            imp2 = float(totals.get("import_2", 0))
+            exp1 = float(totals.get("export_1", totals.get("export", 0)))
+            exp2 = float(totals.get("export_2", 0))
+
+            # If per-zone baselines not set, use total baselines with total import/export
+            if bi1 == bi and bi2 == bi:
+                # No per-zone baseline — use total import/export minus global baseline
+                net_imp = float(totals.get("import", 0)) - bi
+                net_exp = float(totals.get("export", 0)) - be
             else:
                 net_imp = (imp1 - bi1) + (imp2 - bi2)
                 net_exp = (exp1 - be1) + (exp2 - be2)
         else:
-            net_imp = totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))
-            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
-        coeff = float(self._entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-        initial = float(self._entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+            net_imp = float(totals.get("import", 0)) - bi
+            net_exp = float(totals.get("export", 0)) - be
+
+        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
         bilans = (net_exp * coeff) - net_imp
-        return round(max(0, bilans) + initial, 2)
+        bank = max(0, bilans) + initial
+
+        _LOGGER.debug(
+            "BankKwh %s: imp=%.2f exp=%.2f coeff=%.2f bilans=%.2f initial=%.2f bank=%.2f",
+            mid, net_imp, net_exp, coeff, bilans, initial, bank,
+        )
+
+        self._attr_extra_state_attributes = {
+            "net_import_kwh": round(net_imp, 2),
+            "net_export_kwh": round(net_exp, 2),
+            "coefficient": coeff,
+            "bilans_kwh": round(bilans, 2),
+            "initial_kwh": initial,
+            "source": "net-metering (old system)",
+        }
+
+        return round(bank, 2)
 
 
 class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
     """Virtual storage in PLN for new prosumer (net-billing, RCE×1.23).
 
-    For new installations (after 2022-03-31, especially after 30.06.2024): bank in PLN,
-    per strefa G12W 1.30/0.65 + RCE from PSE, ×1.23, 12 mies. validity.
-    Uses per-zone import and total export×RCE.
+    For new system (coefficient 0.0): bank in PLN.
+    bank = initial_pln + export×RCE×1.23 - import×cena_per_strefa.
+    Per strefa G12W: import_1 × cena_1 + import_2 × cena_2.
+    RCE fetched from PSE or manual input, ×1.23 (VAT on energy sold).
     """
 
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
@@ -992,24 +1045,67 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         totals = self.coordinator._meter_totals.get(str(self._meter_id))
         if not totals:
             return None
-        rce = float(self._entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
-        initial = float(self._entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN))
-        # Net export/import
+
+        opts = self._entry.options
+        mid = self._meter_id
+
+        rce = float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+        initial = float(opts.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN))
+
+        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+
         if self._has_zones:
-            imp1 = totals.get("import_1", 0) - float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_1", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0)))
-            imp2 = totals.get("import_2", 0) - float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_2", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0)))
-            # Fallback to total if per-zone baselines not set
-            if imp1 == totals.get("import_1", 0) and imp2 == totals.get("import_2", 0):
-                # No per-zone baseline, use total
-                net_imp_cost = (totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))) * 0.95
+            # Per-zone baselines if available
+            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
+            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
+            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
+            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+
+            imp1 = float(totals.get("import_1", totals.get("import", 0)))
+            imp2 = float(totals.get("import_2", 0))
+            exp1 = float(totals.get("export_1", totals.get("export", 0)))
+            exp2 = float(totals.get("export_2", 0))
+
+            # If per-zone baselines not set, use total
+            if bi1 == bi and bi2 == bi:
+                net_imp = float(totals.get("import", 0)) - bi
+                net_exp = float(totals.get("export", 0)) - be
+                price1 = get_price_for_key(opts, "import", mid)
+                net_imp_cost = net_imp * price1
             else:
-                net_imp_cost = imp1 * get_price_for_key(self._entry.options, "import_1", self._meter_id) + imp2 * get_price_for_key(self._entry.options, "import_2", self._meter_id)
-            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+                net_imp1 = imp1 - bi1
+                net_imp2 = imp2 - bi2
+                price1 = get_price_for_key(opts, "import_1", mid)
+                price2 = get_price_for_key(opts, "import_2", mid)
+                net_imp_cost = net_imp1 * price1 + net_imp2 * price2
+                net_exp = (exp1 - be1) + (exp2 - be2)
         else:
-            net_imp_cost = (totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))) * get_price_for_key(self._entry.options, "import", self._meter_id)
-            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+            net_imp = float(totals.get("import", 0)) - bi
+            net_exp = float(totals.get("export", 0)) - be
+            price = get_price_for_key(opts, "import", mid)
+            net_imp_cost = net_imp * price
+
         comp_export = net_exp * rce * 1.23
-        return round(initial + comp_export - net_imp_cost, 2)
+        bank = initial + comp_export - net_imp_cost
+
+        _LOGGER.debug(
+            "BankPln %s: net_imp_cost=%.2f net_exp=%.2f rce=%.5f comp_export=%.2f initial=%.2f bank=%.2f",
+            mid, net_imp_cost, net_exp, rce, comp_export, initial, bank,
+        )
+
+        self._attr_extra_state_attributes = {
+            "net_import_kwh": round(net_imp, 2) if not self._has_zones else round(imp1 - bi1 + imp2 - bi2, 2),
+            "net_export_kwh": round(net_exp, 2),
+            "rce_price": rce,
+            "vat_multiplier": 1.23,
+            "compensation_export_pln": round(comp_export, 2),
+            "import_cost_pln": round(net_imp_cost, 2),
+            "initial_pln": initial,
+            "source": "net-billing (new system)",
+        }
+
+        return round(bank, 2)
 
 
 class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
@@ -1386,3 +1482,63 @@ class EnergaPriceSensor(SensorEntity):
         return get_price_for_key(
             opts, self._data_key, meter_id=self._meter_id
         )
+
+
+class EnergaRceSensor(CoordinatorEntity, SensorEntity):
+    """RCEm sensor — auto-fetch monthly RCE from PSE or use manual value.
+
+    Displays the current RCEm (PLN/kWh) used for net-billing calculations.
+    When auto-fetch is enabled, fetches from PSE API ~every 24h.
+    Falls back to manual value (CONF_BANK_RCE_PRICE) if fetch fails.
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, api) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._api = api
+        self._cached_rcem: float | None = None
+        self._last_fetch: datetime | None = None
+        self._attr_name = "RCEm (auto)"
+        self._attr_unique_id = f"energa_{meter_id}_rcem_auto"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "PLN/kWh"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_icon = "mdi:chart-line"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self):
+        """Return RCEm — either auto-fetched or manual fallback."""
+        opts = self._entry.options
+        auto_fetch = opts.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
+
+        if auto_fetch and self._cached_rcem is not None:
+            return self._cached_rcem
+
+        # Fallback to manual value
+        return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "auto_fetch": bool(self._entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)),
+            "cached_rcem": self._cached_rcem,
+            "last_fetch": self._last_fetch.isoformat() if self._last_fetch else None,
+            "manual_fallback": float(self._entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)),
+            "source": "PSE API (api.raporty.pse.pl)" if self._cached_rcem else "manual input",
+        }
+
+    async def async_update_rcem(self):
+        """Fetch RCEm from PSE API. Called by coordinator or on demand."""
+        try:
+            rcem = await self._api.async_fetch_rcem()
+            if rcem is not None:
+                self._cached_rcem = rcem
+                self._last_fetch = datetime.now()
+                _LOGGER.info("RCEm auto-fetched: %.5f PLN/kWh", rcem)
+            else:
+                _LOGGER.warning("RCEm auto-fetch failed, using manual fallback")
+        except Exception as err:
+            _LOGGER.warning("RCEm auto-fetch error: %s", err)

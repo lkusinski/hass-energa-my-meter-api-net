@@ -44,6 +44,11 @@ HEADERS = {
 # Spike guard: maximum plausible hourly energy consumption in kWh
 MAX_HOURLY_KWH = 100
 
+# PSE API for RCE (Rynkowa Cena Energii)
+PSE_RCE_API_URL = "https://api.raporty.pse.pl/api/rce-pln"
+CONF_RCE_AUTO_FETCH = "rce_auto_fetch"  # Enable/disable auto RCE fetch
+DEFAULT_RCE_AUTO_FETCH = False
+
 
 def get_price_for_key(
     options: dict, data_key: str, meter_id: str | None = None

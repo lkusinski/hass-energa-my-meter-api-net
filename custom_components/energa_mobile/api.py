@@ -13,6 +13,7 @@ from .const import (
     DATA_ENDPOINT,
     HEADERS,
     LOGIN_ENDPOINT,
+    PSE_RCE_API_URL,
     SESSION_ENDPOINT,
 )
 
@@ -234,11 +235,66 @@ class EnergaAPI:
 
         return result
 
+    async def async_fetch_rcem(self, month: int = None, year: int = None) -> float | None:
+        """Fetch RCEm (monthly average RCE) from PSE API.
+
+        Returns RCEm in PLN/kWh (e.g. 0.26288 for July 2026).
+        If month/year not specified, uses previous month (RCEm is published ~11th of next month).
+        """
+        tz = ZoneInfo("Europe/Warsaw")
+        now = datetime.now(tz)
+        if month is None or year is None:
+            # Use previous month (RCEm for current month isn't published yet)
+            if now.month == 1:
+                month, year = 12, now.year - 1
+            else:
+                month, year = now.month - 1, now.year
+
+        target_month_str = f"{year}-{month:02d}"
+
+        try:
+            # Fetch hourly RCE data from PSE
+            # The API returns up to 100 records per call; we need a full month (~96-288 records for 15-min intervals)
+            # Use the $filter parameter to get records for the target month
+            url = f"{PSE_RCE_API_URL}?$filter=business_date ge '{target_month_str}-01' and business_date lt '{target_month_str}-31'"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        _LOGGER.warning("PSE RCE API returned HTTP %d", resp.status)
+                        return None
+                    data = await resp.json()
+
+            values = data.get("value", [])
+            if not values:
+                _LOGGER.warning("No RCE data from PSE for %s", target_month_str)
+                return None
+
+            # RCEm = volume-weighted average of hourly RCE prices
+            # Since we don't have volume weights, use simple average
+            # PSE returns rce_pln in PLN/MWh, convert to PLN/kWh by dividing by 1000
+            total = sum(v.get("rce_pln", 0) for v in values)
+            avg_rce_mwh = total / len(values)
+            rcem_pln_kwh = round(avg_rce_mwh / 1000, 5)
+
+            _LOGGER.info(
+                "RCEm for %s: %.2f PLN/MWh = %.5f PLN/kWh (from %d records)",
+                target_month_str, avg_rce_mwh, rcem_pln_kwh, len(values),
+            )
+            return rcem_pln_kwh
+
+        except aiohttp.ClientError as err:
+            _LOGGER.warning("PSE RCE API connection error: %s", err)
+            return None
+        except Exception as err:
+            _LOGGER.warning("PSE RCE API error: %s", err)
+            return None
+
     async def async_find_first_data_date(self, meter_point_id: str) -> datetime | None:
         """Hierarchically find first day with data (year → half → month → day).
 
         Uses single-day mchart probes per level (1 request per check, not 365),
-        with 0.7s sleep for discretion. Starts from activationDate or 2020.
+        with 0.7s sleep for discretion. Starts from activation_date or 2020.
         Returns datetime of first day with import or export data, or None.
         """
         import asyncio
@@ -250,12 +306,15 @@ class EnergaAPI:
             meter = self._meters_data[0]
         # Try to get activation date from API data, else 2020-01-01
         try:
-            # activationDate is in agreementPoints dealer start or meter activation
+            # activation_date is at response level (prosumer agreement activation)
             # Fallback to 2020
             start_year = 2020
-            if meter and meter.get("activationDate"):
-                start_year = datetime.fromtimestamp(int(meter["activationDate"]) / 1000, tz=ZoneInfo("Europe/Warsaw")).year
-        except:
+            if meter and meter.get("activation_date"):
+                try:
+                    start_year = datetime.fromtimestamp(int(meter["activation_date"]) / 1000, tz=ZoneInfo("Europe/Warsaw")).year
+                except (ValueError, TypeError, OSError):
+                    pass
+        except Exception:
             start_year = 2020
 
         end_year = datetime.now(ZoneInfo("Europe/Warsaw")).year
@@ -482,6 +541,21 @@ class EnergaAPI:
             except (ValueError, TypeError, OSError):
                 pass
 
+            # activationDate is at response level, not meterPoint level
+            # This is the date the prosumer agreement was activated
+            activation_ts = data["response"].get("activationDate")
+            if not activation_ts:
+                # Fallback to dealer.start if activationDate not at response level
+                activation_ts = ag.get("dealer", {}).get("start")
+
+            # Check if prosumer (Wytwórca = producer = prosumer)
+            is_prosumer = ag.get("type") == "Wytwórca" or bool(
+                mp.get("obis_minus") or any(
+                    obj.get("obis", "").startswith("1-0:2.8.0")
+                    for obj in mp.get("meterObjects", [])
+                )
+            )
+
             meter_obj = {
                 "meter_point_id": mp.get("id"),
                 "ppe": ppe,
@@ -489,6 +563,8 @@ class EnergaAPI:
                 "tariff": mp.get("tariff"),
                 "address": address,
                 "contract_date": c_date,
+                "activation_date": activation_ts,
+                "is_prosumer": is_prosumer,
                 "daily_pobor": None,
                 "daily_produkcja": None,
                 "total_plus": None,
@@ -499,6 +575,8 @@ class EnergaAPI:
                 "total_minus_2": None,
                 "obis_plus": None,
                 "obis_minus": None,
+                "obis_balance": None,
+                "obis_yearly": None,
                 "zone_count": 1,
             }
 
@@ -540,10 +618,15 @@ class EnergaAPI:
                 )
 
             for obj in mp.get("meterObjects", []):
-                if obj.get("obis", "").startswith("1-0:1.8.0"):
-                    meter_obj["obis_plus"] = obj.get("obis")
-                elif obj.get("obis", "").startswith("1-0:2.8.0"):
-                    meter_obj["obis_minus"] = obj.get("obis")
+                obis = obj.get("obis", "")
+                if obis.startswith("1-0:1.8.0"):
+                    meter_obj["obis_plus"] = obis
+                elif obis.startswith("1-0:2.8.0"):
+                    meter_obj["obis_minus"] = obis
+                elif obis == "BP":
+                    meter_obj["obis_balance"] = obis
+                elif obis == "WytworzonaOddana":
+                    meter_obj["obis_yearly"] = obis
             meters_found.append(meter_obj)
         return meters_found
 
