@@ -377,6 +377,27 @@ async def async_setup_entry(
                 )
             )
 
+        # === BANK SENSORS (native, per strefa, old kWh + new PLN, issue #37) ===
+        if meter.get("obis_minus"):
+            sensors.append(
+                EnergaBankKwhSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    has_zones=has_zones,
+                )
+            )
+            sensors.append(
+                EnergaBankPlnSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    has_zones=has_zones,
+                )
+            )
+
         # === PRICE SENSORS (F1: v4.14) ===
 
         if has_zones:
@@ -880,6 +901,107 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
             self.native_value,
         )
         self.async_write_ha_state()
+
+
+class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
+    """Virtual storage in kWh for old prosumer (net-metering, per strefa G12W).
+
+    Auto-detects old vs new based on activationDate < 2022-03-31 or coefficient 0.8/0.7.
+    For old: bank = max(0, Bilans) + initial_kwh (e.g. 783/1358 from invoice).
+    Uses per-zone meter totals if G12W, with 1.23 NOT applied (old).
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._has_zones = has_zones
+        self._attr_name = "Bank Wirtualny kWh"
+        self._attr_unique_id = f"energa_{meter_id}_bank_kwh"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_icon = "mdi:battery-charging"
+
+    @property
+    def native_value(self):
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return None
+        # Use per-zone if G12W for accurate import
+        if self._has_zones:
+            imp1 = totals.get("import_1", totals.get("import", 0))
+            imp2 = totals.get("import_2", 0)
+            exp1 = totals.get("export_1", totals.get("export", 0))
+            exp2 = totals.get("export_2", 0)
+            # Need baselines per zone - fallback to global if not set
+            bi1 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_1", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE)))
+            bi2 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_2", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE)))
+            be1 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_export_1", self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE)))
+            be2 = float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_export_2", self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE)))
+            # If per-zone baselines not set, use total baselines proportionally
+            if bi1 == 0 and bi2 == 0:
+                bi1 = bi2 = 0
+                be1 = be2 = 0
+                net_imp = totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))
+                net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+            else:
+                net_imp = (imp1 - bi1) + (imp2 - bi2)
+                net_exp = (exp1 - be1) + (exp2 - be2)
+        else:
+            net_imp = totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))
+            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+        coeff = float(self._entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        initial = float(self._entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        bilans = (net_exp * coeff) - net_imp
+        return round(max(0, bilans) + initial, 2)
+
+
+class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
+    """Virtual storage in PLN for new prosumer (net-billing, RCE×1.23).
+
+    For new installations (after 2022-03-31, especially after 30.06.2024): bank in PLN,
+    per strefa G12W 1.30/0.65 + RCE from PSE, ×1.23, 12 mies. validity.
+    Uses per-zone import and total export×RCE.
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._has_zones = has_zones
+        self._attr_name = "Bank Wirtualny PLN"
+        self._attr_unique_id = f"energa_{meter_id}_bank_pln"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "PLN"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_icon = "mdi:cash-check"
+
+    @property
+    def native_value(self):
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return None
+        rce = float(self._entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+        initial = float(self._entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN))
+        # Net export/import
+        if self._has_zones:
+            imp1 = totals.get("import_1", 0) - float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_1", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0)))
+            imp2 = totals.get("import_2", 0) - float(self._entry.options.get(f"meter_{self._meter_id}_balance_baseline_import_2", self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0)))
+            # Fallback to total if per-zone baselines not set
+            if imp1 == totals.get("import_1", 0) and imp2 == totals.get("import_2", 0):
+                # No per-zone baseline, use total
+                net_imp_cost = (totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))) * 0.95
+            else:
+                net_imp_cost = imp1 * get_price_for_key(self._entry.options, "import_1", self._meter_id) + imp2 * get_price_for_key(self._entry.options, "import_2", self._meter_id)
+            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+        else:
+            net_imp_cost = (totals.get("import", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_IMPORT, 0))) * get_price_for_key(self._entry.options, "import", self._meter_id)
+            net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
+        comp_export = net_exp * rce * 1.23
+        return round(initial + comp_export - net_imp_cost, 2)
 
 
 class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):

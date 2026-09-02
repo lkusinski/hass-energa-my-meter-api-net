@@ -11,6 +11,9 @@ CONF_IMPORT_PRICE_2 = "import_price_2"  # PLN/kWh zone 2 / off-peak (G12w)
 CONF_PROSUMER_COEFFICIENT = "prosumer_coefficient"  # Net billing coefficient (0.0-1.0)
 CONF_BALANCE_BASELINE_IMPORT = "balance_baseline_import"  # Meter import reading at period start (kWh)
 CONF_BALANCE_BASELINE_EXPORT = "balance_baseline_export"  # Meter export reading at period start (kWh)
+CONF_BANK_RCE_PRICE = "bank_rce_price"  # PLN/kWh for net-billing (RCE/RCEm, e.g. 0.26288 for 07.2026)
+CONF_BANK_INITIAL_KWH = "bank_initial_kwh"  # Initial kWh bank for old prosumer (e.g. 783 for G12W stare zasady 31.12.2025, 1358 for 30.06.2026)
+CONF_BANK_INITIAL_PLN = "bank_initial_pln"  # Initial PLN bank for new prosumer (e.g. 0.0 for G12W nowe zasady 01.08.2026, 147.44 for 07.2026)
 
 # Default prices (PLN/kWh) - G12w tariff from 2026-01-01
 DEFAULT_IMPORT_PRICE = 1.188
@@ -19,6 +22,9 @@ DEFAULT_IMPORT_PRICE_2 = 0.5955  # Zone 2 (off-peak)
 DEFAULT_EXPORT_PRICE = 0.95
 DEFAULT_PROSUMER_COEFFICIENT = 0.8
 DEFAULT_BALANCE_BASELINE = 0.0  # 0 = count from meter installation (lifetime)
+DEFAULT_BANK_RCE_PRICE = 0.26288  # RCEm for 07.2026, update monthly via PSE
+DEFAULT_BANK_INITIAL_KWH = 0.0
+DEFAULT_BANK_INITIAL_PLN = 0.0
 
 # API endpoints
 BASE_URL = "https://api-mojlicznik.energa-operator.pl/dp"
