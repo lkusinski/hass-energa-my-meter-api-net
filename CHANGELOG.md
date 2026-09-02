@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.6 (2026-09-02)
+
+### 🐛 Bug Fixes
+- **Unknown error po Wykryj → Zatwierdź:** Brak `from . import _import_meter_history` w `async_step_detect_first` → `NameError` na `Zatwierdź` po `Wykryto: 2025-01-01`. Dodano import.
+
 ## v0.2.5 (2026-09-02)
 
 ### 🐛 Bug Fixes
