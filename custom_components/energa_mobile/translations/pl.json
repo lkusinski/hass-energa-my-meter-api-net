@@ -34,6 +34,7 @@
                     "credentials": "Zmień Login/Hasło",
                     "prices": "Ustaw Ceny Energii",
                     "history": "Pobierz Historię Danych",
+                    "detect_first": "Wykryj pierwszy odczyt",
                     "clear_stats": "Wyczyść Statystyki Panelu Energia"
                 }
             },
@@ -63,6 +64,10 @@
                 "data": {
                     "start_date": "Data początkowa"
                 }
+            },
+            "detect_first": {
+                "title": "Wykryj pierwszy odczyt",
+                "description": "**Wykryto:** {detected_date} (kontrakt: {contract_date})\n\nPotwierdź aby pobrać historię od wykrytego dnia. Dyskretne: ~14 requestów hierarchicznie (rok→pół→miesiąc→dzień) zamiast 365."
             },
             "clear_stats": {
                 "title": "Czyszczenie Statystyk",
