@@ -234,6 +234,97 @@ class EnergaAPI:
 
         return result
 
+    async def async_find_first_data_date(self, meter_point_id: str) -> datetime | None:
+        """Hierarchically find first day with data (year → half → month → day).
+
+        Uses single-day mchart probes per level (1 request per check, not 365),
+        with 0.7s sleep for discretion. Starts from activationDate or 2020.
+        Returns datetime of first day with import or export data, or None.
+        """
+        import asyncio
+        from datetime import timedelta
+
+        # Find meter and its activation date or fallback to 2020
+        meter = next((m for m in self._meters_data if m["meter_point_id"] == meter_point_id), None)
+        if not meter and self._meters_data:
+            meter = self._meters_data[0]
+        # Try to get activation date from API data, else 2020-01-01
+        try:
+            # activationDate is in agreementPoints dealer start or meter activation
+            # Fallback to 2020
+            start_year = 2020
+            if meter and meter.get("activationDate"):
+                start_year = datetime.fromtimestamp(int(meter["activationDate"]) / 1000, tz=ZoneInfo("Europe/Warsaw")).year
+        except:
+            start_year = 2020
+
+        end_year = datetime.now(ZoneInfo("Europe/Warsaw")).year
+
+        # Helper to check if a specific day has data (1 mchart call)
+        async def has_data_for_day(dt: datetime) -> bool:
+            try:
+                await asyncio.sleep(0.7)
+                data = await self.async_get_history_hourly(meter_point_id, dt, include_timestamps=False)
+                return bool(data.get("import") or data.get("export") or data.get("import_1") or data.get("export_1"))
+            except:
+                return False
+
+        # Year level: probe mid-year July 1
+        first_year_with_data = None
+        for y in range(end_year, start_year - 1, -1):
+            probe = datetime(y, 7, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
+            if await has_data_for_day(probe):
+                first_year_with_data = y
+            else:
+                break
+        if first_year_with_data is None:
+            return None
+        # Now we know first year is first_year_with_data+1? Actually loop breaks when no data, so first with data is y+1
+        # Correct: we went descending, so when we hit no data at y, the next y+1 is first with data
+        # But our loop set first_year_with_data to last with data, so need to find first
+        # Simpler: find first year with data by ascending
+        first_year = None
+        for y in range(start_year, end_year + 1):
+            probe = datetime(y, 7, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
+            if await has_data_for_day(probe):
+                first_year = y
+                break
+        if first_year is None:
+            return None
+
+        # Half-year: check June vs Jan
+        for m in [1, 7]:
+            probe = datetime(first_year, m, 15, tzinfo=ZoneInfo("Europe/Warsaw"))
+            if await has_data_for_day(probe):
+                first_month = m
+                break
+        else:
+            first_month = 7
+
+        # Month: binary search within year
+        # If first_month is 1, search Jan-Jun, else Jul-Dec
+        month_start = 1 if first_month == 1 else 7
+        month_end = 6 if first_month == 1 else 12
+        first_month_found = None
+        for m in range(month_start, month_end + 1):
+            probe = datetime(first_year, m, 15, tzinfo=ZoneInfo("Europe/Warsaw"))
+            if await has_data_for_day(probe):
+                first_month_found = m
+                break
+        if first_month_found is None:
+            first_month_found = month_start
+
+        # Day: linear within month (max 31 requests, discreet)
+        for d in range(1, 32):
+            try:
+                probe = datetime(first_year, first_month_found, d, tzinfo=ZoneInfo("Europe/Warsaw"))
+            except ValueError:
+                continue
+            if await has_data_for_day(probe):
+                return probe
+
+        return datetime(first_year, first_month_found, 1, tzinfo=ZoneInfo("Europe/Warsaw"))
+
     async def async_get_hourly_statistics(
         self, meter_point_id: str, start_date: datetime = None
     ):

@@ -397,6 +397,14 @@ async def async_setup_entry(
                     has_zones=has_zones,
                 )
             )
+            sensors.append(
+                EnergaFirstDataDateSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                )
+            )
 
         # === PRICE SENSORS (F1: v4.14) ===
 
@@ -1002,6 +1010,48 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             net_exp = totals.get("export", 0) - float(self._entry.options.get(CONF_BALANCE_BASELINE_EXPORT, 0))
         comp_export = net_exp * rce * 1.23
         return round(initial + comp_export - net_imp_cost, 2)
+
+
+class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
+    """Date of first reading (auto-detected hierarchically, per strefa G12W).
+
+    Created as diagnostic entity, disabled by default if user prefers.
+    Value is set after async_find_first_data_date (year→half→month→day, ~14 req).
+    Can be manually triggered via button.energa_xxx_wykryj_pierwszy_odczyt.
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._attr_name = "Data pierwszego odczytu"
+        self._attr_unique_id = f"energa_{meter_id}_first_data_date"
+        self._attr_has_entity_name = True
+        self._attr_device_class = SensorDeviceClass.DATE
+        self._attr_icon = "mdi:calendar-start"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self):
+        # Stored in entry.options["first_data_date"] after detection, or from API contract_date
+        val = self._entry.options.get(f"meter_{self._meter_id}_first_data_date") or self._entry.options.get("first_data_date")
+        if val:
+            try:
+                from datetime import datetime
+                return datetime.strptime(val, "%Y-%m-%d").date()
+            except:
+                return None
+        # Fallback to contract_date from meter data
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        # Try to get from meter data
+        for m in self.coordinator.data or []:
+            if str(m.get("meter_point_id")) == str(self._meter_id) or str(m.get("meter_serial")) == str(self._meter_id):
+                if m.get("contract_date"):
+                    try:
+                        return datetime.strptime(str(m["contract_date"]), "%Y-%m-%d").date()
+                    except:
+                        pass
+        return None
 
 
 class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):

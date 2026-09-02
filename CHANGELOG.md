@@ -1,9 +1,22 @@
 # Changelog
 
-## v0.2.2 (2026-09-02)
+## v0.2.4 (2026-09-02)
+
+### ✨ New Features
+- **Encja Data pierwszego odczytu + przycisk Wykryj:** Dodano `sensor.energa_XXX_data_pierwszego_odczytu` (diagnostyczna, `device_class: date`) i `button.energa_XXX_wykryj_pierwszy_odczyt` (pushbutton) per licznik. Data wykrywana automatycznie podczas konfiguracji (hierarchicznie rok→pół→miesiąc→dzień, ~14 requestów, komunikat `Wykrywam... ~15s`), zapisywana w `entry.options["first_data_date"]` i proponowana jako `default` w `Pobierz Historię`. Jeśli nie pasuje — wyłącz encję, przycisk zawsze pod ręką.
+
+## v0.2.3 (2026-09-02)
+
+### ✨ New Features
+- **Wykryj pierwszy odczyt (hierarchicznie):** Nowa opcja `Konfiguruj → Wykryj pierwszy odczyt` w menu Opcji. Zamiast liniowego `for day in range(days)` (365 requestów), sprawdza rok → półrocze → miesiąc → dzień pojedynczymi `mchart` na środku okresu (`1 request/poziom`, ~14 requestów dla 5 lat, `sleep 0.7s` dyskretnie). Dyskretne i szybkie — nie zarzuca serwera. Zwraca `05.05.2023` dla przykładu z issue.
 
 ### 🐛 Bug Fixes
 - **Login case sensitivity (retry):** Poprawiono logowanie z zachowaniem oryginalnej wielkości liter — najpierw próba z wpisanym loginem, a dopiero przy `invalid_auth` druga próba z `lower()`. Dzięki temu `User@Example.com` zadziała jako `user@example.com` bez nadpisywania poprawnych kont z wielkimi literami.
+
+## v0.2.2 (2026-09-02)
+
+### 🐛 Bug Fixes
+- **Login case sensitivity:** Emaile są case-insensitive (RFC 5321), ale `api-mojlicznik` jest case-sensitive. Dodano normalizację `strip().lower()` w `config_flow.py` i `api.py`, aby logowanie `User@Example.com` działało jako `user@example.com`.
 
 ## v0.2.1 (2026-09-02)
 

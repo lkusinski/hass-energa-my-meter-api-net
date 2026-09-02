@@ -65,6 +65,51 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 try:
                     await api.async_login()
+                    # Auto-detect first data date hierarchically (dyskretnie ~14 req)
+                    # Show notification to wait ~15s
+                    from homeassistant.components import persistent_notification
+                    try:
+                        persistent_notification.async_create(
+                            self.hass,
+                            "Wykrywam datę pierwszego odczytu (hierarchicznie rok→pół→miesiąc→dzień, ~15s) — proszę czekać...",
+                            title="Energa: Wykrywanie",
+                            notification_id=f"energa_detect_{attempt_username}",
+                        )
+                        # Need meter data first
+                        await api.async_get_data()
+                        if api._meters_data:
+                            first_meter_id = api._meters_data[0]["meter_point_id"]
+                            detected = await api.async_find_first_data_date(first_meter_id)
+                            if detected:
+                                date_str = detected.strftime("%Y-%m-%d")
+                                # Store for sensor/history default
+                                entry_data_first = {
+                                    **user_input,
+                                    CONF_DEVICE_TOKEN: device_token,
+                                    "first_data_date": date_str,
+                                    f"meter_{first_meter_id}_first_data_date": date_str,
+                                }
+                                # Also try per-meter for all meters
+                                for m in api._meters_data:
+                                    mid = m["meter_point_id"]
+                                    try:
+                                        d = await api.async_find_first_data_date(mid)
+                                        if d:
+                                            entry_data_first[f"meter_{mid}_first_data_date"] = d.strftime("%Y-%m-%d")
+                                    except:
+                                        pass
+                                persistent_notification.async_dismiss(self.hass, f"energa_detect_{attempt_username}")
+                                # Save the successful username (lowercase if fallback succeeded)
+                                entry_data_first[CONF_USERNAME] = attempt_username
+                                await self.async_set_unique_id(attempt_username.lower())
+                                self._abort_if_unique_id_configured()
+                                return self.async_create_entry(
+                                    title=attempt_username,
+                                    data=entry_data_first,
+                                )
+                    except Exception as det_err:
+                        _LOGGER.debug("Auto-detect first data failed, fallback to contract_date: %s", det_err)
+                    # Fallback without auto-detect
                     # Save the successful username (lowercase if fallback succeeded)
                     user_input[CONF_USERNAME] = attempt_username
                     await self.async_set_unique_id(attempt_username.lower())
@@ -165,7 +210,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Show options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["credentials", "prices", "history", "clear_stats"],
+            menu_options=["credentials", "prices", "history", "detect_first", "clear_stats"],
         )
 
     async def async_step_credentials(self, user_input=None):
@@ -427,6 +472,54 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             ),
             description_placeholders={"contract_date": contract_str},
         )
+
+    async def async_step_detect_first(self, user_input=None):
+        """Hierarchically detect first day with data (year → half → month → day).
+
+        Uses single-day mchart probes per level (1 request per check, not 365),
+        with 0.7s sleep for discretion. Starts from activationDate or 2020.
+        Dyskretne: ~14 requestów dla 5 lat vs 365 przy liniowym.
+        """
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {})
+        api = entry_data.get("api") if isinstance(entry_data, dict) else entry_data
+        if not api:
+            return self.async_abort(reason="integration_not_ready")
+
+        if user_input is not None:
+            # User confirmed the detected date, start history import from there
+            start_date = datetime.strptime(user_input["start_date"], "%Y-%m-%d")
+            days = (datetime.now() - start_date).days
+            if days < 1:
+                days = 1
+            try:
+                meters = await api.async_get_data()
+            except Exception as err:
+                return self.async_abort(reason="cannot_connect", description_placeholders={"error": str(err)})
+            active_meters = [m for m in meters if m.get("total_plus") and float(m.get("total_plus", 0)) > 0]
+            for meter in active_meters:
+                self.hass.async_create_task(_import_meter_history(self.hass, api, meter, start_date, days, self._config_entry))
+            return self.async_create_entry(title="", data=dict(self._config_entry.options))
+
+        # Detect first data date via hierarchical search
+        try:
+            meters = await api.async_get_data()
+            if not meters:
+                return self.async_abort(reason="cannot_connect", description_placeholders={"error": "Brak liczników"})
+            meter = meters[0]
+            meter_id = meter["meter_point_id"]
+            detected = await api.async_find_first_data_date(meter_id)
+            if detected:
+                detected_str = detected.strftime("%Y-%m-%d")
+                return self.async_show_form(
+                    step_id="detect_first",
+                    data_schema=vol.Schema({vol.Required("start_date", default=detected_str): selector.DateSelector()}),
+                    description_placeholders={"detected_date": detected_str, "contract_date": str(meter.get("contract_date", "Nieznana"))},
+                )
+            else:
+                return self.async_abort(reason="cannot_connect", description_placeholders={"error": "Nie znaleziono pierwszego odczytu (brak danych w API)"})
+        except Exception as err:
+            _LOGGER.exception("Detect first data failed")
+            return self.async_abort(reason="cannot_connect", description_placeholders={"error": str(err)})
 
     async def async_step_clear_stats(self, user_input=None):
         """Clear Energy Panel statistics for Energa sensors.

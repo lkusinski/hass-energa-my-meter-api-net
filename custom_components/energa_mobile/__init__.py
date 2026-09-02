@@ -42,7 +42,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 TIMEZONE = ZoneInfo("Europe/Warsaw")
 
 
