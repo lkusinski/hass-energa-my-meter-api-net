@@ -1,9 +1,14 @@
 # Changelog
 
+## v0.2.5 (2026-09-02)
+
+### 🐛 Bug Fixes
+- **Puste pole w menu Opcji i ukryta Data:** Brak `detect_first` w `translations/pl.json` → puste pole między `Pobierz Historię` a `Wyczyść Statystyki` (zrzut 18:06). Dodano tłumaczenie + przeniesiono `Data pierwszego odczytu` z `diagnostic` na widoczne (`None`) + dopisano `Proszę czekać — aplikacja próbuje znaleźć datę pierwszego odczytu (~15 sekund).` w `strings.json`/`pl.json` dla `Podaj dane logowania` (lab: `prosument-g12w` długo myśli).
+
 ## v0.2.4 (2026-09-02)
 
 ### ✨ New Features
-- **Encja Data pierwszego odczytu + przycisk Wykryj:** Dodano `sensor.energa_XXX_data_pierwszego_odczytu` (diagnostyczna, `device_class: date`) i `button.energa_XXX_wykryj_pierwszy_odczyt` (pushbutton) per licznik. Data wykrywana automatycznie podczas konfiguracji (hierarchicznie rok→pół→miesiąc→dzień, ~14 requestów, komunikat `Wykrywam... ~15s`), zapisywana w `entry.options["first_data_date"]` i proponowana jako `default` w `Pobierz Historię`. Jeśli nie pasuje — wyłącz encję, przycisk zawsze pod ręką.
+- **Encja Data pierwszego odczytu + przycisk Wykryj:** Dodano `sensor.energa_XXX_data_pierwszego_odczytu` (`device_class: date`) i `button.energa_XXX_wykryj_pierwszy_odczyt` (pushbutton) per licznik. Data wykrywana automatycznie podczas konfiguracji (hierarchicznie rok→pół→miesiąc→dzień, ~14 requestów, komunikat `Wykrywam... ~15s`), zapisywana w `entry.options["first_data_date"]` i proponowana jako `default` w `Pobierz Historię`. Jeśli nie pasuje — wyłącz encję, przycisk zawsze pod ręką.
 
 ## v0.2.3 (2026-09-02)
 

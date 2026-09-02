@@ -1029,7 +1029,7 @@ class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
         self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.DATE
         self._attr_icon = "mdi:calendar-start"
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_entity_category = None
 
     @property
     def native_value(self):
