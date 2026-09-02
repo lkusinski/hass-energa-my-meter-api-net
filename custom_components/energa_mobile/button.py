@@ -24,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     except Exception:
         meters = api._meters_data or []
 
+    coordinator = data.get("coordinator") if isinstance(data, dict) else None
     entities = []
     for meter in meters:
         meter_id = meter.get("meter_serial", meter["meter_point_id"])
@@ -34,7 +35,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             manufacturer="Energa Operator",
             model=meter.get("tariff") or "G12W" if has_zones else "G11",
         )
-        entities.append(EnergaDetectFirstDataButton(entry, meter_id, device_info, api))
+        # Use coordinator if available, else entry as fallback for CoordinatorEntity
+        coord = coordinator if coordinator else entry
+        entities.append(EnergaDetectFirstDataButton(coord, meter_id, device_info, entry, api))
 
     async_add_entities(entities)
 
@@ -42,8 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class EnergaDetectFirstDataButton(CoordinatorEntity, ButtonEntity):
     """Pushbutton — hierarchically detect first data date (year→half→month→day, ~14 req)."""
 
-    def __init__(self, entry: ConfigEntry, meter_id: str, device_info: DeviceInfo, api):
-        super().__init__(entry)
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, api):
+        super().__init__(coordinator)
         self._meter_id = meter_id
         self._api = api
         self._entry = entry

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.8 (2026-09-03)
+
+### 🐛 Bug Fixes
+- **Przycisk Wykryj pierwszy odczyt `niedostępny` + `Bank` `unavailable`:** `Button` robił `super().__init__(entry)` zamiast `coordinator` → `AttributeError: ConfigEntry has no attribute async_add_listener` + `Bank` `NameError` dla `CONF_BANK_*` w `0.2.7` na labie (cache HACS). Naprawiono `button.py` na `coordinator` i `sensor.py` importy.
+- **Puste pole Wykryj w pl.json:** Już w `v0.2.7`, teraz `v0.2.8` zawiera też `Data pierwszego odczytu` widoczną.
+
 ## v0.2.7 (2026-09-03)
 
 ### 🐛 Bug Fixes
