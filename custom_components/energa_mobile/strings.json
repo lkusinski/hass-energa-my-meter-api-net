@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Energa My Meter Login",
-                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected.",
+                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. Please wait — the integration is trying to find the date of the first reading (~15 seconds).",
                 "data": {
                     "username": "Username (email)",
                     "password": "Password"

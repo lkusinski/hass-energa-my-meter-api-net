@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Logowanie do Energa My Meter",
-                "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki.",
+                "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki. Proszę czekać — aplikacja próbuje znaleźć datę pierwszego odczytu (~15 sekund).",
                 "data": {
                     "username": "Login (email)",
                     "password": "Hasło"
