@@ -40,7 +40,7 @@ class EnergaAPI:
         session: aiohttp.ClientSession,
         create_session_fn=None,
     ):
-        self._username = username.strip().lower() if isinstance(username, str) else username
+        self._username = username
         self._password = password
         self._device_token = device_token  # Unique per-installation token
         self._session = session

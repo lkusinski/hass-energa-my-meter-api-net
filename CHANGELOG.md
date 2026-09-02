@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.2 (2026-09-02)
+
+### 🐛 Bug Fixes
+- **Login case sensitivity (retry):** Poprawiono logowanie z zachowaniem oryginalnej wielkości liter — najpierw próba z wpisanym loginem, a dopiero przy `invalid_auth` druga próba z `lower()`. Dzięki temu `User@Example.com` zadziała jako `user@example.com` bez nadpisywania poprawnych kont z wielkimi literami.
+
 ## v0.2.1 (2026-09-02)
 
 ### 🐛 Bug Fixes

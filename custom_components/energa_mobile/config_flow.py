@@ -51,39 +51,46 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle initial user setup."""
         errors = {}
         if user_input is not None:
-            # Normalize username to lowercase (portal MojLicznik is case-sensitive, but email should be lowercase)
-            user_input[CONF_USERNAME] = user_input[CONF_USERNAME].strip().lower()
+            original_username = user_input[CONF_USERNAME].strip()
+            normalized_username = original_username.lower()
             session = async_get_clientsession(self.hass)
-            # Generate unique device token for this installation
             device_token = secrets.token_hex(32)
-            api = EnergaAPI(
-                user_input[CONF_USERNAME],
-                user_input[CONF_PASSWORD],
-                device_token,
-                session,
-            )
-            try:
-                await api.async_login()
-                await self.async_set_unique_id(user_input[CONF_USERNAME])
-                self._abort_if_unique_id_configured()
-                # Store device token along with credentials
-                entry_data = {
-                    **user_input,
-                    CONF_DEVICE_TOKEN: device_token,
-                }
-                return self.async_create_entry(
-                    title=user_input[CONF_USERNAME],
-                    data=entry_data,
+            # Try original first, fallback to lowercase on invalid_auth
+            for attempt_username in [original_username, normalized_username] if original_username != normalized_username else [original_username]:
+                api = EnergaAPI(
+                    attempt_username,
+                    user_input[CONF_PASSWORD],
+                    device_token,
+                    session,
                 )
-            except EnergaAuthError:
-                errors["base"] = "invalid_auth"
-            except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
-                errors["base"] = "cannot_connect"
-            except AbortFlow:
-                raise  # Let HA handle "already_configured" etc.
-            except Exception:
-                _LOGGER.exception("Unexpected error during setup")
-                errors["base"] = "unknown"
+                try:
+                    await api.async_login()
+                    # Save the successful username (lowercase if fallback succeeded)
+                    user_input[CONF_USERNAME] = attempt_username
+                    await self.async_set_unique_id(attempt_username.lower())
+                    self._abort_if_unique_id_configured()
+                    entry_data = {
+                        **user_input,
+                        CONF_DEVICE_TOKEN: device_token,
+                    }
+                    return self.async_create_entry(
+                        title=attempt_username,
+                        data=entry_data,
+                    )
+                except EnergaAuthError:
+                    if attempt_username == normalized_username:
+                        errors["base"] = "invalid_auth"
+                    else:
+                        continue  # Try normalized
+                except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+                    break
+                except AbortFlow:
+                    raise
+                except Exception:
+                    _LOGGER.exception("Unexpected error during setup")
+                    errors["base"] = "unknown"
+                    break
 
         return self.async_show_form(
             step_id="user",
@@ -165,40 +172,46 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Handle credential update."""
         errors = {}
         if user_input is not None:
-            user_input[CONF_USERNAME] = user_input[CONF_USERNAME].strip().lower()
+            original_username = user_input[CONF_USERNAME].strip()
+            normalized_username = original_username.lower()
             session = async_get_clientsession(self.hass)
-            # Preserve existing device token or generate new one
             device_token = self._config_entry.data.get(
                 CONF_DEVICE_TOKEN
             ) or secrets.token_hex(32)
-            api = EnergaAPI(
-                user_input[CONF_USERNAME],
-                user_input[CONF_PASSWORD],
-                device_token,
-                session,
-            )
-            try:
-                await api.async_login()
-                # Preserve device token in updated entry data
-                entry_data = {
-                    **user_input,
-                    CONF_DEVICE_TOKEN: device_token,
-                }
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    data=entry_data,
+            for attempt_username in [original_username, normalized_username] if original_username != normalized_username else [original_username]:
+                api = EnergaAPI(
+                    attempt_username,
+                    user_input[CONF_PASSWORD],
+                    device_token,
+                    session,
                 )
-                await self.hass.config_entries.async_reload(self._config_entry.entry_id)
-                return self.async_create_entry(title="", data=dict(self._config_entry.options))
-            except EnergaAuthError:
-                errors["base"] = "invalid_auth"
-            except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
-                errors["base"] = "cannot_connect"
-            except AbortFlow:
-                raise
-            except Exception:
-                _LOGGER.exception("Unexpected error during credential update")
-                errors["base"] = "unknown"
+                try:
+                    await api.async_login()
+                    user_input[CONF_USERNAME] = attempt_username
+                    entry_data = {
+                        **user_input,
+                        CONF_DEVICE_TOKEN: device_token,
+                    }
+                    self.hass.config_entries.async_update_entry(
+                        self._config_entry,
+                        data=entry_data,
+                    )
+                    await self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                    return self.async_create_entry(title="", data=dict(self._config_entry.options))
+                except EnergaAuthError:
+                    if attempt_username == normalized_username:
+                        errors["base"] = "invalid_auth"
+                    else:
+                        continue
+                except (EnergaConnectionError, aiohttp.ClientError, TimeoutError):
+                    errors["base"] = "cannot_connect"
+                    break
+                except AbortFlow:
+                    raise
+                except Exception:
+                    _LOGGER.exception("Unexpected error during credential update")
+                    errors["base"] = "unknown"
+                    break
 
         current_user = self._config_entry.data.get(CONF_USERNAME)
         return self.async_show_form(
