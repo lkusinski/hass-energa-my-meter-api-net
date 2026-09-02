@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.1 (2026-09-02)
+
+### 🐛 Bug Fixes
+- **Login case sensitivity:** Emaile są case-insensitive (RFC 5321), ale `api-mojlicznik` jest case-sensitive (`prosument-g12w@example.com` ≠ `prosument-g12w@example.com`). Dodano `strip().lower()` w `config_flow.py` (`async_step_user`, `async_step_credentials`) i `api.py` (`__init__`) — `Login@mail.com` → `login@mail.com` automatycznie. Zgłoszone na labie `lab-testowy` z kontami `odbiorca-g11/prosument-g12w` `***`.
+
 ## v4.15.2 (2026-07-15)
 
 ### 🐛 Bug Fixes

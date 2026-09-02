@@ -51,6 +51,8 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle initial user setup."""
         errors = {}
         if user_input is not None:
+            # Normalize username to lowercase (portal MojLicznik is case-sensitive, but email should be lowercase)
+            user_input[CONF_USERNAME] = user_input[CONF_USERNAME].strip().lower()
             session = async_get_clientsession(self.hass)
             # Generate unique device token for this installation
             device_token = secrets.token_hex(32)
@@ -163,6 +165,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Handle credential update."""
         errors = {}
         if user_input is not None:
+            user_input[CONF_USERNAME] = user_input[CONF_USERNAME].strip().lower()
             session = async_get_clientsession(self.hass)
             # Preserve existing device token or generate new one
             device_token = self._config_entry.data.get(
