@@ -9,6 +9,9 @@
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_API-blue)
 
+> [!NOTE]
+> **Testowa kontynuacja pracy Ergo5** — fork `lkusinski/hass-energa-my-meter-api-net` z natywnym bankiem kWh/PLN per strefa G12W (net-metering 0.8 roczny / net-billing RCE×1.23 miesięczny) i historią magazynu (issue #37). Oryginał: `ergo5/hass-energa-my-meter-api`.
+
 🇵🇱 This integration is designed for customers of **Energa Operator** — a regional electricity distributor serving **northern Poland** (Pomorze, Warmia-Mazury, Kujawsko-Pomorskie).
 
 A robust integration for **Energa Operator** in Home Assistant that communicates directly with the **native REST API** — **not web scraping**. It retrieves data from the "Mój Licznik" portal and integrates seamlessly with the **Energy Dashboard**. Features **self-healing history import**, **automatic cost calculation**, and reliable cumulative statistics.
