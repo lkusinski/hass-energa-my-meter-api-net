@@ -64,6 +64,7 @@ from .settlement import (
     FlowAccumulator,
     days_to_settlement,
     deposit_valid_until,
+    is_export_prosumer,
     month_to_date_forecast,
     next_settlement_date,
     parse_settlement_date,
@@ -231,7 +232,7 @@ async def async_setup_entry(
         )
 
         # 4. Daily Export (Today's production - resets at midnight)
-        if meter.get("obis_minus"):
+        if is_export_prosumer(meter):
             sensors.append(
                 EnergaLiveSensor(
                     coordinator=coordinator,
@@ -323,7 +324,7 @@ async def async_setup_entry(
             )
 
         # Export statistics
-        if meter.get("obis_minus") and has_zones:
+        if is_export_prosumer(meter) and has_zones:
             # Per-zone export for G12w
             sensors.append(
                 EnergaStatisticsSensor(
@@ -367,7 +368,7 @@ async def async_setup_entry(
                     serial=serial,
                 )
             )
-        elif meter.get("obis_minus"):
+        elif is_export_prosumer(meter):
             sensors.append(
                 EnergaStatisticsSensor(
                     coordinator=coordinator,
@@ -392,7 +393,7 @@ async def async_setup_entry(
 
         # === PROSUMER BALANCE SENSOR ===
         # (only for prosumers — meters with export capability)
-        if meter.get("obis_minus"):
+        if is_export_prosumer(meter):
             sensors.append(
                 EnergaProsumerBalanceSensor(
                     coordinator=coordinator,
@@ -409,7 +410,7 @@ async def async_setup_entry(
         # coefficient 0.8 = old system (roczny bilans kWh)
         # coefficient 0.7 = old system with 0.7 opłata (przejściowy)
         # coefficient 0.0 = new system (net-billing, RCE×1.23, miesięczny PLN)
-        if meter.get("obis_minus"):
+        if is_export_prosumer(meter):
             coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
             is_old_system = coeff >= 0.7  # 0.8 or 0.7 = old net-metering
 
@@ -497,7 +498,7 @@ async def async_setup_entry(
                 ("import", "Cena Poboru", "mdi:cash-multiple"),
             ]
 
-        if meter.get("obis_minus"):
+        if is_export_prosumer(meter):
             price_keys.append(("export", "Cena Oddania", "mdi:cash-refund"))
             price_keys.append(
                 ("coefficient", "Współczynnik Prosumencki", "mdi:percent")
@@ -539,6 +540,52 @@ async def async_setup_entry(
                         device_class=device_class,
                     )
                 )
+
+    # === CLEANUP CONSUMER LEFTOVERS (v0.2.15) ===
+    # Consumer meters (no export) no longer get prosumer sensors; remove
+    # orphan entities so they don't linger as unavailable (replaces the
+    # manual jq entity_registry cleanup from v0.2.10).
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        _doomed: set = set()
+        for _m in meters_to_process:
+            if is_export_prosumer(_m):
+                continue
+            _mid = str(_m["meter_point_id"])
+            _ser = str(_m.get("meter_serial", _m["meter_point_id"]))
+            _doomed.update({
+                f"energa_{_mid}_prosumer_balance",
+                f"energa_{_mid}_bank_kwh",
+                f"energa_{_mid}_bank_pln",
+                f"energa_{_mid}_bank_charge",
+                f"energa_{_mid}_bank_discharge",
+                f"energa_{_mid}_rcem_auto",
+                f"energa_{_mid}_bill_forecast",
+                f"energa_{_mid}_daily_produkcja_live",
+                f"energa_{_mid}_export_stats",
+                f"energa_{_mid}_export_1_stats",
+                f"energa_{_mid}_export_2_stats",
+                f"energa_{_ser}_export_price",
+                f"energa_{_ser}_coefficient_price",
+                f"energa_{_ser}_export_cost_stats",
+                f"energa_{_ser}_export_1_cost_stats",
+                f"energa_{_ser}_export_2_cost_stats",
+            })
+        if _doomed:
+            _ent_reg = er.async_get(hass)
+            for _ent in list(_ent_reg.entities.values()):
+                if (
+                    _ent.platform == DOMAIN
+                    and _ent.config_entry_id == entry.entry_id
+                    and (_ent.unique_id or "") in _doomed
+                ):
+                    _LOGGER.info(
+                        "Removing consumer leftover %s", _ent.entity_id
+                    )
+                    _ent_reg.async_remove(_ent.entity_id)
+    except Exception as err:
+        _LOGGER.debug("Consumer leftover cleanup skipped: %s", err)
 
     _LOGGER.info("Created %d Energa sensors", len(sensors))
     _LOGGER.debug(

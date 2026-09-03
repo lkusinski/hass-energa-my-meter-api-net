@@ -154,6 +154,36 @@ def rolling_kwh_bank(
     return round(max(0.0, export_365d * coefficient - import_365d), 2)
 
 
+def is_export_prosumer(meter: dict | None) -> bool:
+    """True when the meter can actually export (prosumer, v0.2.15).
+
+    `obis_minus` alone is NOT enough: consumer meters (e.g. G11 without PV)
+    may still report export OBIS codes with zero readings, which used to
+    spawn a useless `0.0` Bank, misleading `Bank Ładowanie/Rozładowanie`
+    flows and a `Bilans Prosumencki` that is trivially `-import`.
+    Require either the seller flag (`type: Wytwórca`) or a non-zero
+    export total.
+    """
+    if not meter:
+        return False
+    if meter.get("is_prosumer"):
+        return True
+    for key in (
+        "total_minus",
+        "total_minus_1",
+        "total_minus_2",
+        "export",
+        "export_1",
+        "export_2",
+    ):
+        try:
+            if float(meter.get(key) or 0) > 0:
+                return True
+        except (ValueError, TypeError):
+            continue
+    return False
+
+
 def month_to_date_forecast(
     mtd_net_pln: float, day_of_month: int, days_in_month: int
 ) -> float:

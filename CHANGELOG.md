@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.15 (2026-09-03)
+
+### 🧹 Czysty konsument (G11 bez PV): zero sensorów prosumenckich
+- **Nowa bramka `is_export_prosumer`:** sam `obis_minus` NIE wystarcza —
+  liczniki odbiorcze (np. G11 bez fotowoltaiki) potrafią raportować kody OBIS
+  eksportu z zerowymi odczytami i dostawały bezużyteczny `Bank 0.0`,
+  mylące przepływy `Ładowanie/Rozładowanie` oraz `Bilans == -import`.
+  Prosument = flaga sprzedawcy (`type: Wytwórca`) LUB niezerowy licznik
+  eksportu. Bez eksportu nie powstają: `Bilans`, `Bank kWh/PLN`,
+  `Ładowanie/Rozładowanie`, `RCEm`, `Prognoza`, sensory eksportu ani
+  `Cena Oddania/Współczynnik`.
+- **Decyzja: `Bilans Prosumencki` zbędny u odbiorcy** — to algebraicznie
+  `-import` (zero informacji ponad sensory importu), a nazwa wprowadza
+  w błąd. Panel Energia i tak bierze sensory importu.
+- **Auto-sprzątanie sierot:** przy starcie usuwane są porzucone encje
+  prosumenckie liczników konsumenckich (zastępuje ręczne `jq` na
+  `entity_registry` z v0.2.10).
+
+### 🧪 Testy
+- **163 testy** (było 157): +6 `is_export_prosumer` (kody OBIS to za mało,
+  flaga `Wytwórca`, defensywność).
+
 ## v0.2.14 (2026-09-03)
 
 ### 🧾 Pełna prognoza rachunku brutto (faktura, nie tylko energia)

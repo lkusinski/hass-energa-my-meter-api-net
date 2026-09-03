@@ -11,6 +11,9 @@
 
 > `<nr-licznika>` — podstaw numer swojego licznika. `G11 Odbiorca`
 > (taryfa jednostrefowa, sam pobór) nie dostaje banku — tylko prosumenci.
+> Od `v0.2.15` prosument = flaga `Wytwórca` lub niezerowy licznik eksportu
+> (same kody OBIS eksportu przy zerach nie wystarczą); sieroty po starej
+> bramce usuwają się same przy starcie.
 
 * `initial_kwh` = **1358** (`752+606` `Razem w magazynie` z faktury `06.2026` — stan po rozliczeniu). Ustaw `balance_baseline_import/export` na wskazania `do` z tej faktury + `bank_initial_kwh=1358`. `Bilans>0` nadbudowuje bank.
 * `initial_pln` = `0.00` na `01.08.2026` (faktura `07.2026`: `456×0.26288×1.23=147.44`, `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U.1847.

@@ -12,6 +12,7 @@ from datetime import date
 from custom_components.energa_mobile.settlement import (
     days_to_settlement,
     deposit_valid_until,
+    is_export_prosumer,
     latest_official_rcem,
     month_to_date_forecast,
     next_settlement_date,
@@ -119,3 +120,37 @@ class TestDepositValidUntil:
 
     def test_december_rollover(self):
         assert deposit_valid_until(2026, 12) == date(2028, 1, 31)
+
+
+class TestIsExportProsumer:
+    """v0.2.15: obis_minus alone must not spawn prosumer sensors.
+
+    Consumer meters (e.g. G11 bez fotowoltaiki without PV) may still report
+    export OBIS codes with zero readings — Bank 0.0, phantom
+    charge/discharge flows and a Bilans == -import are noise.
+    """
+
+    def test_empty(self):
+        assert is_export_prosumer(None) is False
+        assert is_export_prosumer({}) is False
+
+    def test_obis_codes_alone_not_enough(self):
+        assert is_export_prosumer({"obis_minus": "1-0:2.8.0"}) is False
+        assert is_export_prosumer({"obis_minus": "x", "total_minus": 0}) is False
+
+    def test_zero_totals_not_prosumer(self):
+        meter = {"obis_minus": "x", "total_minus": 0.0,
+                 "total_minus_1": 0, "total_minus_2": 0.0}
+        assert is_export_prosumer(meter) is False
+
+    def test_nonzero_export_total(self):
+        assert is_export_prosumer({"total_minus": 523.5}) is True
+        assert is_export_prosumer({"total_minus_1": 0, "total_minus_2": 12.3}) is True
+
+    def test_seller_flag_without_export_yet(self):
+        # New PV, nothing exported yet — still a prosumer
+        assert is_export_prosumer({"is_prosumer": True, "total_minus": 0}) is True
+
+    def test_invalid_values_defensive(self):
+        assert is_export_prosumer({"total_minus": "junk"}) is False
+        assert is_export_prosumer({"total_minus": None}) is False
