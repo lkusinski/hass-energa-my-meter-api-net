@@ -154,6 +154,88 @@ def rolling_kwh_bank(
     return round(max(0.0, export_365d * coefficient - import_365d), 2)
 
 
+def fifo_kwh_bank(
+    monthly_flows, coefficient: float, today=None
+) -> tuple:
+    """Old-system warehouse from monthly flows with real FIFO expiry.
+
+    Rules (Energa net-metering, verified 2026-09-04): energy introduced in
+    month M (export x coefficient) can be collected until the END of month
+    M+12; each month's import consumes the OLDEST live energy first.
+    Uncovered import is lost (it was paid), expired leftovers vanish.
+
+    Args:
+        monthly_flows: iterable of (year, month, import_kwh, export_kwh).
+        coefficient: prosumer factor (0.8 / 0.7).
+        today: reference date (default: today).
+
+    Returns (bank_kwh, detail) where detail holds expired_kwh,
+    uncovered_kwh and months_used. Pure function, unit-tested.
+    """
+    from collections import defaultdict
+    from datetime import date as _date
+
+    today = today or _date.today()
+    try:
+        coeff = float(coefficient)
+    except (ValueError, TypeError):
+        coeff = 0.8
+    agg: dict = defaultdict(lambda: [0.0, 0.0])
+    for row in monthly_flows or []:
+        try:
+            y, m, imp, exp = row
+            agg[(int(y), int(m))][0] += max(0.0, float(imp))
+            agg[(int(y), int(m))][1] += max(0.0, float(exp))
+        except (ValueError, TypeError):
+            continue
+    detail = {"expired_kwh": 0.0, "uncovered_kwh": 0.0, "months_used": 0}
+    if not agg:
+        return (0.0, detail)
+    cur_idx = today.year * 12 + today.month
+    buckets: list = []  # [expiry_month_idx, balance_kwh]
+    expired = 0.0
+    uncovered = 0.0
+    used = 0
+    for (y, m) in sorted(agg):
+        idx = y * 12 + m
+        if idx > cur_idx:
+            break  # future data ignored
+        # Expire first, then introduce (readability over cleverness)
+        live: list = []
+        for exp_i, bal in buckets:
+            if exp_i < idx:
+                expired += bal
+            else:
+                live.append([exp_i, bal])
+        buckets = live
+        intro = agg[(y, m)][1] * coeff
+        if intro > 0:
+            buckets.append([idx + 12, intro])
+        need = agg[(y, m)][0]
+        if need > 0 or intro > 0:
+            used += 1
+        for b in buckets:
+            if need <= 0:
+                break
+            take = min(b[1], need)
+            b[1] -= take
+            need -= take
+        uncovered += max(0.0, need)
+        buckets = [b for b in buckets if b[1] > 1e-9]
+    bank = 0.0
+    for exp_i, bal in buckets:
+        if exp_i < cur_idx:
+            expired += bal
+        else:
+            bank += bal
+    detail.update({
+        "expired_kwh": round(expired, 2),
+        "uncovered_kwh": round(uncovered, 2),
+        "months_used": used,
+    })
+    return (round(bank, 2), detail)
+
+
 def is_export_prosumer(meter: dict | None) -> bool:
     """True when the meter can actually export (prosumer, v0.2.15).
 
@@ -245,6 +327,22 @@ def deposit_valid_until(year: int, month: int) -> date:
     idx = (year * 12 + (month - 1)) + 13
     y, m0 = divmod(idx, 12)
     return _last_day_of(y, m0 + 1)
+
+
+def trailing_months(today=None, count: int = 13) -> list:
+    """[(year, month), ...] oldest-first ending with today's month."""
+    from datetime import date as _date
+
+    today = today or _date.today()
+    out = []
+    y, m = today.year, today.month
+    for _ in range(max(1, int(count))):
+        out.append((y, m))
+        m -= 1
+        if m < 1:
+            m = 12
+            y -= 1
+    return out[::-1]
 
 
 def _last_day_of(year: int, month: int) -> date:

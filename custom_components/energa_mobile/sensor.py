@@ -58,6 +58,7 @@ from .const import (
     DEFAULT_SETTLEMENT_DATE,
     DEFAULT_USE_ROLLING_365D,
     DOMAIN,
+    FIFO_MIN_COVERAGE_MONTHS,
     ROLLING_MIN_COVERAGE_DAYS,
     get_price_for_key,
 )
@@ -65,12 +66,14 @@ from .settlement import (
     FlowAccumulator,
     days_to_settlement,
     deposit_valid_until,
+    fifo_kwh_bank,
     is_export_prosumer,
     month_to_date_forecast,
     next_settlement_date,
     orphan_bank_uids,
     parse_settlement_date,
     rolling_kwh_bank,
+    trailing_months,
 )
 from .tariff import capacity_for_annual_use, compute_bill, fees_from_options, split_cover
 
@@ -641,6 +644,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._rce_fetch_lock = False
         self._rce_source: str | None = None  # v0.2.11: where cached RCE comes from
         self._rolling_365: dict = {}  # v0.2.11: {meter_id: {suffix: kWh, "_coverage_days": n}}
+        self._monthly: dict = {}  # v0.2.20: {meter_id: {(y, m): {suffix: kWh}}} for FIFO bank
         self._mtd: dict = {}  # v0.2.11: month-to-date sums, same shape
 
     async def _async_update_data(self):
@@ -741,6 +745,14 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     _mtd = await self._async_compute_period_sums(_month_start, _now)
                     if _mtd:
                         self._mtd = _mtd
+                    try:
+                        _coeff_now = float(_opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+                    except (ValueError, TypeError):
+                        _coeff_now = DEFAULT_PROSUMER_COEFFICIENT
+                    if _coeff_now >= 0.7:
+                        _monthly = await self._async_compute_monthly_sums(_now)
+                        if _monthly:
+                            self._monthly = _monthly
             except Exception as cal_err:
                 _LOGGER.debug("Settlement calibration skipped: %s", cal_err)
 
@@ -954,6 +966,43 @@ class EnergaCoordinator(DataUpdateCoordinator):
             return out
         except Exception as err:
             _LOGGER.debug("Period sums failed: %s", err)
+            return {}
+
+    async def _async_compute_monthly_sums(self, end, months: int = 14) -> dict:
+        """Per-month Panel Energia sums per meter for the FIFO bank (v0.2.20).
+
+        Returns {meter_id: {(year, month): {suffix: delta_kwh}}}.
+        Sequential small recorder queries in the executor; fully defensive —
+        settlement calibration must never break the coordinator update.
+        """
+        from datetime import datetime as _dt
+
+        out: dict = {}
+        try:
+            y, m = end.year, end.month
+            bounds = []
+            for _ in range(max(1, int(months))):
+                bounds.append((y, m))
+                m -= 1
+                if m < 1:
+                    m = 12
+                    y -= 1
+            bounds.reverse()
+            for (by, bm) in bounds:
+                ms = _dt(by, bm, 1, tzinfo=end.tzinfo)
+                me = _dt(by + 1, 1, 1, tzinfo=end.tzinfo) if bm == 12 else _dt(by, bm + 1, 1, tzinfo=end.tzinfo)
+                if me > end:
+                    me = end
+                if ms >= me:
+                    continue
+                sums = await self._async_compute_period_sums(ms, me)
+                for mid, vals in (sums or {}).items():
+                    per = {k: v for k, v in vals.items() if not str(k).startswith("_")}
+                    if per:
+                        out.setdefault(str(mid), {})[(by, bm)] = per
+            return out
+        except Exception as err:
+            _LOGGER.debug("Monthly sums failed: %s", err)
             return {}
 
     @staticmethod
@@ -1277,6 +1326,33 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
                     mid, exp365, imp365, bank,
                 )
 
+        # v0.2.20 FIFO mode: warehouse reconstructed from monthly flows
+        # (no invoice typing). Wins over rolling/baseline when ~11 months
+        # of statistics exist (needs Download History once).
+        fifo_detail = None
+        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+            monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
+            if monthly:
+                from datetime import date as _date
+
+                flows = []
+                for (fy, fm) in trailing_months(_date.today(), 13):
+                    d = monthly.get((fy, fm), {})
+                    try:
+                        exp = float(d.get("export", d.get("export_1", 0) + d.get("export_2", 0)))
+                        imp = float(d.get("import", d.get("import_1", 0) + d.get("import_2", 0)))
+                    except (ValueError, TypeError):
+                        exp, imp = 0.0, 0.0
+                    flows.append((fy, fm, imp, exp))
+                if sum(1 for (_, _, i, e) in flows if i > 0 or e > 0) >= FIFO_MIN_COVERAGE_MONTHS:
+                    bank, fifo_detail = fifo_kwh_bank(flows, coeff)
+                    mode = "fifo_12m"
+                    _LOGGER.debug(
+                        "BankKwh %s fifo: bank=%.2f expired=%.2f uncovered=%.2f",
+                        mid, bank, fifo_detail.get("expired_kwh", 0),
+                        fifo_detail.get("uncovered_kwh", 0),
+                    )
+
         # Build rich attributes for Lovelace visibility
         attrs = {
             "net_import_kwh": round(net_imp, 2),
@@ -1291,6 +1367,14 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         }
         if mode == "rolling_365d":
             attrs["coverage_days"] = coverage
+        if mode == "fifo_12m" and fifo_detail:
+            attrs["fifo_months"] = fifo_detail.get("months_used")
+            attrs["fifo_expired_kwh"] = fifo_detail.get("expired_kwh")
+            attrs["fifo_uncovered_kwh"] = fifo_detail.get("uncovered_kwh")
+            attrs["fifo_note"] = (
+                "Magazyn odtworzony z miesięcznych przepływów (FIFO 12 m-cy, "
+                "bez przepisywania z faktury). Wymaga historii ~11 mies."
+            )
         if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             settle_str = opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
             base = parse_settlement_date(settle_str)

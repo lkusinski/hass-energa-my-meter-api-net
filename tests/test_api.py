@@ -193,3 +193,41 @@ class TestApiGetRetry:
 
         assert result == {"response": "data"}
         assert api._session is new_session
+
+
+class TestFindFirstDataDate:
+    """v0.2.20: hierarchical detection must not skip months (May/June bug)."""
+
+    @pytest.mark.asyncio
+    async def test_finds_true_first_month(self, api, mock_session):
+        """Data since May 9 -> detected date is May 9, not July 1."""
+        from datetime import date, timedelta
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+
+        first = date.today() - timedelta(days=120)
+
+        async def fake_hourly(meter_point_id, dt, include_timestamps=False):
+            if dt.date() >= first:
+                return {"import": [1.0] * 24}
+            return {"import": [0.0] * 24}
+
+        api._meters_data = [{"meter_point_id": "m1"}]
+        api.async_get_history_hourly = fake_hourly
+        with patch("asyncio.sleep", new=AsyncMock()):
+            found = await api.async_find_first_data_date("m1")
+        assert found is not None
+        assert found.date() == first
+
+    @pytest.mark.asyncio
+    async def test_no_data_returns_none(self, api, mock_session):
+        """Empty window -> None (no crash)."""
+        from unittest.mock import patch
+
+        async def fake_hourly(meter_point_id, dt, include_timestamps=False):
+            return {"import": [0.0] * 24}
+
+        api._meters_data = [{"meter_point_id": "m1"}]
+        api.async_get_history_hourly = fake_hourly
+        with patch("asyncio.sleep", new=AsyncMock()):
+            assert await api.async_find_first_data_date("m1") is None

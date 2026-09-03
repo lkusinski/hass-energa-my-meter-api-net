@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.20 (2026-09-04)
+
+### 🧠 Bank liczony sam + naprawiona detekcja startu
+- **FIFO 12 m-cy z historii (`fifo_kwh_bank`):** magazyn starego systemu
+  odtwarzany z miesięcznych przepływów (wkłady `export×coeff` ważne do
+  końca M+12, pobór zjada najstarsze) — zero przepisywania z faktur, gdy
+  jest ~11 mies. historii (`settlement_mode: fifo_12m`, atrybuty
+  `fifo_expired/uncovered`). Bez historii działa jak dotąd (baseline).
+- **Detekcja pierwszego odczytu bez zgadywania:** skan miesięcy liniowy
+  (half-probing przeskakiwał maj/czerwiec → zwracał 07-01), retry probek,
+  testy regresyjne.
+- Backfill: dla starego systemu potrzeba **≥365 dni** (nie 30!) —
+  tyle trzyma API (730d); start `2025-07-30` na Wiśniowej w tle.
+
+### 🧪 Testy
+- **179 testów** (było 172): FIFO + detekcja.
+
 ## v0.2.19 (2026-09-03)
 
 ### 🧹 Sprzątanie banku nieaktywnego systemu

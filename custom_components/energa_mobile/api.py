@@ -348,13 +348,15 @@ class EnergaAPI:
             return None
 
     async def async_find_first_data_date(self, meter_point_id: str) -> datetime | None:
-        """Hierarchically find first day with data (year → half → month → day).
+        """Hierarchically find first day with data (year → month → day).
 
         Uses single-day mchart probes per level (1 request per check, not 365),
         with 0.7s sleep for discretion. API holds ~730 days, so window is
         today-730d → today. Activation_date is used only to clamp start if later.
         Returns datetime of first day with import or export data, or None.
-        ~14 requests for 2-year window vs 730 linear.
+        Month scan is deliberately LINEAR (max 12 probes): half-level probing
+        used to skip over the true first months (v0.2.20 fix).
+        ~20 requests typical vs 730 linear.
         """
         import asyncio
         from datetime import timedelta
@@ -377,18 +379,21 @@ class EnergaAPI:
             except (ValueError, TypeError, OSError):
                 pass
 
-        # Helper to check if a specific day has data (1 mchart call)
+        # Helper to check if a specific day has data (1 mchart call).
+        # Retried once: a single API blip must not shift the found date.
         async def has_data_for_day(dt: datetime) -> bool:
-            try:
-                await asyncio.sleep(0.7)
-                data = await self.async_get_history_hourly(meter_point_id, dt, include_timestamps=False)
-                # Any zone with sum > 0 means real data (avoid false-positive on all-zero empty day)
-                for vals in data.values():
-                    if vals and any(isinstance(v, (int, float)) and float(v) > 0 for v in vals if v is not None):
-                        return True
-                return False
-            except Exception:
-                return False
+            for _attempt in range(2):
+                try:
+                    await asyncio.sleep(0.7)
+                    data = await self.async_get_history_hourly(meter_point_id, dt, include_timestamps=False)
+                    # Any zone with sum > 0 means real data (avoid false-positive on all-zero empty day)
+                    for vals in data.values():
+                        if vals and any(isinstance(v, (int, float)) and float(v) > 0 for v in vals if v is not None):
+                            return True
+                    return False
+                except Exception:
+                    continue
+            return False
 
         # If window_start itself has data, it's the first (common for long-running prosumers)
         # We still need hierarchical walk to find earliest in window if window_start empty.
@@ -413,42 +418,18 @@ class EnergaAPI:
         if first_year is None:
             return None
 
-        # Half-year / Month: find first month with data in first_year
-        # If first_year == window_start.year, start from window_start.month, else 1
+        # Month level: LINEAR scan from month_start (max 12 probes).
+        # v0.2.20: no half-level skipping — probing Jan then Jul skipped over
+        # real first months (e.g. May/June), returning e.g. 07-01 instead.
         month_start = window_start.month if first_year == start_year else 1
-        month_end = 12
-        # Try halves first to stay ~14 req: probe mid-half
-        half_probes = [1, 7] if month_start <= 7 else [7]
         first_month = None
-        # Quick half check
-        for m in half_probes:
-            if m < month_start:
-                continue
+        for m in range(month_start, 13):
             probe = datetime(first_year, m, 15, tzinfo=tz)
             if probe < window_start:
                 continue
             if await has_data_for_day(probe):
-                # Found half with data — now linear within that half
-                h_start = m
-                h_end = m + 5
-                for mm in range(max(h_start, month_start), min(h_end, month_end) + 1):
-                    p = datetime(first_year, mm, 15, tzinfo=tz)
-                    if p < window_start:
-                        continue
-                    if await has_data_for_day(p):
-                        first_month = mm
-                        break
-                if first_month:
-                    break
-        if first_month is None:
-            # Fallback linear month scan (max 12)
-            for m in range(month_start, month_end + 1):
-                probe = datetime(first_year, m, 15, tzinfo=tz)
-                if probe < window_start:
-                    continue
-                if await has_data_for_day(probe):
-                    first_month = m
-                    break
+                first_month = m
+                break
         if first_month is None:
             first_month = month_start
 

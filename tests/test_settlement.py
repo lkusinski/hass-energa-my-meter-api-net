@@ -12,6 +12,7 @@ from datetime import date
 from custom_components.energa_mobile.settlement import (
     days_to_settlement,
     deposit_valid_until,
+    fifo_kwh_bank,
     is_export_prosumer,
     latest_official_rcem,
     month_to_date_forecast,
@@ -180,3 +181,39 @@ class TestOrphanBankUids:
     def test_invalid_coefficient_dooms_nothing(self):
         assert orphan_bank_uids("1", "1", True, None) == set()
         assert orphan_bank_uids("1", "1", True, "junk") == set()
+
+
+class TestFifoKwhBank:
+    """v0.2.20: warehouse reconstructed from monthly flows (no typing)."""
+
+    def test_stable_prosumer(self):
+        flows = [(2025, m, 50.0, 100.0) for m in range(9, 13)]
+        flows += [(2026, m, 50.0, 100.0) for m in range(1, 9)]
+        bank, detail = fifo_kwh_bank(flows, 0.8, date(2026, 9, 3))
+        # 12 live months x (80-50)
+        assert bank == 360.0
+        assert detail["months_used"] == 12
+
+    def test_expired_energy_vanishes(self):
+        flows = [(2025, 1, 0.0, 100.0)]  # introduced 20 months ago
+        bank, detail = fifo_kwh_bank(flows, 0.8, date(2026, 9, 3))
+        assert bank == 0.0
+        assert detail["expired_kwh"] == 80.0
+
+    def test_oldest_first_order(self):
+        # m1: +100, m2: import 150 (eats m1 fully, 50 uncovered), m3: +100
+        flows = [(2026, 1, 0.0, 100.0), (2026, 2, 150.0, 0.0), (2026, 3, 0.0, 100.0)]
+        bank, detail = fifo_kwh_bank(flows, 1.0, date(2026, 9, 3))
+        assert bank == 100.0
+        assert detail["uncovered_kwh"] == 50.0
+
+    def test_empty_and_invalid(self):
+        assert fifo_kwh_bank([], 0.8)[0] == 0.0
+        assert fifo_kwh_bank(None, 0.8)[0] == 0.0
+        assert fifo_kwh_bank([("x", 1, 2, 3)], 0.8)[0] == 0.0
+        assert fifo_kwh_bank([(2026, 5, -10.0, -5.0)], 0.8)[0] == 0.0
+
+    def test_future_months_ignored(self):
+        flows = [(2026, 9, 0.0, 100.0), (2027, 5, 0.0, 100.0)]
+        bank, _ = fifo_kwh_bank(flows, 0.8, date(2026, 9, 3))
+        assert bank == 80.0
