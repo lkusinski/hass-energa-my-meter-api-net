@@ -46,6 +46,7 @@ from .const import (
     CONF_PROSUMER_COEFFICIENT,
     CONF_RCE_AUTO_FETCH,
     CONF_SETTLEMENT_DATE,
+    CONF_TARIFF_CAPACITY,
     CONF_USE_ROLLING_365D,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
@@ -70,7 +71,7 @@ from .settlement import (
     parse_settlement_date,
     rolling_kwh_bank,
 )
-from .tariff import compute_bill, fees_from_options, split_cover
+from .tariff import capacity_for_annual_use, compute_bill, fees_from_options, split_cover
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -2056,6 +2057,48 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             exp = float(mtd.get("export", 0))
         return imp_d, imp_n, exp
 
+    def _annual_import_estimate(self):
+        """Annual grid import (kWh) for the URE capacity-fee bracket.
+
+        Prefers trailing-365-day statistics (needs history + coverage);
+        otherwise annualizes lifetime meter totals over the meter age
+        (first-data date from entry data). None when unknowable.
+        """
+        mid = str(self._meter_id)
+        try:
+            rolling = getattr(self.coordinator, "_rolling_365", {}).get(mid, {})
+            cov = int(rolling.get("_coverage_days", 0))
+            imp365 = rolling.get(
+                "import", rolling.get("import_1", 0) + rolling.get("import_2", 0)
+            )
+            if cov >= ROLLING_MIN_COVERAGE_DAYS and float(imp365) > 0:
+                return float(imp365)
+        except (ValueError, TypeError):
+            pass
+        totals = (getattr(self.coordinator, "_meter_totals", {}) or {}).get(mid)
+        if not totals:
+            return None
+        try:
+            lifetime = float(totals.get("import", 0))
+        except (ValueError, TypeError):
+            return None
+        if lifetime <= 0:
+            return None
+        try:
+            from datetime import date as _date
+
+            data = getattr(self._entry, "data", {}) or {}
+            first_s = data.get(f"meter_{self._meter_id}_first_data_date") or data.get(
+                "first_data_date"
+            )
+            if not first_s:
+                return None
+            y, m, d = (int(p) for p in str(first_s).split("-"))
+            days = max(30, (_date.today() - _date(y, m, d)).days)
+            return round(lifetime / days * 365, 1)
+        except (ValueError, TypeError):
+            return None
+
     def _is_old_system(self) -> bool:
         """Old net-metering (coeff >= 0.7) vs new net-billing."""
         try:
@@ -2128,6 +2171,15 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
         # === v0.2.14 full-bill math (invoice reconstruction) ===
         fees = fees_from_options(opts)
+        # v0.2.18: capacity fee auto-bracket (URE 2026) unless overridden.
+        capacity_source = "manual (Options tariff_capacity)"
+        if CONF_TARIFF_CAPACITY not in (opts or {}):
+            annual = self._annual_import_estimate()
+            if annual is not None:
+                fees["capacity"] = capacity_for_annual_use(annual)
+                capacity_source = (
+                    f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
+                )
         old_system = self._is_old_system()
         if old_system:
             cover_d, cover_n = split_cover(
@@ -2197,6 +2249,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "forecast_do_zaplaty_pln": bill_fc["do_zaplaty"],
                 "cover_day_kwh": cover_d,
                 "cover_night_kwh": cover_n,
+                "capacity_source": capacity_source,
                 "fee_note": "Stawki z Options (taryfa) lub domyślne G12W z faktur; "
                 "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
                 "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "

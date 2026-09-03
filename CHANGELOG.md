@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.18 (2026-09-03)
+
+### ⚖️ Opłata mocowa z urzędu, nie z faktury sąsiada
+- **Auto-próg URE 2026** (Informacja 58/2025): ryczałt wg rocznego poboru
+  (`<500` → 4.29, `500–1200` → 10.31, `1200–2800` → 17.18, `>2800` → 24.05
+  netto/mies.). Roczny pobór z kroczących 365 dni statystyk albo z
+  annualizacji licznika; ręczne `tariff_capacity` zawsze wygrywa.
+  Stary default 24.05 to był po prostu najwyższy próg (Wasze domy biorą
+  więcej) — dla kawalerki zawyżałby o ~17 zł/mies. Atrybut
+  `capacity_source` mówi skąd liczba.
+- Dla obcego konta z automatu działa też: RCEm official z PSE i próg
+  mocowy; z faktury trzeba przepisać 3 liczby (ceny energii D/N, handlową,
+  jakościową) — formularz `Options` to podpowie.
+
+### 🧪 Testy
+- **168 testów** (było 165): progi URE + wpływ na rachunek.
+
 ## v0.2.17 (2026-09-03)
 
 ### 🧾 Prognoza dla wszystkich liczników

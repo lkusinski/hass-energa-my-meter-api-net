@@ -24,6 +24,7 @@ compute_bill = _mod.compute_bill
 fees_from_options = _mod.fees_from_options
 split_cover = _mod.split_cover
 G12W_DEFAULT_FEES = _mod.G12W_DEFAULT_FEES
+capacity_for_annual_use = _mod.capacity_for_annual_use
 
 
 class TestNewSystemJuly:
@@ -195,3 +196,29 @@ class TestBillSensorWiring:
         assert res["deposit"] == 0.0
         assert res["do_zaplaty"] == res["brutto"]
         assert res["brutto"] > res["netto"]  # VAT included
+
+
+class TestCapacityBrackets:
+    """URE 2026 brackets (Informacja 58/2025, netto PLN/month)."""
+
+    def test_brackets(self):
+        assert capacity_for_annual_use(499.9) == 4.29
+        assert capacity_for_annual_use(500.0) == 10.31
+        assert capacity_for_annual_use(1200.0) == 17.18
+        assert capacity_for_annual_use(2800.0) == 24.05
+        assert capacity_for_annual_use(20000.0) == 24.05
+
+    def test_defensive_fallback_top_bracket(self):
+        assert capacity_for_annual_use(None) == 24.05
+        assert capacity_for_annual_use(0) == 24.05
+        assert capacity_for_annual_use(-5) == 24.05
+        assert capacity_for_annual_use("junk") == 24.05
+
+    def test_bracket_changes_bill(self):
+        small = dict(fees_from_options({}), capacity=capacity_for_annual_use(800.0))
+        big = dict(fees_from_options({}), capacity=capacity_for_annual_use(5000.0))
+        r_small = compute_bill(100.0, 0.0, 0.0, 0.0, small, deposit_pln=0.0)
+        r_big = compute_bill(100.0, 0.0, 0.0, 0.0, big, deposit_pln=0.0)
+        assert r_small["distr_fixed"] == round(0.74 + 20.17 + 10.31, 2)
+        assert r_big["distr_fixed"] == round(0.74 + 20.17 + 24.05, 2)
+        assert r_big["do_zaplaty"] > r_small["do_zaplaty"]

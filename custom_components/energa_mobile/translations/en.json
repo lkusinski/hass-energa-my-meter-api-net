@@ -65,15 +65,15 @@
                     "tariff_energy_day": "Tariff: sale energy day L1 [PLN/kWh]",
                     "tariff_energy_night": "Tariff: sale energy night L2 [PLN/kWh]",
                     "tariff_excise_mwh": "Tariff: excise duty [PLN/MWh of import]",
-                    "tariff_trade_fee": "Tariff: monthly trade fee [PLN]",
+                    "tariff_trade_fee": "Tariff: monthly trade fee [PLN] (from your invoice!)",
                     "tariff_abonament": "Tariff: subscription fee [PLN/month]",
                     "tariff_grid_fixed": "Tariff: fixed grid fee [PLN/month]",
                     "tariff_grid_var_day": "Tariff: variable grid day [PLN/kWh]",
                     "tariff_grid_var_night": "Tariff: variable grid night [PLN/kWh]",
-                    "tariff_quality": "Tariff: quality fee [PLN/kWh]",
+                    "tariff_quality": "Tariff: quality fee [PLN/kWh] (from your invoice!)",
                     "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
                     "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
-                    "tariff_capacity": "Tariff: capacity fee [PLN/month]"
+                    "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)"
                 }
             },
             "history": {

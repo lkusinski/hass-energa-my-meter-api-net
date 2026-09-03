@@ -18,6 +18,37 @@ from __future__ import annotations
 
 VAT_RATE = 0.23
 
+# URE 2026 capacity-fee brackets for households (ryczałt, netto PLN/month).
+# Source: Informacja Prezesa URE Nr 58/2025 (30.10.2025) — by ANNUAL
+# consumption, not contracted power: <500 kWh -> 4.29; 500-1200 -> 10.31;
+# 1200-2800 -> 17.18; >2800 -> 24.05. Our old default 24.05 was just the
+# top bracket (both reference houses consume more) — for a small flat it
+# would overcharge by ~20 PLN/month, hence auto-bracketing below.
+CAPACITY_2026_BRACKETS = (
+    (500.0, 4.29),
+    (1200.0, 10.31),
+    (2800.0, 17.18),
+    (float("inf"), 24.05),
+)
+
+
+def capacity_for_annual_use(annual_kwh: float | None) -> float:
+    """Monthly capacity fee (netto) from estimated annual import.
+
+    Falls back to the top bracket when the estimate is missing/invalid —
+    same value as the old hard default, never worse.
+    """
+    try:
+        annual = float(annual_kwh)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return G12W_DEFAULT_FEES["capacity"]
+    if annual <= 0:
+        return G12W_DEFAULT_FEES["capacity"]
+    for limit, fee in CAPACITY_2026_BRACKETS:
+        if annual < limit:
+            return fee
+    return G12W_DEFAULT_FEES["capacity"]
+
 # Option keys (mirrored in const.py as CONF_TARIFF_*). Kept as plain
 # strings here so this module stays importable without Home Assistant.
 _OPTION_KEY_MAP = {
