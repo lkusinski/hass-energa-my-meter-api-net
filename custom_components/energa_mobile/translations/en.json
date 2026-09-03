@@ -54,7 +54,14 @@
                     "export_price": "Rate per kWh (production) [PLN]",
                     "prosumer_coefficient": "Prosumer coefficient (0-1)",
                     "balance_baseline_import": "Prosumer baseline import [kWh]",
-                    "balance_baseline_export": "Prosumer baseline export [kWh]"
+                    "balance_baseline_export": "Prosumer baseline export [kWh]",
+                    "bank_rce_price": "RCE/RCEm price [PLN/kWh] (e.g. 0.26288 for 07.2026)",
+                    "bank_initial_kwh": "Bank initial kWh (old system, from invoice)",
+                    "bank_initial_pln": "Bank initial PLN (new system, from invoice)",
+                    "rce_auto_fetch": "Auto-fetch RCEm from PSE API every 24h",
+                    "settlement_date": "Annual settlement anniversary YYYY-MM-DD (old system, e.g. invoice date)",
+                    "enable_auto_settlement": "Show settlement/expiry calibration attributes",
+                    "use_rolling_365d": "Old system: rolling 365-day FIFO bank from statistics (needs history)"
                 }
             },
             "history": {

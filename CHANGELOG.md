@@ -1,6 +1,36 @@
 # Changelog
 
-## v0.2.10 (2026-09-03)
+## v0.2.11 (2026-09-04)
+
+### ⚖️ Autokalibracja rozliczeń (FIFO 12 m-cy, nie reset kalendarzowy)
+- **Weryfikacja przepisów (sprawdzone źródła):** reset „1 stycznia" (stare) i „co miesiąc"
+  (nowe) byłyby NIEZGODNE z przepisami. Oba systemy to kroczące okna FIFO 12 m-cy:
+  stare — odbiór w 12 m-cy od końca miesiąca wprowadzenia (`energa.pl net-metering`,
+  `enerad.pl`); nowe — depozyt ważny 12 m-cy od przypisania (M+1, ×1.23), zwrot max
+  20% RCEm / 30% RCE (`energa.pl net-billing`, `gov.pl` 27.12.2024 Dz.U. 1847).
+- **Nowe opcje (`Options → Ceny`):** `settlement_date` (rocznica rozliczenia, np. data
+  faktury), `enable_auto_settlement` (master-switch kalibracji, domyślnie OFF = jak 0.2.10),
+  `use_rolling_365d` (stary system: bank z ostatnich 365 dni statystyk zamiast lifetime).
+- **Bank kWh:** tryb `rolling_365d` (`max(0, export_365×coeff - import_365)`, wymaga
+  `Pobierz Historię`, min. 300 dni pokrycia) + atrybuty `settlement_next`,
+  `days_to_settlement`, `validity_note`, `settlement_mode`, `coverage_days`.
+- **Nowy `EnergaBillForecastSensor` (`Prognoza Rachunku`, tylko nowe systemy):**
+  `mtd_net/dni×dni_miesiąca` ze statystyk + atrybuty `mtd_import/export/net`,
+  `forecast_pln`, `rce_source`. Depozyt pokrywa tylko energię czynną.
+- **Bank PLN:** atrybuty `deposit_valid_until` (+12 m-cy), `refund_cap_note`,
+  `validity_note`, `hourly_netting_note` (sprzedawca bilansuje godzinowo —
+  faktura 07: 456 kWh z delty licznika 523 kWh, sensor liczy z delt — przybliżenie).
+
+### 🐛 Bug Fixes
+- **RCE auto ≠ RCEm:** prosta średnia RCE (lab: 0.59287) to NIE fakturowane RCEm
+  (średnia ważona; lipiec 0.26288). `async_fetch_rcem` bierze teraz **oficjalne RCEm
+  ze strony PSE** (`pse.pl/oire/rcem...`, parser w `settlement.py`), fallback: średnia
+  RCE. Reguła miesiąca: przed 11. dniem → M-2, po 11. → M-1. `coordinator._rce_source`
+  mówi skąd wartość (`PSE RCEm official` / `PSE RCE avg fallback` / `manual`).
+  Zweryfikowano: faktura G12W nowe zasady 07.2026 `456×0.26288×1.23=147.44` = RCEm z tabeli PSE.
+- **Weryfikacja fakturowa:** G12W stare zasady bank `1358+1114.18=2472.18` zgodny prod==lab;
+  przybliżenie deltami vs bilans godzinowy sprzedawcy ~1% (1344 vs 1358).
+  Prod atrybuty `formula` (783 / +147.44) są nieaktualne — kosmetyka po stronie prod.
 
 ### ✨ Nowe / Ulepszenia
 - **Bank — łatwa widoczność:** `Bank Kwh/Pln` rozbudowane atrybuty (`formula`, `per_strefa_note`, `price_1/2`, `import_1/2` `L1/L2`) + `docs/BANK.md` z gotowym `Lovelace vertical-stack` (gauge + entities) dla Wiśniowej `1358 kWh` i Agrestowej `0.00 PLN`. `bank_energii.yaml` do usunięcia — bank natywnie.

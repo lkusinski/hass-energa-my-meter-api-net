@@ -20,6 +20,7 @@ from .const import (
     CONF_BANK_INITIAL_PLN,
     CONF_BANK_RCE_PRICE,
     CONF_DEVICE_TOKEN,
+    CONF_ENABLE_AUTO_SETTLEMENT,
     CONF_EXPORT_PRICE,
     CONF_IMPORT_PRICE,
     CONF_IMPORT_PRICE_1,
@@ -27,17 +28,22 @@ from .const import (
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
     CONF_RCE_AUTO_FETCH,
+    CONF_SETTLEMENT_DATE,
     CONF_USERNAME,
+    CONF_USE_ROLLING_365D,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
+    DEFAULT_ENABLE_AUTO_SETTLEMENT,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
+    DEFAULT_SETTLEMENT_DATE,
+    DEFAULT_USE_ROLLING_365D,
     DOMAIN,
 )
 
@@ -359,6 +365,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             current_initial_kwh = self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH)
             current_initial_pln = self._config_entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN)
             current_rce_auto = self._config_entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
+            current_settlement = self._config_entry.options.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
+            current_auto_settle = self._config_entry.options.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT)
+            current_rolling = self._config_entry.options.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D)
 
             return self.async_show_form(
                 step_id="prices",
@@ -394,6 +403,15 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
                         ): bool,
+                        vol.Optional(
+                            CONF_SETTLEMENT_DATE, default=current_settlement
+                        ): str,
+                        vol.Optional(
+                            CONF_ENABLE_AUTO_SETTLEMENT, default=current_auto_settle
+                        ): bool,
+                        vol.Optional(
+                            CONF_USE_ROLLING_365D, default=current_rolling
+                        ): bool,
                     }
                 ),
             )
@@ -404,6 +422,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             current_initial_kwh = self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH)
             current_initial_pln = self._config_entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN)
             current_rce_auto = self._config_entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
+            current_settlement = self._config_entry.options.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
+            current_auto_settle = self._config_entry.options.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT)
+            current_rolling = self._config_entry.options.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D)
 
             return self.async_show_form(
                 step_id="prices",
@@ -435,6 +456,15 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         ): vol.Coerce(float),
                         vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
+                        ): bool,
+                        vol.Optional(
+                            CONF_SETTLEMENT_DATE, default=current_settlement
+                        ): str,
+                        vol.Optional(
+                            CONF_ENABLE_AUTO_SETTLEMENT, default=current_auto_settle
+                        ): bool,
+                        vol.Optional(
+                            CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
                     }
                 ),

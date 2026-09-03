@@ -59,7 +59,10 @@
                     "bank_rce_price": "Cena RCE/RCEm [PLN/kWh] (np. 0.26288 dla 07.2026)",
                     "bank_initial_kwh": "Bank poczatkowy kWh (stary system, z faktury)",
                     "bank_initial_pln": "Bank poczatkowy PLN (nowy system, z faktury)",
-                    "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h"
+                    "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
+                    "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
+                    "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
+                    "use_rolling_365d": "Stary system: kroczący bank 365d FIFO ze statystyk (wymaga historii)"
                 }
             },
             "history": {

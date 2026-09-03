@@ -239,17 +239,74 @@ class EnergaAPI:
         """Fetch RCEm (monthly average RCE) from PSE API.
 
         Returns RCEm in PLN/kWh (e.g. 0.26288 for July 2026).
-        If month/year not specified, uses previous month (RCEm is published ~11th of next month).
+        If month/year not specified, uses the latest PUBLISHED month
+        (PSE publishes ~11th of the next month - see settlement.target_rcem_month).
+        Prefers the official RCEm table (volume-weighted, as billed);
+        falls back to plain RCE average when the table is unreachable.
         """
+        from .settlement import target_rcem_month
+
         tz = ZoneInfo("Europe/Warsaw")
         now = datetime.now(tz)
         if month is None or year is None:
-            # Use previous month (RCEm for current month isn't published yet)
-            if now.month == 1:
-                month, year = 12, now.year - 1
-            else:
-                month, year = now.month - 1, now.year
+            year, month = target_rcem_month(now.date())
 
+        # 1) Official RCEm table (volume-weighted, matches invoices)
+        official = await self.async_fetch_official_rcem(month, year)
+        if official is not None:
+            return official
+
+        # 2) Fallback: plain average of hourly RCE (NOT volume-weighted,
+        #    may differ from the invoiced RCEm by design)
+        _LOGGER.debug(
+            "Official RCEm unavailable for %04d-%02d, using RCE average fallback",
+            year, month,
+        )
+        return await self.async_fetch_rce_average(month, year)
+
+    async def async_fetch_official_rcem(self, month: int, year: int) -> float | None:
+        """Fetch official RCEm for a month from the PSE RCEm page.
+
+        RCEm is a volume-weighted average published ~11th of the next month
+        (https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej).
+        Returns PLN/kWh or None when unavailable.
+        """
+        from .settlement import parse_official_rcem_table
+
+        url = "https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej"
+        try:
+            async with self._create_session_fn() as session:
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; hass-energa-my-meter)"},
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.debug("PSE RCEm page returned HTTP %d", resp.status)
+                        return None
+                    html = await resp.text()
+            for y, m, price in parse_official_rcem_table(html):
+                if y == year and m == month:
+                    _LOGGER.info(
+                        "Official RCEm for %04d-%02d: %.5f PLN/kWh (PSE table)",
+                        year, month, price,
+                    )
+                    return price
+            _LOGGER.debug("Official RCEm for %04d-%02d not on PSE page yet", year, month)
+            return None
+        except aiohttp.ClientError as err:
+            _LOGGER.debug("PSE RCEm page connection error: %s", err)
+            return None
+        except Exception as err:
+            _LOGGER.debug("PSE RCEm page error: %s", err)
+            return None
+
+    async def async_fetch_rce_average(self, month: int, year: int) -> float | None:
+        """Plain arithmetic average of hourly RCE for a month (fallback).
+
+        NOTE: this is NOT the invoiced RCEm (which is volume-weighted).
+        Kept as fallback when the official table is unreachable.
+        """
         target_month_str = f"{year}-{month:02d}"
 
         try:
@@ -278,7 +335,7 @@ class EnergaAPI:
             rcem_pln_kwh = round(avg_rce_mwh / 1000, 5)
 
             _LOGGER.info(
-                "RCEm for %s: %.2f PLN/MWh = %.5f PLN/kWh (from %d records)",
+                "RCE average fallback for %s: %.2f PLN/MWh = %.5f PLN/kWh (from %d records)",
                 target_month_str, avg_rce_mwh, rcem_pln_kwh, len(values),
             )
             return rcem_pln_kwh

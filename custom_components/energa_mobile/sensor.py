@@ -41,16 +41,31 @@ from .const import (
     CONF_BANK_INITIAL_KWH,
     CONF_BANK_INITIAL_PLN,
     CONF_BANK_RCE_PRICE,
+    CONF_ENABLE_AUTO_SETTLEMENT,
     CONF_PROSUMER_COEFFICIENT,
     CONF_RCE_AUTO_FETCH,
+    CONF_SETTLEMENT_DATE,
+    CONF_USE_ROLLING_365D,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
+    DEFAULT_ENABLE_AUTO_SETTLEMENT,
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
+    DEFAULT_SETTLEMENT_DATE,
+    DEFAULT_USE_ROLLING_365D,
     DOMAIN,
+    ROLLING_MIN_COVERAGE_DAYS,
     get_price_for_key,
+)
+from .settlement import (
+    days_to_settlement,
+    deposit_valid_until,
+    month_to_date_forecast,
+    next_settlement_date,
+    parse_settlement_date,
+    rolling_kwh_bank,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -424,6 +439,19 @@ async def async_setup_entry(
                         api=api,
                     )
                 )
+                # v0.2.11 bill forecast (monthly net-billing view, needs history)
+                if entry.options.get(
+                    CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
+                ):
+                    sensors.append(
+                        EnergaBillForecastSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            has_zones=has_zones,
+                        )
+                    )
             sensors.append(
                 EnergaFirstDataDateSensor(
                     coordinator=coordinator,
@@ -538,6 +566,9 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._rce_cache: float | None = None
         self._rce_last_fetch = None
         self._rce_fetch_lock = False
+        self._rce_source: str | None = None  # v0.2.11: where cached RCE comes from
+        self._rolling_365: dict = {}  # v0.2.11: {meter_id: {suffix: kWh, "_coverage_days": n}}
+        self._mtd: dict = {}  # v0.2.11: month-to-date sums, same shape
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -589,8 +620,12 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     self._hourly_stats[meter_id] = {"import": [], "export": []}
 
             # === RCE auto-fetch (net-billing, 24h cache) ===
+            # v0.2.11: prefer official volume-weighted RCEm (as billed),
+            # fall back to plain RCE average. Month rule: latest PUBLISHED
+            # (PSE publishes ~11th of next month).
             try:
                 from datetime import datetime as _dt
+                from .settlement import target_rcem_month
                 opts = self.entry.options
                 if opts.get("rce_auto_fetch"):
                     need_fetch = False
@@ -601,15 +636,40 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     if need_fetch and not self._rce_fetch_lock:
                         self._rce_fetch_lock = True
                         try:
-                            rcem = await self.api.async_fetch_rcem()
+                            _ty, _tm = target_rcem_month(_dt.now().date())
+                            rcem = await self.api.async_fetch_official_rcem(_tm, _ty)
+                            source = "PSE RCEm official"
+                            if rcem is None:
+                                rcem = await self.api.async_fetch_rce_average(_tm, _ty)
+                                source = "PSE RCE avg fallback"
                             if rcem is not None:
                                 self._rce_cache = rcem
                                 self._rce_last_fetch = _dt.now()
-                                _LOGGER.info("Coordinator RCE auto-fetched: %.5f PLN/kWh", rcem)
+                                self._rce_source = source
+                                _LOGGER.info("Coordinator RCE auto-fetched: %.5f PLN/kWh (%s)", rcem, source)
                         finally:
                             self._rce_fetch_lock = False
             except Exception as rce_err:
                 _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
+
+            # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===
+            try:
+                from datetime import datetime as _dt2
+                _opts = self.entry.options
+                if _opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+                    _now = _dt2.now(TIMEZONE)
+                    if _opts.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D):
+                        _rolling = await self._async_compute_period_sums(
+                            _now - timedelta(days=365), _now
+                        )
+                        if _rolling:
+                            self._rolling_365 = _rolling
+                    _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                    _mtd = await self._async_compute_period_sums(_month_start, _now)
+                    if _mtd:
+                        self._mtd = _mtd
+            except Exception as cal_err:
+                _LOGGER.debug("Settlement calibration skipped: %s", cal_err)
 
             return active_meters
 
@@ -761,6 +821,91 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(
                             "Could not pre-fetch stats for %s: %s", entity_id, err
                         )
+
+    async def _async_compute_period_sums(self, start, end) -> dict:
+        """Sum Panel Energia statistics per meter over [start, end] (v0.2.11).
+
+        Returns {meter_id: {suffix: delta_kwh, "_coverage_days": n}} where
+        delta is last.sum - first.sum of daily statistics in the window.
+        Returns {} when recorder data is unavailable (fully defensive —
+        settlement calibration must never break the coordinator update).
+        """
+        try:
+            import functools
+
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import (
+                statistics_during_period,
+            )
+            from homeassistant.helpers import entity_registry as er
+        except Exception as err:
+            _LOGGER.debug("Period sums unavailable (imports): %s", err)
+            return {}
+        try:
+            registry = er.async_get(self.hass)
+            wanted: dict = {}  # entity_id -> (meter_id, suffix)
+            for mid in list(self._meter_totals.keys()):
+                for suffix in (
+                    "import_1", "import_2", "export_1", "export_2",
+                    "import", "export",
+                ):
+                    uid = f"energa_{mid}_{suffix}_stats"
+                    for entity in registry.entities.values():
+                        if entity.unique_id == uid and entity.platform == DOMAIN:
+                            wanted[entity.entity_id] = (str(mid), suffix)
+                            break
+            if not wanted:
+                return {}
+            stats = await get_instance(self.hass).async_add_executor_job(
+                functools.partial(
+                    statistics_during_period,
+                    self.hass, start, end, list(wanted.keys()), "day", None, {"sum"},
+                )
+            )
+            out: dict = {}
+            for stat_id, points in (stats or {}).items():
+                if not points:
+                    continue
+                sums = [p.get("sum") for p in points if p.get("sum") is not None]
+                if len(sums) < 2:
+                    continue
+                mid, suffix = wanted[stat_id]
+                out.setdefault(str(mid), {})[suffix] = round(
+                    max(0.0, sums[-1] - sums[0]), 3
+                )
+                span = self._stat_span_days(points)
+                prev = out[str(mid)].get("_coverage_days")
+                out[str(mid)]["_coverage_days"] = (
+                    span if prev is None else min(prev, span)
+                )
+            return out
+        except Exception as err:
+            _LOGGER.debug("Period sums failed: %s", err)
+            return {}
+
+    @staticmethod
+    def _stat_span_days(points) -> int:
+        """Actual day span covered by statistics points (defensive)."""
+        try:
+            from datetime import datetime as _dt
+
+            def _ts(p, key):
+                v = p.get(key)
+                if v is None:
+                    return None
+                if isinstance(v, (int, float)):
+                    return float(v)
+                if isinstance(v, _dt):
+                    return v.timestamp()
+                return None
+
+            first = _ts(points[0], "start")
+            last = _ts(points[-1], "end") or _ts(points[-1], "start")
+            if first is None or last is None or last <= first:
+                return 0
+            return int((last - first) // 86400)
+        except Exception:
+            return 0
 
 
 class EnergaLiveSensor(CoordinatorEntity, SensorEntity):
@@ -1026,11 +1171,37 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
         bilans = (net_exp * coeff) - net_imp
         bank = max(0, bilans) + initial
+        mode = "baseline"
 
         _LOGGER.debug(
             "BankKwh %s: imp=%.2f exp=%.2f coeff=%.2f bilans=%.2f initial=%.2f bank=%.2f",
             mid, net_imp, net_exp, coeff, bilans, initial, bank,
         )
+
+        # v0.2.11 rolling FIFO mode: energy older than 12 months expires, so
+        # only trailing-365-day flows count (needs Download History).
+        # A plain Jan-1 reset would NOT comply (rolling window, not calendar).
+        coverage = 0
+        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT) and opts.get(
+            CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D
+        ):
+            rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(mid), {})
+            coverage = int(rolling.get("_coverage_days", 0))
+            if coverage >= ROLLING_MIN_COVERAGE_DAYS:
+                exp365 = rolling.get(
+                    "export",
+                    rolling.get("export_1", 0) + rolling.get("export_2", 0),
+                )
+                imp365 = rolling.get(
+                    "import",
+                    rolling.get("import_1", 0) + rolling.get("import_2", 0),
+                )
+                bank = rolling_kwh_bank(exp365, imp365, coeff)
+                mode = "rolling_365d"
+                _LOGGER.debug(
+                    "BankKwh %s rolling: exp365=%.2f imp365=%.2f bank=%.2f",
+                    mid, exp365, imp365, bank,
+                )
 
         # Build rich attributes for Lovelace visibility
         attrs = {
@@ -1042,7 +1213,22 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             "source": "net-metering 0.8 roczny (old) — faktury FES",
             "formula": "max(0, (export-baseline)*coeff - (import-baseline)) + initial",
             "unit": "kWh — ile energii możesz jeszcze odebrać za darmo",
+            "settlement_mode": mode,
         }
+        if mode == "rolling_365d":
+            attrs["coverage_days"] = coverage
+        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+            settle_str = opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
+            base = parse_settlement_date(settle_str)
+            if base is not None:
+                from datetime import date as _date
+
+                attrs["settlement_next"] = next_settlement_date(base, _date.today()).isoformat()
+                attrs["days_to_settlement"] = days_to_settlement(settle_str)
+            attrs["validity_note"] = (
+                "FIFO 12 m-cy od końca miesiąca wprowadzenia, najstarsza energia "
+                "najpierw (energa.pl net-metering). Reset 1.01 NIE obowiązuje."
+            )
         if self._has_zones:
             attrs.update({
                 "import_1": round(float(totals.get("import_1", 0)), 2),
@@ -1137,7 +1323,11 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             mid, net_imp_cost, net_exp, rce, comp_export, initial, bank,
         )
 
-        rce_source = "PSE auto" if getattr(self.coordinator, "_rce_cache", None) is not None and opts.get(CONF_RCE_AUTO_FETCH) else "manual"
+        coord_cache = getattr(self.coordinator, "_rce_cache", None)
+        if opts.get(CONF_RCE_AUTO_FETCH) and coord_cache is not None:
+            rce_source = getattr(self.coordinator, "_rce_source", None) or "PSE auto"
+        else:
+            rce_source = "manual"
         attrs = {
             "net_import_kwh": round(net_imp, 2) if not self._has_zones else round(imp1 - bi1 + imp2 - bi2, 2),
             "net_export_kwh": round(net_exp, 2),
@@ -1149,8 +1339,28 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             "initial_pln": initial,
             "source": "net-billing RCE×1.23 miesięczny (nowy) — faktura G12W nowe zasady",
             "formula": "initial + export×RCE×1.23 - import×cena_strefa",
-            "unit": "PLN — wartość depozytu, ujemny = do zapłaty",
+            "unit": "PLN — pozycja netto (depozyt minus koszt importu); ujemny = do zapłaty",
         }
+        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+            from datetime import date as _date
+
+            _today = _date.today()
+            attrs["deposit_valid_until"] = deposit_valid_until(_today.year, _today.month).isoformat()
+            attrs["refund_cap_note"] = (
+                "Niewykorzystany depozyt zwracany po 12 m-cach max 20% (RCEm) "
+                "/ 30% (RCE od 01.02.2025), do końca 13. miesiąca (Dz.U. 1847)."
+            )
+            attrs["validity_note"] = (
+                "Depozyt ważny 12 m-cy od przypisania (M+1, ×1.23), najstarsze "
+                "środki najpierw. Zerowanie co miesiąc NIE obowiązuje."
+            )
+            attrs["hourly_netting_note"] = (
+                "Sprzedawca bilansuje godzinowo (faktura 07: 456 kWh z delty "
+                "licznika 523 kWh); sensor liczy z delt licznika — przybliżenie."
+            )
+            settle_str = opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
+            if parse_settlement_date(settle_str) is not None:
+                attrs["days_to_settlement"] = days_to_settlement(settle_str)
         if self._has_zones:
             price1 = get_price_for_key(opts, "import_1", mid)
             price2 = get_price_for_key(opts, "import_2", mid)
@@ -1578,13 +1788,15 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         coord_cache = getattr(self.coordinator, "_rce_cache", None)
         coord_last = getattr(self.coordinator, "_rce_last_fetch", None)
+        coord_source = getattr(self.coordinator, "_rce_source", None)
         return {
             "auto_fetch": bool(self._entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)),
             "cached_rcem": coord_cache,
             "last_fetch": coord_last.isoformat() if coord_last else None,
             "manual_fallback": float(self._entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)),
-            "source": "PSE API (api.raporty.pse.pl)" if coord_cache else "manual input",
+            "source": coord_source or ("PSE API (api.raporty.pse.pl)" if coord_cache else "manual input"),
             "vat_note": "×1.23 w Bank PLN (Dz.U. 1847)",
+            "method_note": "Oficjalne RCEm (średnia ważona PSE); fallback: zwykła średnia RCE",
         }
 
     async def async_update_rcem(self):
@@ -1593,9 +1805,94 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
             rcem = await self._api.async_fetch_rcem()
             if rcem is not None:
                 self.coordinator._rce_cache = rcem
+                self.coordinator._rce_source = "PSE (manual refresh)"
                 from datetime import datetime as _dt
                 self.coordinator._rce_last_fetch = _dt.now()
                 self.async_write_ha_state()
                 _LOGGER.info("RCEm manual fetch: %.5f PLN/kWh", rcem)
         except Exception as err:
             _LOGGER.warning("RCEm manual fetch error: %s", err)
+
+
+class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
+    """Month-end bill forecast for new prosumer (net-billing, v0.2.11).
+
+    mtd_net = export_mtd×RCE×1.23 - import_mtd×cena_per_strefa from recorder
+    statistics; forecast = mtd_net/days_elapsed×days_in_month (linear).
+    Negative = month closes with payment due; positive = deposit surplus.
+    Deposit covers energy charges only (not distribution/fixed fees).
+    Created only when enable_auto_settlement is on (needs history).
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._has_zones = has_zones
+        self._attr_name = "Prognoza Rachunku"
+        self._attr_unique_id = f"energa_{meter_id}_bill_forecast"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "PLN"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_icon = "mdi:calendar-clock"
+
+    def _mtd_parts(self):
+        """(import_kwh, export_kwh) month-to-date from coordinator cache."""
+        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id), {})
+        imp = mtd.get("import", mtd.get("import_1", 0) + mtd.get("import_2", 0))
+        exp = mtd.get("export", mtd.get("export_1", 0) + mtd.get("export_2", 0))
+        return float(imp), float(exp)
+
+    def _rce(self) -> float:
+        opts = self._entry.options
+        coord_rce = getattr(self.coordinator, "_rce_cache", None)
+        if opts.get(CONF_RCE_AUTO_FETCH) and coord_rce is not None:
+            return float(coord_rce)
+        return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+
+    @property
+    def native_value(self):
+        from datetime import date as _date
+
+        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+        if not mtd:
+            return None
+        imp_mtd, exp_mtd = self._mtd_parts()
+        opts = self._entry.options
+        mid = self._meter_id
+        if self._has_zones:
+            m1 = mtd.get("import_1", 0)
+            m2 = mtd.get("import_2", 0)
+            p1 = get_price_for_key(opts, "import_1", mid)
+            p2 = get_price_for_key(opts, "import_2", mid)
+            imp_cost = m1 * p1 + m2 * p2
+        else:
+            imp_cost = imp_mtd * get_price_for_key(opts, "import", mid)
+        rce = self._rce()
+        mtd_net = exp_mtd * rce * 1.23 - imp_cost
+        today = _date.today()
+        import calendar as _cal
+
+        forecast = month_to_date_forecast(
+            mtd_net, today.day, _cal.monthrange(today.year, today.month)[1]
+        )
+        self._attr_extra_state_attributes = {
+            "mtd_import_kwh": round(imp_mtd, 2),
+            "mtd_export_kwh": round(exp_mtd, 2),
+            "mtd_net_pln": round(mtd_net, 2),
+            "forecast_pln": forecast,
+            "day_of_month": today.day,
+            "rce_price": rce,
+            "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",
+            "formula": "mtd_net/days_elapsed*days_in_month; mtd_net=export×RCE×1.23-import×cena",
+            "note": "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)",
+        }
+        return forecast
+
+    @property
+    def available(self) -> bool:
+        return (
+            self.coordinator.data is not None
+            and str(self._meter_id) in getattr(self.coordinator, "_mtd", {})
+        )

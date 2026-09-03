@@ -49,6 +49,24 @@ PSE_RCE_API_URL = "https://api.raporty.pse.pl/api/rce-pln"
 CONF_RCE_AUTO_FETCH = "rce_auto_fetch"  # Enable/disable auto RCE fetch
 DEFAULT_RCE_AUTO_FETCH = False
 
+# Settlement / auto-calibration (v0.2.11)
+# Sources (verified 2026-09-04):
+# - Old net-metering (opusty 0.8/0.7): energy valid 12 months from introduction
+#   (counted from last day of introduction month), FIFO oldest-first.
+#   See: energa.pl/dom/strefa-prosumenta/net-metering, enerad.pl/net-metering-system-opustow
+# - New net-billing: deposit valid 12 months from assignment (assigned next calendar
+#   month, x1.23), FIFO oldest-first, refund cap 20% (RCEm) / 30% (RCE since 01.02.2025).
+#   See: energa.pl/dom/strefa-prosumenta/net-billing, gov.pl 27.12.2024 (Dz.U. 1847)
+# NOTE: a plain calendar reset (Jan 1 / each month) would NOT comply — both systems
+# are rolling 12-month FIFO windows.
+CONF_SETTLEMENT_DATE = "settlement_date"  # YYYY-MM-DD: annual settlement anniversary (old system, e.g. invoice date 2026-06-30)
+CONF_ENABLE_AUTO_SETTLEMENT = "enable_auto_settlement"  # Show settlement/expiry calibration attributes
+CONF_USE_ROLLING_365D = "use_rolling_365d"  # Old system: compute bank from last 365d of statistics (FIFO) instead of lifetime baseline
+DEFAULT_SETTLEMENT_DATE = ""  # empty = anniversary derived from baselines/invoice not set; attributes show validity note only
+DEFAULT_ENABLE_AUTO_SETTLEMENT = False
+DEFAULT_USE_ROLLING_365D = False
+ROLLING_MIN_COVERAGE_DAYS = 300  # minimum statistics coverage to trust rolling 365d mode
+
 
 def get_price_for_key(
     options: dict, data_key: str, meter_id: str | None = None

@@ -82,6 +82,37 @@ cards:
 - `sensor.bank_wirtualny_kwh_3` 2472.18 kWh (G12W stare zasady, baseline per-strefa `19543.235/26736.058` + `17072.943/15371.476`), `sensor.bank_wirtualny_pln -415.57 PLN` (G12W nowe zasady, baseline `1932.634/2423.794` + `400.52/287.581`, RCE `0.59287` auto), `sensor.energa_72000002_rcem_auto 0.59287`
 - Czyszczenie `core.entity_registry` przy `ha core stop` (`jq` na `/mnt/data/supervisor/homeassistant/.storage/`): usunięto 3 orphan `bank_pln` + 3 duplikaty `button` `serial` → 3 banki + 3 `data_pierwszego_odczytu` + 3 `button` (point_id)
 
-## Dalej — v0.2.11 prognoza rachunku
+## Dalej — v0.2.11 autokalibracja rozliczeń (FIFO 12 m-cy)
 
-Plan: `EnergaBillForecastSensor` (`sensor.energa_XXX_prognoza_rachunku`) — `mtd_cost = net_import_mtd×cena - net_export_mtd×RCE×1.23` + `forecast = mtd/days_elapsed*days_in_month` + `stałe` (opłata handlowa z faktury); atrybuty `mtd_kwh`, `forecast_kwh`, `rce_source`; `enable_bill_forecast` w `Options`. Dla starego systemu `forecast_kwh = max(0, mag - mtd_import)`. Szczegóły w `PLAN.md:4`.
+> Reset „1 stycznia" (stare) i „co miesiąc" (nowe) byłyby NIEZGODNE z przepisami.
+> Oba systemy to kroczące okna FIFO 12 m-cy. Włącz w `Options → Ceny`:
+> `enable_auto_settlement`, ustaw `settlement_date` (np. `2026-06-30` G12W stare zasady),
+> dla starych opcjonalnie `use_rolling_365d` (wymaga `Pobierz Historię`).
+
+* Stare: bank z ostatnich 365 dni statystyk (`rolling_365d`), atrybuty
+  `settlement_next` / `days_to_settlement` / `validity_note`.
+  Podstawa: energia ważna 12 m-cy od końca miesiąca wprowadzenia, FIFO
+  (`energa.pl/dom/strefa-prosumenta/net-metering`, `enerad.pl`).
+* Nowe: `sensor.energa_XXX_prognoza_rachunku` (MTD + liniowa prognoza końca
+  miesiąca), `deposit_valid_until` (+12 m-cy od przypisania M+1), `refund_cap_note`
+  (20% RCEm / 30% RCE, Dz.U. 1847). Podstawa: `energa.pl net-billing`, `gov.pl` 27.12.2024.
+* RCE auto bierze **oficjalne RCEm z tabeli PSE** (średnia ważona, jak na fakturze),
+  nie zwykłą średnią RCE. Reguła: przed 11. dniem miesiąca obowiązuje M-2, po 11. — M-1.
+  Tabela: `pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej`.
+
+## Weryfikacja fakturowa 2026-09-04 (prod read-only vs lab)
+
+* G12W stare zasady `4100000041/FES/XXXXX` 01.05–30.06: magazyn przed `0/0`, po `752+606=1358`;
+  przybliżenie deltami `(1067.7+1066.3)×0.8−(109.4+253.6)=1344` vs faktura `1358`
+  (~1% — różnica to bilansowanie godzinowe sprzedawcy). `1358+1114.18=2472.18` prod==lab.
+* G12W nowe zasady `3253000044/FES/XXXXX` 07.2026: `456×0.26288×1.23=147.44`, depozyt po `0.00`.
+  Faktura liczy z sumy sald godzinowych (456 kWh), sensor z delty licznika (523 kWh) —
+  znane ~13% przybliżenie (`hourly_netting_note`). Bank PLN to pozycja netto
+  (depozyt − koszt importu), nie sam depozyt.
+* RCEm 07 `0.26288` z faktury = RCEm z tabeli PSE (publ. 11.08.2026). Prod `0.26288`
+  poprawne na dziś (RCEm sierpnia dopiero 11.09).
+* Znalezione niespójności prod (do poprawy ręcznie, NIE ruszane):
+  `G12W stare zasady_bank_wirtualny.formula` mówi `783` a liczy `1358`;
+  `G12W nowe zasady_bank_pln.formula` mówi `+147.44` a liczy bez offsetu (poprawnie);
+  G12W nowe zasady na prod ma `coefficient 0.8` (stara formuła bilansu) zamiast `0.0`;
+  prod jedzie na upstream `v4.15.2` (brak natywnego banku) — do migracji na fork.
