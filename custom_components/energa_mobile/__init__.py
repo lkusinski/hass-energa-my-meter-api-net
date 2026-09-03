@@ -111,6 +111,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Service to manually fetch historical data."""
         start_date_str = call.data["start_date"]
         days = call.data.get("days", 30)
+        _LOGGER.info(
+            "fetch_history called: start=%s days=%s", start_date_str, days
+        )
 
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
@@ -155,6 +158,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 notification_id="energa_fetch_warning",
             )
             return
+
+        _LOGGER.info(
+            "fetch_history: importing %d meter(s) from %s (%d days)",
+            len(active_meters),
+            start_date.date(),
+            days,
+        )
 
         # Process each active meter
         for meter in active_meters:
