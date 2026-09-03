@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.19 (2026-09-03)
+
+### 🧹 Sprzątanie banku nieaktywnego systemu
+- Cleanup obejmuje też bank nieaktywnego systemu u prosumenata
+  (np. `Bank kWh unavailable` po przejściu na net-billing) — reguła
+  `orphan_bank_uids` w teście jednostkowym.
+- Fix kolizji: prognoza konsumenta (v0.2.17) nie jest już kasowana
+  przez sprzątanie.
+
+### 🧪 Testy
+- **172 testy** (było 168).
+
 ## v0.2.18 (2026-09-03)
 
 ### ⚖️ Opłata mocowa z urzędu, nie z faktury sąsiada

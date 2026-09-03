@@ -68,6 +68,7 @@ from .settlement import (
     is_export_prosumer,
     month_to_date_forecast,
     next_settlement_date,
+    orphan_bank_uids,
     parse_settlement_date,
     rolling_kwh_bank,
 )
@@ -546,37 +547,33 @@ async def async_setup_entry(
                     )
                 )
 
-    # === CLEANUP CONSUMER LEFTOVERS (v0.2.15) ===
-    # Consumer meters (no export) no longer get prosumer sensors; remove
-    # orphan entities so they don't linger as unavailable (replaces the
-    # manual jq entity_registry cleanup from v0.2.10).
+    # === CLEANUP CONSUMER LEFTOVERS (v0.2.15+) ===
+    # Consumer meters (no export) no longer get prosumer sensors, and
+    # prosumer meters drop the bank of the inactive settlement system
+    # (v0.2.19). Remove orphans so they don't linger as unavailable
+    # (replaces the manual jq entity_registry cleanup from v0.2.10).
     try:
         from homeassistant.helpers import entity_registry as er
 
         _doomed: set = set()
         for _m in meters_to_process:
-            if is_export_prosumer(_m):
-                continue
-            _mid = str(_m["meter_point_id"])
-            _ser = str(_m.get("meter_serial", _m["meter_point_id"]))
-            _doomed.update({
-                f"energa_{_mid}_prosumer_balance",
-                f"energa_{_mid}_bank_kwh",
-                f"energa_{_mid}_bank_pln",
-                f"energa_{_mid}_bank_charge",
-                f"energa_{_mid}_bank_discharge",
-                f"energa_{_mid}_rcem_auto",
-                f"energa_{_mid}_bill_forecast",
-                f"energa_{_mid}_daily_produkcja_live",
-                f"energa_{_mid}_export_stats",
-                f"energa_{_mid}_export_1_stats",
-                f"energa_{_mid}_export_2_stats",
-                f"energa_{_ser}_export_price",
-                f"energa_{_ser}_coefficient_price",
-                f"energa_{_ser}_export_cost_stats",
-                f"energa_{_ser}_export_1_cost_stats",
-                f"energa_{_ser}_export_2_cost_stats",
-            })
+            _pros = is_export_prosumer(_m)
+            try:
+                _coeff = float(
+                    entry.options.get(
+                        CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                    )
+                )
+            except (ValueError, TypeError):
+                _coeff = DEFAULT_PROSUMER_COEFFICIENT
+            _doomed.update(
+                orphan_bank_uids(
+                    str(_m["meter_point_id"]),
+                    str(_m.get("meter_serial", _m["meter_point_id"])),
+                    _pros,
+                    _coeff,
+                )
+            )
         if _doomed:
             _ent_reg = er.async_get(hass)
             for _ent in list(_ent_reg.entities.values()):

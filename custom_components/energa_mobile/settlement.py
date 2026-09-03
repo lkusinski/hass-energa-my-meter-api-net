@@ -184,6 +184,48 @@ def is_export_prosumer(meter: dict | None) -> bool:
     return False
 
 
+def orphan_bank_uids(
+    meter_id: str, serial: str, is_prosumer: bool, coefficient: float | None
+) -> set:
+    """Unique IDs of stale prosumer entities to remove (v0.2.15+).
+
+    - Consumer meters: the whole prosumer set (Bilans, banks, flows,
+      RCEm, forecast, export live/stats/costs/prices).
+    - Prosumer meters: only the bank of the INACTIVE settlement system
+      (e.g. Bank kWh left over after switching to net-billing, or vice
+      versa when baselines were configured under a previous coefficient).
+    Pure helper so the rule stays unit-tested; sensor.py applies it.
+    """
+    mid, ser = str(meter_id), str(serial or meter_id)
+    if not is_prosumer:
+        # NOTE: bill_forecast intentionally NOT here — since v0.2.17
+        # consumers get a plain import-bill forecast too.
+        return {
+            f"energa_{mid}_prosumer_balance",
+            f"energa_{mid}_bank_kwh",
+            f"energa_{mid}_bank_pln",
+            f"energa_{mid}_bank_charge",
+            f"energa_{mid}_bank_discharge",
+            f"energa_{mid}_rcem_auto",
+            f"energa_{mid}_daily_produkcja_live",
+            f"energa_{mid}_export_stats",
+            f"energa_{mid}_export_1_stats",
+            f"energa_{mid}_export_2_stats",
+            f"energa_{ser}_export_price",
+            f"energa_{ser}_coefficient_price",
+            f"energa_{ser}_export_cost_stats",
+            f"energa_{ser}_export_1_cost_stats",
+            f"energa_{ser}_export_2_cost_stats",
+        }
+    try:
+        coeff = float(coefficient)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return set()
+    if coeff >= 0.7:
+        return {f"energa_{mid}_bank_pln", f"energa_{mid}_rcem_auto"}
+    return {f"energa_{mid}_bank_kwh"}
+
+
 def month_to_date_forecast(
     mtd_net_pln: float, day_of_month: int, days_in_month: int
 ) -> float:

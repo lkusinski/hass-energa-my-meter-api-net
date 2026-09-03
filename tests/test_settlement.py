@@ -16,6 +16,7 @@ from custom_components.energa_mobile.settlement import (
     latest_official_rcem,
     month_to_date_forecast,
     next_settlement_date,
+    orphan_bank_uids,
     parse_official_rcem_table,
     parse_settlement_date,
     rolling_kwh_bank,
@@ -154,3 +155,28 @@ class TestIsExportProsumer:
     def test_invalid_values_defensive(self):
         assert is_export_prosumer({"total_minus": "junk"}) is False
         assert is_export_prosumer({"total_minus": None}) is False
+
+
+class TestOrphanBankUids:
+    """v0.2.19: which stale unique IDs the setup cleanup removes."""
+
+    def test_consumer_full_set_but_keeps_forecast(self):
+        doomed = orphan_bank_uids("73000003", "73000003", False, 0.8)
+        assert "energa_73000003_prosumer_balance" in doomed
+        assert "energa_73000003_bank_kwh" in doomed
+        assert "energa_73000003_bank_charge" in doomed
+        assert "energa_73000003_export_stats" in doomed
+        # v0.2.17+: consumers keep their import-bill forecast
+        assert "energa_73000003_bill_forecast" not in doomed
+
+    def test_old_system_dooms_pln_bank_and_rcem(self):
+        doomed = orphan_bank_uids("71000001", "71000001", True, 0.8)
+        assert doomed == {"energa_71000001_bank_pln", "energa_71000001_rcem_auto"}
+
+    def test_new_system_dooms_kwh_bank(self):
+        doomed = orphan_bank_uids("72000002", "72000002", True, 0.0)
+        assert doomed == {"energa_72000002_bank_kwh"}
+
+    def test_invalid_coefficient_dooms_nothing(self):
+        assert orphan_bank_uids("1", "1", True, None) == set()
+        assert orphan_bank_uids("1", "1", True, "junk") == set()
