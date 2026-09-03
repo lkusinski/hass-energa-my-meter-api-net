@@ -84,7 +84,11 @@ sprzedawcy vs delty licznika + zmiany cen w trakcie miesiąca).
 
 - `v0.2.12` — natywne sensory ładowania/rozładowania Banku → bateria
   na żywo w Panelu Energia; fix `RCEm monetary+measurement`.
-- `v0.2.13` — `tariff.py` + pełna prognoza rachunku brutto z rozkładem.
+- `v0.2.13` — fix laboratoryjny `v0.2.12`: `RestoreEntity` dla przepływów
+  (odtwarzanie stanu po restarcie) + usunięcie martwej linii
+  (zweryfikowane na labie: 6× `0.0` bez `Traceback`).
+- `v0.2.13` — fix laboratoryjny `v0.2.12` (powyżej).
+- `v0.2.14` — `tariff.py` + pełna prognoza rachunku brutto z rozkładem.
 - Potem — migracja prod na fork, usunięcie `bank_energii.yaml`.
 
 ## Pytania otwarte

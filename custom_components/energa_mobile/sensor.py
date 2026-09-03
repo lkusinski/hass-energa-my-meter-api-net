@@ -27,6 +27,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
@@ -1391,7 +1392,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         return round(bank, 2)
 
 
-class EnergaBankFlowSensor(CoordinatorEntity, SensorEntity):
+class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     """Native bank charge/discharge totals for the Energy battery (v0.2.12).
 
     Energy Dashboard batteries need total_increasing FLOW sensors, while
@@ -1491,7 +1492,6 @@ class EnergaBankFlowSensor(CoordinatorEntity, SensorEntity):
             base = net_exp if self._direction == "charge" else net_imp
             value = self._flows.update(base)[0]
             mode = "flows"
-        value = charge if self._direction == "charge" else discharge
         self._attr_extra_state_attributes = {
             "settlement_mode": mode,
             "coefficient": coeff,

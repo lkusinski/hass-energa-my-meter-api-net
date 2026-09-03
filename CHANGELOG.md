@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.13 (2026-09-03)
+
+### 🐛 Bug Fixes (zweryfikowane na labie)
+- **`EnergaBankFlowSensor` bez stanu po restarcie:** brak `RestoreEntity` —
+  `AttributeError: async_get_last_state` przy dodawaniu encji, sensory
+  `unavailable`. Dodano dziedziczenie `RestoreEntity`.
+- **Martwa linia po refaktorze:** `value = charge if ... else discharge`
+  (`NameError`) — gałęzie ustawiają już `value` bezpośrednio.
+
 ## v0.2.12 (2026-09-03)
 
 ### 🔋 Natywne przepływy Banku (bateria na żywo w Panelu Energia)
