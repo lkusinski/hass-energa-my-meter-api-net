@@ -390,3 +390,59 @@ class FlowAccumulator:
         elif delta < 0:
             self.discharge = round(self.discharge - delta, 2)
         return (self.charge, self.discharge)
+
+
+def flow_history_series(hourly, coefficient: float, old_system: bool) -> tuple:
+    """Historical (charge, discharge) cumulative series (v0.2.23).
+
+    Replays the live FlowAccumulator semantics over imported hourly flows
+    so Download History also backfills the Energy battery (not just Panel
+    Energia). Baselines don't matter (only deltas flow through).
+
+    Args:
+        hourly: iterable of (import_kwh, export_kwh) per hour, chronological.
+        coefficient: prosumer factor (old system only).
+        old_system: True = Bilans movement; False = export/import growth.
+
+    Returns (charge_points, discharge_points): lists of cumulative kWh
+    aligned with `hourly` (first point 0.0 — anchor, like live).
+    Pure function, unit-tested.
+    """
+    try:
+        coeff = float(coefficient)
+    except (ValueError, TypeError):
+        coeff = 0.8
+    charge, discharge = [], []
+    ch_tot, dis_tot = 0.0, 0.0
+    cum_exp, cum_imp = 0.0, 0.0
+    prev_base = None
+    for row in hourly or []:
+        try:
+            imp, exp = max(0.0, float(row[0])), max(0.0, float(row[1]))
+        except (ValueError, TypeError, IndexError):
+            charge.append(round(ch_tot, 2))
+            discharge.append(round(dis_tot, 2))
+            continue
+        if old_system:
+            # Mirror live mode: Bilans of CUMULATIVE flows, split deltas.
+            cum_exp += exp
+            cum_imp += imp
+            base = cum_exp * coeff - cum_imp
+            if prev_base is None:
+                prev_base = base  # anchor, like live first update
+            else:
+                delta = base - prev_base
+                prev_base = base
+                if delta > 0:
+                    ch_tot += delta
+                elif delta < 0:
+                    dis_tot -= delta
+        else:
+            # Mirror live mode: export growth charges, import growth discharges.
+            if exp > 0:
+                ch_tot += exp
+            if imp > 0:
+                dis_tot += imp
+        charge.append(round(ch_tot, 2))
+        discharge.append(round(dis_tot, 2))
+    return (charge, discharge)

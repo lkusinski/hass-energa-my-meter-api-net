@@ -13,6 +13,7 @@ from custom_components.energa_mobile.settlement import (
     days_to_settlement,
     deposit_valid_until,
     fifo_kwh_bank,
+    flow_history_series,
     is_export_prosumer,
     latest_official_rcem,
     month_to_date_forecast,
@@ -217,3 +218,33 @@ class TestFifoKwhBank:
         flows = [(2026, 9, 0.0, 100.0), (2027, 5, 0.0, 100.0)]
         bank, _ = fifo_kwh_bank(flows, 0.8, date(2026, 9, 3))
         assert bank == 80.0
+
+
+class TestFlowHistorySeries:
+    """v0.2.23: replay live accumulator semantics over hourly history."""
+
+    def test_old_system_mirrors_live(self):
+        from custom_components.energa_mobile.settlement import FlowAccumulator
+
+        hours = [(2.0, 5.0), (1.0, 0.0), (0.0, 3.0), (4.0, 1.0)]
+        ch, dis = flow_history_series(hours, 0.8, True)
+        acc = FlowAccumulator()
+        cum_e = cum_i = 0.0
+        for imp, exp in hours:
+            cum_e += exp
+            cum_i += imp
+            acc.update(cum_e * 0.8 - cum_i)
+        assert (ch[-1], dis[-1]) == (acc.charge, acc.discharge)
+        assert ch[-1] > 0 and dis[-1] > 0
+
+    def test_new_system_sums_growth(self):
+        ch, dis = flow_history_series([(2.0, 5.0), (1.0, 0.0)], 0.0, False)
+        assert ch == [5.0, 5.0]
+        assert dis == [2.0, 3.0]
+
+    def test_empty_and_invalid(self):
+        assert flow_history_series([], 0.8, True) == ([], [])
+        assert flow_history_series(None, 0.8, False) == ([], [])
+        # invalid row keeps totals, next valid row anchors (no delta yet)
+        ch, dis = flow_history_series([("x", None), (1.0, 2.0)], 0.8, True)
+        assert (ch, dis) == ([0.0, 0.0], [0.0, 0.0])

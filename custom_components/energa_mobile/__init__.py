@@ -35,7 +35,9 @@ from .api import (
 from .const import (
     CONF_DEVICE_TOKEN,
     CONF_PASSWORD,
+    CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
+    DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
     MAX_HOURLY_KWH,
     get_price_for_key,
@@ -611,6 +613,74 @@ async def _import_meter_history(
             )
 
         _LOGGER.info("History import complete for %s: %d points", serial, total_count)
+
+        # === v0.2.23: backfill bank flows (Energy battery history) ===
+        # Panel import rebuilds statistics; without this the battery stays
+        # 0/0 until live deltas accrue. Replays live accumulator semantics
+        # over the same hourly points (baselines cancel out in deltas, so
+        # raw sums are used). Live sensors seed from these sums on setup.
+        try:
+            from .settlement import flow_history_series
+
+            _by_hour: dict = {}
+
+            def _add_flow_points(points: list, _idx: int) -> None:
+                for _p in points:
+                    try:
+                        _v = float(_p["value"])
+                    except (ValueError, TypeError, KeyError):
+                        continue
+                    if _v < 0 or _v > MAX_HOURLY_KWH:
+                        continue
+                    _slot = _by_hour.setdefault(_p["dt"], [0.0, 0.0])
+                    _slot[_idx] += max(0.0, _v)
+
+            if has_zones:
+                _add_flow_points(import_1_points, 0)
+                _add_flow_points(import_2_points, 0)
+                _add_flow_points(export_1_points, 1)
+                _add_flow_points(export_2_points, 1)
+            else:
+                _add_flow_points(import_points, 0)
+                _add_flow_points(export_points, 0)
+            _ordered = sorted(_by_hour.items())
+            try:
+                _coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            except (ValueError, TypeError):
+                _coeff = DEFAULT_PROSUMER_COEFFICIENT
+            _ch, _dis = flow_history_series(
+                [(v[0], v[1]) for _, v in _ordered], _coeff, _coeff >= 0.7
+            )
+            from homeassistant.helpers import entity_registry as er
+
+            _reg = er.async_get(hass)
+            for _direction, _series in (("charge", _ch), ("discharge", _dis)):
+                _uid = f"energa_{meter_point_id}_bank_{_direction}"
+                _eid = _reg.async_get_entity_id("sensor", DOMAIN, _uid)
+                if not _eid:
+                    _LOGGER.debug("Flow backfill: entity missing for %s", _uid)
+                    continue
+                _stats = []
+                _prev = 0.0
+                for (_dt, _cum) in zip([d for d, _ in _ordered], _series):
+                    _stats.append({"start": _dt, "sum": _cum, "state": round(_cum - _prev, 3)})
+                    _prev = _cum
+                if not _stats:
+                    continue
+                _meta = StatisticMetaData(
+                    source="recorder",
+                    statistic_id=_eid,
+                    name=None,
+                    unit_of_measurement="kWh",
+                    has_mean=False,
+                    has_sum=True,
+                    mean_type=StatisticMeanType.NONE,
+                    unit_class="energy",
+                )
+                async_import_statistics(hass, _meta, _stats)
+                _LOGGER.info("Backfilled %d flow statistics for %s", len(_stats), _eid)
+        except Exception as err:
+            _LOGGER.debug("Flow history backfill skipped for %s: %s", serial, err)
 
     except Exception as err:
         _LOGGER.error("History import failed for %s: %s", serial, err, exc_info=True)

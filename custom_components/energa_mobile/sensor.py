@@ -1575,16 +1575,35 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._attr_device_info = device_info
 
     async def async_added_to_hass(self) -> None:
-        """Seed totals from the previous HA state (restart-safe)."""
+        """Seed totals from statistics (history backfill) or HA state."""
         await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is None or last.state in (None, "unknown", "unavailable", "none"):
-            return
+        candidates: list = []
+        # v0.2.23: history backfill writes flow statistics; prefer the last
+        # stats sum so live deltas continue without a reset spike.
         try:
-            value = float(last.state)
-        except (ValueError, TypeError):
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import (
+                get_last_statistics,
+            )
+
+            _stats = await get_instance(self.hass).async_add_executor_job(
+                get_last_statistics, self.hass, 1, self.entity_id, True, {"sum"}
+            )
+            _rows = _stats.get(self.entity_id) or []
+            if _rows and _rows[0].get("sum") is not None:
+                candidates.append(float(_rows[0]["sum"]))
+        except Exception:
+            pass
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "unknown", "unavailable", "none"):
+            try:
+                candidates.append(float(last.state))
+            except (ValueError, TypeError):
+                pass
+        if not candidates:
             return
         # Seed both sides; each mode reads only its own side.
+        value = max(candidates)
         self._flows.restore(value, value)
 
     def _nets(self):

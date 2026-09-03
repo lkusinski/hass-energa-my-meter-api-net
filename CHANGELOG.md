@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.23 (2026-09-04)
+
+### 🔋 Historia także dla baterii (koniec 0/0)
+- **Backfill przepływów:** Download History importuje też szeregi
+  `Ładowanie/Rozładowanie` (replay semantyki live z tych samych godzin;
+  encje rozwiązywane po `unique_id`, więc działa mimo suffixów w nazwach).
+- **Seedowanie bez skoku:** sensory startują z ostatniej sumy statystyk
+  (nie z 0), więc bateria nie robi resetu po imporcie/restarcie.
+- Poziom baterii = `Ładowanie − Rozładowanie` narasta od pierwszego
+  zaimportowanego dnia; stan magazynu (pełna wartość) pokazuje gauge
+  `Bank kWh/PLN`.
+
+### 🧪 Testy
+- **185 testów** (było 179): serie historyczne przepływów.
+
 ## v0.2.22 (2026-09-04)
 - Wyrównanie manifestu (0.2.21 miała manifest 0.2.20); kod = v0.2.21.
 
