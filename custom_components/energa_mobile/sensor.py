@@ -447,20 +447,6 @@ async def async_setup_entry(
                         serial=serial,
                     )
                 )
-                # v0.2.11 bill forecast (monthly net-billing view, needs history)
-                if entry.options.get(
-                    CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
-                ):
-                    sensors.append(
-                        EnergaBillForecastSensor(
-                            coordinator=coordinator,
-                            meter_id=meter_id,
-                            device_info=device_info,
-                            entry=entry,
-                            has_zones=has_zones,
-                            serial=serial,
-                        )
-                    )
             # v0.2.12 native bank flows (Energy battery, live stock):
             # charge/discharge totals from Bilans deltas (old) or
             # export/import deltas (new). Replaces bank_energii.yaml.
@@ -482,6 +468,24 @@ async def async_setup_entry(
                     meter_id=meter_id,
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
+                )
+            )
+
+        # === BILL FORECAST (v0.2.17: every meter, needs history) ===
+        # New net-billing: deposit lowers the payable. Old net-metering:
+        # warehouse coverage lowers the energy charge. Plain consumers:
+        # full import bill (export 0, cover 0) — same compute_bill math.
+        if entry.options.get(
+            CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
+        ):
+            sensors.append(
+                EnergaBillForecastSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    has_zones=has_zones,
                     serial=serial,
                 )
             )
@@ -2129,7 +2133,9 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             cover_d, cover_n = split_cover(
                 self._warehouse_cover(), imp_d, imp_n
             )
-            deposit_mtd = None  # warehouse coverage, not a PLN deposit
+            # No PLN deposit in the old system — coverage only.
+            # (None would auto-compute export×RCEm×1.23.)
+            deposit_mtd = 0.0
         else:
             cover_d, cover_n = 0.0, 0.0
             deposit_mtd = None  # computed inside compute_bill
@@ -2150,13 +2156,15 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             f_cover_d, f_cover_n = split_cover(
                 self._warehouse_cover(), f_imp_d, f_imp_n
             )
+            f_deposit = 0.0
         else:
             f_cover_d, f_cover_n = 0.0, 0.0
+            f_deposit = None
         try:
             bill_fc = compute_bill(
                 f_imp_d, f_imp_n, f_exp, rce, fees,
                 cover_day=f_cover_d, cover_night=f_cover_n,
-                deposit_pln=None,
+                deposit_pln=f_deposit,
             )
         except (ValueError, TypeError):
             bill_fc = None

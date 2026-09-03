@@ -175,3 +175,23 @@ class TestBillSensorWiring:
         assert res["sale_energy_day"] == 0.0
         assert res["sale_energy_night"] == 0.0
         assert abs(res["brutto"] - 156.33) / 156.33 < 0.01
+
+    def test_old_system_never_applies_deposit(self):
+        # Old net-metering with export must NOT get a PLN deposit:
+        # coverage only (deposit_pln=0.0, as the sensor passes).
+        fees = fees_from_options({})
+        day, night = split_cover(500.0, 100.0, 200.0)
+        res = compute_bill(100.0, 200.0, 500.0, 0.26288, fees,
+                           cover_day=day, cover_night=night,
+                           deposit_pln=0.0)
+        assert res["deposit"] == 0.0
+        assert res["do_zaplaty"] == res["brutto"]
+
+    def test_consumer_full_import_bill(self):
+        # G11 consumer (G11 bez fotowoltaiki): no export, no cover — pays everything.
+        fees = fees_from_options({})
+        res = compute_bill(150.0, 0.0, 0.0, 0.26288, fees, deposit_pln=0.0)
+        assert res["sale_energy_day"] == round(150.0 * 0.6107, 2)
+        assert res["deposit"] == 0.0
+        assert res["do_zaplaty"] == res["brutto"]
+        assert res["brutto"] > res["netto"]  # VAT included

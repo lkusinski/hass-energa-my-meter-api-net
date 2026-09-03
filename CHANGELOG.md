@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.17 (2026-09-03)
+
+### 🧾 Prognoza dla wszystkich liczników
+- **`Prognoza Rachunku` dla każdego licznika** (dotąd tylko nowe
+  net-billing): stary net-metering (pokrycie z magazynu, bez depozytu PLN)
+  i zwykli odbiorcy (pełny rachunek z samego importu) — ta sama matematyka
+  `compute_bill`, osobny sensor per licznik.
+- **Fix:** stary system dostawałby fikcyjny depozyt
+  (`export×RCEm×1.23`) — teraz jawne `deposit_pln=0.0`.
+
+### 🧪 Testy
+- **165 testów** (było 163): brak depozytu w starym systemie, rachunek
+  konsumenta G11).
+
 ## v0.2.16 (2026-09-03)
 
 ### 🐛 Bug Fixes (wykryte na żywym lab2)
