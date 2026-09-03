@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.2.14 (2026-09-03)
+
+### 🧾 Pełna prognoza rachunku brutto (faktura, nie tylko energia)
+- **`Prognoza Rachunku` liczona jak faktura:** stan = prognozowana dopłata
+  na koniec miesiąca (`do_zapłaty`), MTD z przepływów + liniowa ekstrapolacja
+  i ponowna wycena (`tariff.compute_bill`: sprzedaż D/N + akcyza 5 PLN/MWh +
+  handlowa + dystrybucja zmienna/stała/jakościowa/OZE/kogeneracyjna/mocowa +
+  VAT 23% − rozliczenie prosumenta). Atrybuty: pełny rozkład MTD i prognozy
+  (`mtd_brutto`, `mtd_netto`, `mtd_vat`, `mtd_deposit`, `mtd_do_zaplaty`,
+  `forecast_brutto`, `forecast_do_zaplaty`) + pokrycie magazynem
+  (`cover_day/night`) dla starego systemu. Stare atrybuty energetyczne
+  (`mtd_net_pln`, `forecast_pln`) zostają dla kompatybilności.
+- **Stary net-metering:** pobór pokryty magazynem (do wysokości Banku kWh,
+  D/N proporcjonalnie) = 0 za energię i zmienną dystrybucję/jakościową;
+  stałe, akcyza i OZE/kogeneracyjna zawsze płatne (jak faktura 05–06.2026:
+  energia `0`, brutto `156.33` ✓).
+- **Nowe opcje (`Options → Ceny`):** 12 nadpisań stawek taryfy
+  (`tariff_energy_day/night`, `excise`, `trade_fee`, `abonament`,
+  `grid_fixed/var_day/var_night`, `quality`, `oze`, `cogen`, `capacity`) —
+  domyślne G12W z faktur; parzystość defaultów pilnowana testem.
+- **Wielu liczników czytelniej:** `Bilans`, `Bank kWh/PLN`, `Ładowanie`,
+  `Rozładowanie`, `Data pierwszego odczytu`, `RCEm auto` i `Prognoza`
+  mają numer seryjny w nazwie (3 konta w labie miały identyczne nazwy).
+
+### 🧪 Testy
+- **157 testów** (było 145): +12 (`fees_from_options`, `split_cover`,
+  parzystość defaultów `const`↔`tariff`, matematyka sensora na fakturach
+  07 i 05–06.2026).
+
 ## v0.2.13 (2026-09-03)
 
 ### 🐛 Bug Fixes (zweryfikowane na labie)

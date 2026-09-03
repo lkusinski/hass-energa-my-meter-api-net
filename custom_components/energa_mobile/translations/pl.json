@@ -62,7 +62,19 @@
                     "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
                     "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
                     "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
-                    "use_rolling_365d": "Stary system: kroczący bank 365d FIFO ze statystyk (wymaga historii)"
+                    "use_rolling_365d": "Stary system: kroczący bank 365d FIFO ze statystyk (wymaga historii)",
+                    "tariff_energy_day": "Taryfa: sprzedaż energii dzień L1 [PLN/kWh]",
+                    "tariff_energy_night": "Taryfa: sprzedaż energii noc L2 [PLN/kWh]",
+                    "tariff_excise_mwh": "Taryfa: akcyza [PLN/MWh poboru]",
+                    "tariff_trade_fee": "Taryfa: opłata handlowa [PLN/mies.]",
+                    "tariff_abonament": "Taryfa: opłata abonamentowa [PLN/mies.]",
+                    "tariff_grid_fixed": "Taryfa: sieciowa stała [PLN/mies.]",
+                    "tariff_grid_var_day": "Taryfa: sieciowa zmienna dzień [PLN/kWh]",
+                    "tariff_grid_var_night": "Taryfa: sieciowa zmienna noc [PLN/kWh]",
+                    "tariff_quality": "Taryfa: opłata jakościowa [PLN/kWh]",
+                    "tariff_oze": "Taryfa: opłata OZE [PLN/kWh]",
+                    "tariff_cogen": "Taryfa: opłata kogeneracyjna [PLN/kWh]",
+                    "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.]"
                 }
             },
             "history": {

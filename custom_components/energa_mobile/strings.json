@@ -62,7 +62,19 @@
                     "rce_auto_fetch": "Auto-fetch RCEm from PSE API every 24h",
                     "settlement_date": "Annual settlement anniversary YYYY-MM-DD (old system, e.g. invoice date)",
                     "enable_auto_settlement": "Show settlement/expiry calibration attributes",
-                    "use_rolling_365d": "Old system: rolling 365-day FIFO bank from statistics (needs history)"
+                    "use_rolling_365d": "Old system: rolling 365-day FIFO bank from statistics (needs history)",
+                    "tariff_energy_day": "Tariff: sale energy day L1 [PLN/kWh]",
+                    "tariff_energy_night": "Tariff: sale energy night L2 [PLN/kWh]",
+                    "tariff_excise_mwh": "Tariff: excise duty [PLN/MWh of import]",
+                    "tariff_trade_fee": "Tariff: monthly trade fee [PLN]",
+                    "tariff_abonament": "Tariff: subscription fee [PLN/month]",
+                    "tariff_grid_fixed": "Tariff: fixed grid fee [PLN/month]",
+                    "tariff_grid_var_day": "Tariff: variable grid day [PLN/kWh]",
+                    "tariff_grid_var_night": "Tariff: variable grid night [PLN/kWh]",
+                    "tariff_quality": "Tariff: quality fee [PLN/kWh]",
+                    "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
+                    "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
+                    "tariff_capacity": "Tariff: capacity fee [PLN/month]"
                 }
             },
             "history": {

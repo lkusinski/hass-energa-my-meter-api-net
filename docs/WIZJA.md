@@ -1,8 +1,10 @@
 # Wizja i Architektura — Bank na żywo + Prognoza rachunku
 
-**Status:** cel docelowy (nie zaimplementowane). Stan na 2026-09-03: integracja `v0.2.11`
-ma natywny Bank (kWh/PLN, weryfikacja fakturowa w `docs/BANK.md`) i zalążek
-`Prognozy Rachunku` (tylko energia czynna). Ten dokument definiuje dokąd zmierzamy.
+**Status:** `v0.2.14` dowozi oba cele (przepływy baterii z `v0.2.12/13` +
+pełny rachunek brutto poniżej). Stan na 2026-09-03: integracja `v0.2.14`
+ma natywny Bank (kWh/PLN, weryfikacja fakturowa w `docs/BANK.md`), natywne
+przepływy baterii i `Prognozę Rachunku` liczoną jak faktura. Do zrobienia:
+weryfikacja na labie + migracja prod.
 
 ## Cel 1 — Magazyn na żywo w Panelu Energia
 
@@ -63,14 +65,15 @@ dystrybucja = `343.51` netto → `422.52` brutto − `147.44` depozyt + `0.08`
 = `275.16` ✓); G12W-stare 05–06 (`127.10` netto → `156.33` brutto ✓,
 energia `0` bo z magazynu).
 
-**Architektura docelowa (v0.2.13):** moduł `tariff.py` — tabela opłat
+**Architektura (v0.2.14, zaimplementowane):** moduł `tariff.py` — tabela opłat
 (per taryfa G12W/G11, wartości domyślne z faktur + edycja w `Options`):
 
-- `EnergaBillSensor` (`Prognoza Rachunku Brutto`, PLN, reset miesięczny):
-  stan = koszt MTD brutto; atrybuty = pełny rozkład jak sekcje faktury
-  (`sprzedaz_energia`, `akcyza`, `oplata_handlowa`, `dystrybucja_zmienna`,
-  `oplaty_stale`, `vat`, `depozyt_pokrycie`, `do_zaplaty_forecast`
-  z ekstrapolacją liniową na koniec miesiąca).
+- `EnergaBillForecastSensor` (`Prognoza Rachunku`, PLN): stan = prognozowana
+  dopłata na koniec miesiąca (`do_zapłaty`); atrybuty = pełny rozkład MTD
+  i prognozy jak sekcje faktury (`mtd_sale_total`, `mtd_distr_total`,
+  `mtd_netto`, `mtd_vat`, `mtd_brutto`, `mtd_deposit`, `mtd_do_zaplaty`,
+  `forecast_brutto`, `forecast_do_zaplaty`, `cover_day/night`)
+  z ekstrapolacją liniową przepływów na koniec miesiąca.
 - Stary system: pobór do wysokości Banku = koszt energii `0`
   (dystrybucja i stałe płatne zawsze — jak faktura Wiśniowej).
 - Nowy system: depozyt MTD (`export×RCEm×1.23`) pomniejsza tylko energię
@@ -87,9 +90,11 @@ sprzedawcy vs delty licznika + zmiany cen w trakcie miesiąca).
 - `v0.2.13` — fix laboratoryjny `v0.2.12`: `RestoreEntity` dla przepływów
   (odtwarzanie stanu po restarcie) + usunięcie martwej linii
   (zweryfikowane na labie: 6× `0.0` bez `Traceback`).
-- `v0.2.13` — fix laboratoryjny `v0.2.12` (powyżej).
-- `v0.2.14` — `tariff.py` + pełna prognoza rachunku brutto z rozkładem.
-- Potem — migracja prod na fork, usunięcie `bank_energii.yaml`.
+- `v0.2.14` — `tariff.py` + pełna prognoza rachunku brutto z rozkładem
+  (stan = prognozowana dopłata; MTD + ekstrapolacja, pokrycie magazynem
+  dla starego systemu, 12 nadpisań stawek w `Options`, 157 testów).
+- Potem — weryfikacja `v0.2.14` na labie, migracja prod na fork,
+  usunięcie `bank_energii.yaml`.
 
 ## Pytania otwarte
 

@@ -69,6 +69,7 @@ from .settlement import (
     parse_settlement_date,
     rolling_kwh_bank,
 )
+from .tariff import compute_bill, fees_from_options, split_cover
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -399,6 +400,7 @@ async def async_setup_entry(
                     device_info=device_info,
                     entry=entry,
                     has_zones=has_zones,
+                    serial=serial,
                 )
             )
 
@@ -419,6 +421,7 @@ async def async_setup_entry(
                         device_info=device_info,
                         entry=entry,
                         has_zones=has_zones,
+                        serial=serial,
                     )
                 )
             else:
@@ -429,6 +432,7 @@ async def async_setup_entry(
                         device_info=device_info,
                         entry=entry,
                         has_zones=has_zones,
+                        serial=serial,
                     )
                 )
                 # RCEm auto sensor only for new system (net-billing)
@@ -439,6 +443,7 @@ async def async_setup_entry(
                         device_info=device_info,
                         entry=entry,
                         api=api,
+                        serial=serial,
                     )
                 )
                 # v0.2.11 bill forecast (monthly net-billing view, needs history)
@@ -452,6 +457,7 @@ async def async_setup_entry(
                             device_info=device_info,
                             entry=entry,
                             has_zones=has_zones,
+                            serial=serial,
                         )
                     )
             # v0.2.12 native bank flows (Energy battery, live stock):
@@ -466,6 +472,7 @@ async def async_setup_entry(
                         entry=entry,
                         has_zones=has_zones,
                         direction=direction,
+                        serial=serial,
                     )
                 )
             sensors.append(
@@ -474,6 +481,7 @@ async def async_setup_entry(
                     meter_id=meter_id,
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
 
@@ -1007,6 +1015,7 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         meter_id: str,
         device_info: DeviceInfo,
         entry: ConfigEntry,
+        serial: str = "",
         **kwargs,
     ) -> None:
         """Initialize prosumer balance sensor."""
@@ -1015,8 +1024,8 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
 
-        # Entity attributes
-        self._attr_name = "Bilans Prosumencki"
+        # Entity attributes (serial in name: several accounts/meters coexist)
+        self._attr_name = f"Bilans Prosumencki ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_prosumer_balance"
         self._attr_has_entity_name = True
 
@@ -1133,12 +1142,12 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
     Uses per-zone meter totals if G12W. 1.23 NOT applied (old system).
     """
 
-    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = "Bank Wirtualny kWh"
+        self._attr_name = f"Bank Wirtualny kWh ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_bank_kwh"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.TOTAL
@@ -1267,12 +1276,12 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
     RCE fetched from PSE or manual input, ×1.23 (VAT on energy sold).
     """
 
-    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = "Bank Wirtualny PLN"
+        self._attr_name = f"Bank Wirtualny PLN ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_bank_pln"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.TOTAL
@@ -1409,7 +1418,7 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     def __init__(
         self, coordinator, meter_id: str, device_info: DeviceInfo,
         entry: ConfigEntry, has_zones: bool = False,
-        direction: str = "charge",
+        direction: str = "charge", serial: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
@@ -1418,8 +1427,9 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._direction = direction
         self._flows = FlowAccumulator()
         is_charge = direction == "charge"
+        label = serial or meter_id
         self._attr_name = (
-            "Bank Ładowanie" if is_charge else "Bank Rozładowanie"
+            f"Bank Ładowanie ({label})" if is_charge else f"Bank Rozładowanie ({label})"
         )
         self._attr_unique_id = f"energa_{meter_id}_bank_{direction}"
         self._attr_has_entity_name = True
@@ -1510,11 +1520,11 @@ class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
     Can be manually triggered via button.energa_xxx_wykryj_pierwszy_odczyt.
     """
 
-    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
-        self._attr_name = "Data pierwszego odczytu"
+        self._attr_name = f"Data pierwszego odczytu ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_first_data_date"
         self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.DATE
@@ -1886,12 +1896,12 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
     in _async_update_data. Falls back to manual value if fetch fails.
     """
 
-    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, api) -> None:
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, api, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
         self._api = api
-        self._attr_name = "RCEm (auto)"
+        self._attr_name = f"RCEm auto ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_rcem_auto"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -1942,21 +1952,29 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
 
 
 class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
-    """Month-end bill forecast for new prosumer (net-billing, v0.2.11).
+    """Month-end bill forecast as a full invoice (v0.2.14).
 
-    mtd_net = export_mtd×RCE×1.23 - import_mtd×cena_per_strefa from recorder
-    statistics; forecast = mtd_net/days_elapsed×days_in_month (linear).
-    Negative = month closes with payment due; positive = deposit surplus.
-    Deposit covers energy charges only (not distribution/fixed fees).
+    MTD flows come from recorder statistics (same `_mtd` cache as v0.2.11);
+    the full bill (sale + excise + trade fee + distribution + VAT 23% −
+    prosumer settlement) is computed with `tariff.compute_bill` and
+    linearly extrapolated to month end.
+
+    - New net-billing: deposit = export×RCEm×1.23 lowers the payable.
+    - Old net-metering: import covered by the virtual warehouse (up to the
+      current Bank kWh, split day/night proportionally) pays no energy
+      charge and no variable distribution/quality fee — fixed fees,
+      excise and OZE/cogen always stay (as on the invoice).
+    - State = forecast payable (do_zapłaty) at month end; MTD bill and the
+      legacy energy-only numbers stay in attributes for compatibility.
     Created only when enable_auto_settlement is on (needs history).
     """
 
-    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False) -> None:
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = "Prognoza Rachunku"
+        self._attr_name = f"Prognoza Rachunku ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_bill_forecast"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -1971,6 +1989,56 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         imp = mtd.get("import", mtd.get("import_1", 0) + mtd.get("import_2", 0))
         exp = mtd.get("export", mtd.get("export_1", 0) + mtd.get("export_2", 0))
         return float(imp), float(exp)
+
+    def _mtd_zone_flows(self):
+        """(import_day, import_night, export_total) MTD per zone."""
+        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id), {})
+        if self._has_zones:
+            imp_d = float(mtd.get("import_1", 0))
+            imp_n = float(mtd.get("import_2", 0))
+            exp = float(mtd.get("export_1", 0)) + float(mtd.get("export_2", 0))
+            if not exp:
+                exp = float(mtd.get("export", 0))
+        else:
+            imp_d = float(mtd.get("import", 0))
+            imp_n = 0.0
+            exp = float(mtd.get("export", 0))
+        return imp_d, imp_n, exp
+
+    def _is_old_system(self) -> bool:
+        """Old net-metering (coeff >= 0.7) vs new net-billing."""
+        try:
+            coeff = float(
+                self._entry.options.get(
+                    CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                )
+            )
+        except (ValueError, TypeError):
+            coeff = DEFAULT_PROSUMER_COEFFICIENT
+        return coeff >= 0.7
+
+    def _warehouse_cover(self):
+        """Current Bank kWh available to cover this month's import.
+
+        Same baseline math as EnergaBankKwhSensor (lifetime mode): only
+        energy introduced within the trailing 12 months really counts
+        (FIFO), so this is an upper-bound approximation — the exact
+        expiry schedule lives with the seller, not in the meter totals.
+        """
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return 0.0
+        opts = self._entry.options
+        try:
+            bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+            be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+            coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        except (ValueError, TypeError):
+            return 0.0
+        net_imp = float(totals.get("import", 0)) - bi
+        net_exp = float(totals.get("export", 0)) - be
+        return max(0.0, net_exp * coeff - net_imp) + max(0.0, initial)
 
     def _rce(self) -> float:
         opts = self._entry.options
@@ -1987,6 +2055,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         if not mtd:
             return None
         imp_mtd, exp_mtd = self._mtd_parts()
+        imp_d, imp_n, exp_tot = self._mtd_zone_flows()
         opts = self._entry.options
         mid = self._meter_id
         if self._has_zones:
@@ -2005,6 +2074,46 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         forecast = month_to_date_forecast(
             mtd_net, today.day, _cal.monthrange(today.year, today.month)[1]
         )
+
+        # === v0.2.14 full-bill math (invoice reconstruction) ===
+        fees = fees_from_options(opts)
+        old_system = self._is_old_system()
+        if old_system:
+            cover_d, cover_n = split_cover(
+                self._warehouse_cover(), imp_d, imp_n
+            )
+            deposit_mtd = None  # warehouse coverage, not a PLN deposit
+        else:
+            cover_d, cover_n = 0.0, 0.0
+            deposit_mtd = None  # computed inside compute_bill
+        try:
+            bill_mtd = compute_bill(
+                imp_d, imp_n, exp_tot, rce, fees,
+                cover_day=cover_d, cover_night=cover_n,
+                deposit_pln=deposit_mtd,
+            )
+        except (ValueError, TypeError):
+            bill_mtd = None
+        # Linear extrapolation of flows to month end, then re-price.
+        days_in_month = _cal.monthrange(today.year, today.month)[1]
+        elapsed = min(max(today.day, 1), days_in_month)
+        factor = days_in_month / elapsed
+        f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
+        if old_system:
+            f_cover_d, f_cover_n = split_cover(
+                self._warehouse_cover(), f_imp_d, f_imp_n
+            )
+        else:
+            f_cover_d, f_cover_n = 0.0, 0.0
+        try:
+            bill_fc = compute_bill(
+                f_imp_d, f_imp_n, f_exp, rce, fees,
+                cover_day=f_cover_d, cover_night=f_cover_n,
+                deposit_pln=None,
+            )
+        except (ValueError, TypeError):
+            bill_fc = None
+
         self._attr_extra_state_attributes = {
             "mtd_import_kwh": round(imp_mtd, 2),
             "mtd_export_kwh": round(exp_mtd, 2),
@@ -2016,6 +2125,29 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             "formula": "mtd_net/days_elapsed*days_in_month; mtd_net=export×RCE×1.23-import×cena",
             "note": "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)",
         }
+        if bill_mtd is not None and bill_fc is not None:
+            self._attr_extra_state_attributes.update({
+                "system": "stare net-metering (magazyn kWh)"
+                if old_system else "nowe net-billing (depozyt PLN)",
+                "mtd_import_day_kwh": round(imp_d, 2),
+                "mtd_import_night_kwh": round(imp_n, 2),
+                "mtd_sale_total_pln": bill_mtd["sale_total"],
+                "mtd_distr_total_pln": bill_mtd["distr_total"],
+                "mtd_netto_pln": bill_mtd["netto"],
+                "mtd_vat_pln": bill_mtd["vat"],
+                "mtd_brutto_pln": bill_mtd["brutto"],
+                "mtd_deposit_pln": bill_mtd["deposit"],
+                "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
+                "forecast_brutto_pln": bill_fc["brutto"],
+                "forecast_do_zaplaty_pln": bill_fc["do_zaplaty"],
+                "cover_day_kwh": cover_d,
+                "cover_night_kwh": cover_n,
+                "fee_note": "Stawki z Options (taryfa) lub domyślne G12W z faktur; "
+                "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
+                "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "
+                "godzinowo — przybliżenie ~1% (kWh) / ~13% (depozyt PLN)",
+            })
+            return bill_fc["do_zaplaty"]
         return forecast
 
     @property

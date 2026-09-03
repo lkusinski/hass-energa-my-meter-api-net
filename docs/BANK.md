@@ -105,6 +105,14 @@ cards:
   nie zwykłą średnią RCE. Reguła: przed 11. dniem miesiąca obowiązuje M-2, po 11. — M-1.
   Tabela: `pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej`.
 
+## Prognoza rachunku brutto (v0.2.14)
+
+`sensor.energa_<nr-licznika>_bill_forecast` (`Prognoza Rachunku`) liczy jak
+faktura: sprzedaż D/N + akcyza + handlowa + dystrybucja + VAT 23% −
+rozliczenie prosumenta (depozyt / pokrycie magazynem). Stan = prognozowana
+dopłata na koniec miesiąca, atrybuty = pełny rozkład MTD i prognozy.
+Stawki w `Options → Ceny` (`tariff_*`, domyślne G12W z faktur 2026).
+
 ## Weryfikacja fakturowa 2026-09-04 (prod read-only vs lab)
 
 * Faktura G12W-stare 01.05–30.06: magazyn przed `0/0`, po `752+606=1358`;

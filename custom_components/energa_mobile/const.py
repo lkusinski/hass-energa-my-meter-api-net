@@ -26,6 +26,35 @@ DEFAULT_BANK_RCE_PRICE = 0.26288  # RCEm for 07.2026, update monthly via PSE
 DEFAULT_BANK_INITIAL_KWH = 0.0
 DEFAULT_BANK_INITIAL_PLN = 0.0
 
+# Tariff fee table overrides for the full-bill forecast (v0.2.14).
+# Keys match tariff.py _OPTION_KEY_MAP ("tariff_*"); defaults mirror
+# tariff.G12W_DEFAULT_FEES (parity covered by tests/test_tariff.py).
+CONF_TARIFF_ENERGY_DAY = "tariff_energy_day"
+CONF_TARIFF_ENERGY_NIGHT = "tariff_energy_night"
+CONF_TARIFF_EXCISE_MWH = "tariff_excise_mwh"
+CONF_TARIFF_TRADE_FEE = "tariff_trade_fee"
+CONF_TARIFF_ABONAMENT = "tariff_abonament"
+CONF_TARIFF_GRID_FIXED = "tariff_grid_fixed"
+CONF_TARIFF_GRID_VAR_DAY = "tariff_grid_var_day"
+CONF_TARIFF_GRID_VAR_NIGHT = "tariff_grid_var_night"
+CONF_TARIFF_QUALITY = "tariff_quality"
+CONF_TARIFF_OZE = "tariff_oze"
+CONF_TARIFF_COGEN = "tariff_cogen"
+CONF_TARIFF_CAPACITY = "tariff_capacity"
+
+DEFAULT_TARIFF_ENERGY_DAY = 0.6107
+DEFAULT_TARIFF_ENERGY_NIGHT = 0.3990
+DEFAULT_TARIFF_EXCISE_MWH = 5.00
+DEFAULT_TARIFF_TRADE_FEE = 0.0
+DEFAULT_TARIFF_ABONAMENT = 0.74
+DEFAULT_TARIFF_GRID_FIXED = 20.17
+DEFAULT_TARIFF_GRID_VAR_DAY = 0.4017
+DEFAULT_TARIFF_GRID_VAR_NIGHT = 0.0851
+DEFAULT_TARIFF_QUALITY = 0.0332
+DEFAULT_TARIFF_OZE = 0.0073
+DEFAULT_TARIFF_COGEN = 0.0030
+DEFAULT_TARIFF_CAPACITY = 24.05
+
 # API endpoints
 BASE_URL = "https://api-mojlicznik.energa-operator.pl/dp"
 LOGIN_ENDPOINT = "/apihelper/UserLogin"

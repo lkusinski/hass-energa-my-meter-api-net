@@ -29,6 +29,18 @@ from .const import (
     CONF_PROSUMER_COEFFICIENT,
     CONF_RCE_AUTO_FETCH,
     CONF_SETTLEMENT_DATE,
+    CONF_TARIFF_ABONAMENT,
+    CONF_TARIFF_CAPACITY,
+    CONF_TARIFF_COGEN,
+    CONF_TARIFF_ENERGY_DAY,
+    CONF_TARIFF_ENERGY_NIGHT,
+    CONF_TARIFF_EXCISE_MWH,
+    CONF_TARIFF_GRID_FIXED,
+    CONF_TARIFF_GRID_VAR_DAY,
+    CONF_TARIFF_GRID_VAR_NIGHT,
+    CONF_TARIFF_OZE,
+    CONF_TARIFF_QUALITY,
+    CONF_TARIFF_TRADE_FEE,
     CONF_USERNAME,
     CONF_USE_ROLLING_365D,
     DEFAULT_BALANCE_BASELINE,
@@ -43,11 +55,49 @@ from .const import (
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
     DEFAULT_SETTLEMENT_DATE,
+    DEFAULT_TARIFF_ABONAMENT,
+    DEFAULT_TARIFF_CAPACITY,
+    DEFAULT_TARIFF_COGEN,
+    DEFAULT_TARIFF_ENERGY_DAY,
+    DEFAULT_TARIFF_ENERGY_NIGHT,
+    DEFAULT_TARIFF_EXCISE_MWH,
+    DEFAULT_TARIFF_GRID_FIXED,
+    DEFAULT_TARIFF_GRID_VAR_DAY,
+    DEFAULT_TARIFF_GRID_VAR_NIGHT,
+    DEFAULT_TARIFF_OZE,
+    DEFAULT_TARIFF_QUALITY,
+    DEFAULT_TARIFF_TRADE_FEE,
     DEFAULT_USE_ROLLING_365D,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _tariff_fee_schema(options: dict) -> dict:
+    """Optional tariff fee overrides for the full-bill forecast (v0.2.14).
+
+    Shared by the G12W and G11 price forms. Defaults are the G12W invoice
+    values; an empty/unchanged field keeps the default via fees_from_options.
+    """
+    defaults = {
+        CONF_TARIFF_ENERGY_DAY: DEFAULT_TARIFF_ENERGY_DAY,
+        CONF_TARIFF_ENERGY_NIGHT: DEFAULT_TARIFF_ENERGY_NIGHT,
+        CONF_TARIFF_EXCISE_MWH: DEFAULT_TARIFF_EXCISE_MWH,
+        CONF_TARIFF_TRADE_FEE: DEFAULT_TARIFF_TRADE_FEE,
+        CONF_TARIFF_ABONAMENT: DEFAULT_TARIFF_ABONAMENT,
+        CONF_TARIFF_GRID_FIXED: DEFAULT_TARIFF_GRID_FIXED,
+        CONF_TARIFF_GRID_VAR_DAY: DEFAULT_TARIFF_GRID_VAR_DAY,
+        CONF_TARIFF_GRID_VAR_NIGHT: DEFAULT_TARIFF_GRID_VAR_NIGHT,
+        CONF_TARIFF_QUALITY: DEFAULT_TARIFF_QUALITY,
+        CONF_TARIFF_OZE: DEFAULT_TARIFF_OZE,
+        CONF_TARIFF_COGEN: DEFAULT_TARIFF_COGEN,
+        CONF_TARIFF_CAPACITY: DEFAULT_TARIFF_CAPACITY,
+    }
+    return {
+        vol.Optional(key, default=options.get(key, default)): vol.Coerce(float)
+        for key, default in defaults.items()
+    }
 
 
 class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -412,6 +462,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
+                        **_tariff_fee_schema(self._config_entry.options),
                     }
                 ),
             )
@@ -466,6 +517,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
+                        **_tariff_fee_schema(self._config_entry.options),
                     }
                 ),
             )
