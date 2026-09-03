@@ -25,15 +25,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     entities = []
     for meter in meters:
-        meter_id = meter.get("meter_serial", meter["meter_point_id"])
+        point_id = meter["meter_point_id"]
+        serial = meter.get("meter_serial", point_id)
         has_zones = meter.get("zone_count", 1) > 1
         device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(meter_id))},
-            name=meter.get("address") or f"Energa {meter_id}",
+            identifiers={(DOMAIN, str(serial))},
+            name=meter.get("address") or f"Energa {serial}",
             manufacturer="Energa Operator",
             model=meter.get("tariff") or "G12W" if has_zones else "G11",
         )
-        entities.append(EnergaDetectFirstDataButton(meter_id, device_info, entry, api))
+        entities.append(EnergaDetectFirstDataButton(point_id, device_info, entry, api))
 
     async_add_entities(entities)
 

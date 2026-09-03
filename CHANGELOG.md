@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.10 (2026-09-03)
+
+### ✨ Nowe / Ulepszenia
+- **Bank — łatwa widoczność:** `Bank Kwh/Pln` rozbudowane atrybuty (`formula`, `per_strefa_note`, `price_1/2`, `import_1/2` `L1/L2`) + `docs/BANK.md` z gotowym `Lovelace vertical-stack` (gauge + entities) dla Wiśniowej `1358 kWh` i Agrestowej `0.00 PLN`. `bank_energii.yaml` do usunięcia — bank natywnie.
+- **RCE auto-fetch naprawiony:** `EnergaCoordinator` cache `24h` (`_rce_cache/_rce_last_fetch` w `_async_update_data`), `EnergaRceSensor` czyta z coordinatora (`rce_source: PSE auto/manual`), `Bank PLN` używa cache gdy `rce_auto_fetch`. Brak osobnych sesji per sensor.
+- **Bank tworzony tylko dla prosumenta:** `if meter.get("obis_minus")` — konsumenci bez produkcji nie dostają `Bank kWh/PLN` ani `RCEm` (na życzenie: nie zaśmieca encji).
+
+### 🐛 Bug Fixes
+- **`async_find_first_data_date` hierarchia `today-730d`:** było `2020→end_year` podwójna pętla + `07-01` probe zwracało `2025-01-01` zamiast `2024-09-02` (`api.py:293`). Teraz `window_start = today-730d` clamp `activation_date`, `start_year = window_start.year`, `~14 req` `0.7s`, probe `has_data` sprawdza `>0` per `zones`. Zgodne z `POSZLAKI_I_PLAN.md:9` (API 2 lata).
+- **Bank PLN cena RCE:** preferuje `coordinator._rce_cache` gdy `auto_fetch`, fallback `bank_rce_price`.
+- **`button.py` meter_id:** `Wykryj pierwszy odczyt` przekazywał `meter_serial` do `async_find_first_data_date` oczekującego `meter_point_id` — poprawiono na `point_id` (dla kont multi-meter).
+- **`has_data_for_day` fałszywy pozytyw:** `bool(data["import"])` zwracało `True` dla dnia z listą `24×0.0` — teraz `any(v>0)` per `zones`.
+
 ## v0.2.9 (2026-09-03)
 
 ### 🐛 Bug Fixes

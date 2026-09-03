@@ -535,6 +535,9 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._hourly_stats: dict = {}  # {meter_id: {"import_1": [...], "import_2": [...], ...}}
         self._pre_fetched_stats: dict = {}  # {entity_id: {"sum": x, "start": dt}}
         self._meter_totals: dict = {}  # {meter_id: {"import_1": x, "import_2": y, ...}}
+        self._rce_cache: float | None = None
+        self._rce_last_fetch = None
+        self._rce_fetch_lock = False
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -584,6 +587,29 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         "Failed to fetch hourly stats for %s: %s", meter_id, err
                     )
                     self._hourly_stats[meter_id] = {"import": [], "export": []}
+
+            # === RCE auto-fetch (net-billing, 24h cache) ===
+            try:
+                from datetime import datetime as _dt
+                opts = self.entry.options
+                if opts.get("rce_auto_fetch"):
+                    need_fetch = False
+                    if self._rce_cache is None:
+                        need_fetch = True
+                    elif self._rce_last_fetch and (_dt.now() - self._rce_last_fetch).total_seconds() > 22 * 3600:
+                        need_fetch = True
+                    if need_fetch and not self._rce_fetch_lock:
+                        self._rce_fetch_lock = True
+                        try:
+                            rcem = await self.api.async_fetch_rcem()
+                            if rcem is not None:
+                                self._rce_cache = rcem
+                                self._rce_last_fetch = _dt.now()
+                                _LOGGER.info("Coordinator RCE auto-fetched: %.5f PLN/kWh", rcem)
+                        finally:
+                            self._rce_fetch_lock = False
+            except Exception as rce_err:
+                _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
 
             return active_meters
 
@@ -1006,14 +1032,26 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             mid, net_imp, net_exp, coeff, bilans, initial, bank,
         )
 
-        self._attr_extra_state_attributes = {
+        # Build rich attributes for Lovelace visibility
+        attrs = {
             "net_import_kwh": round(net_imp, 2),
             "net_export_kwh": round(net_exp, 2),
             "coefficient": coeff,
             "bilans_kwh": round(bilans, 2),
             "initial_kwh": initial,
-            "source": "net-metering (old system)",
+            "source": "net-metering 0.8 roczny (old) — faktury FES",
+            "formula": "max(0, (export-baseline)*coeff - (import-baseline)) + initial",
+            "unit": "kWh — ile energii możesz jeszcze odebrać za darmo",
         }
+        if self._has_zones:
+            attrs.update({
+                "import_1": round(float(totals.get("import_1", 0)), 2),
+                "import_2": round(float(totals.get("import_2", 0)), 2),
+                "export_1": round(float(totals.get("export_1", 0)), 2),
+                "export_2": round(float(totals.get("export_2", 0)), 2),
+                "per_strefa_note": "L1 droga / L2 tania — bank łączny, per-strefa w atrybutach",
+            })
+        self._attr_extra_state_attributes = attrs
 
         return round(bank, 2)
 
@@ -1049,7 +1087,12 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         opts = self._entry.options
         mid = self._meter_id
 
-        rce = float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+        # Prefer coordinator RCE cache if auto-fetch enabled
+        coord_rce = getattr(self.coordinator, "_rce_cache", None)
+        if opts.get(CONF_RCE_AUTO_FETCH) and coord_rce is not None:
+            rce = float(coord_rce)
+        else:
+            rce = float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
         initial = float(opts.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN))
 
         bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
@@ -1094,16 +1137,31 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             mid, net_imp_cost, net_exp, rce, comp_export, initial, bank,
         )
 
-        self._attr_extra_state_attributes = {
+        rce_source = "PSE auto" if getattr(self.coordinator, "_rce_cache", None) is not None and opts.get(CONF_RCE_AUTO_FETCH) else "manual"
+        attrs = {
             "net_import_kwh": round(net_imp, 2) if not self._has_zones else round(imp1 - bi1 + imp2 - bi2, 2),
             "net_export_kwh": round(net_exp, 2),
             "rce_price": rce,
+            "rce_source": rce_source,
             "vat_multiplier": 1.23,
             "compensation_export_pln": round(comp_export, 2),
             "import_cost_pln": round(net_imp_cost, 2),
             "initial_pln": initial,
-            "source": "net-billing (new system)",
+            "source": "net-billing RCE×1.23 miesięczny (nowy) — faktura G12W nowe zasady",
+            "formula": "initial + export×RCE×1.23 - import×cena_strefa",
+            "unit": "PLN — wartość depozytu, ujemny = do zapłaty",
         }
+        if self._has_zones:
+            price1 = get_price_for_key(opts, "import_1", mid)
+            price2 = get_price_for_key(opts, "import_2", mid)
+            attrs.update({
+                "price_1": price1,
+                "price_2": price2,
+                "import_1": round(float(totals.get("import_1", 0)), 2),
+                "import_2": round(float(totals.get("import_2", 0)), 2),
+                "per_strefa_note": "L1 droga ×1.30 / L2 tania ×0.65 — koszt liczony per strefa",
+            })
+        self._attr_extra_state_attributes = attrs
 
         return round(bank, 2)
 
@@ -1488,8 +1546,8 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
     """RCEm sensor — auto-fetch monthly RCE from PSE or use manual value.
 
     Displays the current RCEm (PLN/kWh) used for net-billing calculations.
-    When auto-fetch is enabled, fetches from PSE API ~every 24h.
-    Falls back to manual value (CONF_BANK_RCE_PRICE) if fetch fails.
+    When auto-fetch is enabled, reads from Coordinator cache (24h) populated
+    in _async_update_data. Falls back to manual value if fetch fails.
     """
 
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, api) -> None:
@@ -1497,8 +1555,6 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
         self._api = api
-        self._cached_rcem: float | None = None
-        self._last_fetch: datetime | None = None
         self._attr_name = "RCEm (auto)"
         self._attr_unique_id = f"energa_{meter_id}_rcem_auto"
         self._attr_has_entity_name = True
@@ -1510,35 +1566,36 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return RCEm — either auto-fetched or manual fallback."""
+        """Return RCEm — either coordinator-cached or manual fallback."""
         opts = self._entry.options
         auto_fetch = opts.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
-
-        if auto_fetch and self._cached_rcem is not None:
-            return self._cached_rcem
-
-        # Fallback to manual value
+        # Coordinator holds shared 24h cache
+        if auto_fetch and getattr(self.coordinator, "_rce_cache", None) is not None:
+            return self.coordinator._rce_cache
         return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
 
     @property
     def extra_state_attributes(self):
+        coord_cache = getattr(self.coordinator, "_rce_cache", None)
+        coord_last = getattr(self.coordinator, "_rce_last_fetch", None)
         return {
             "auto_fetch": bool(self._entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)),
-            "cached_rcem": self._cached_rcem,
-            "last_fetch": self._last_fetch.isoformat() if self._last_fetch else None,
+            "cached_rcem": coord_cache,
+            "last_fetch": coord_last.isoformat() if coord_last else None,
             "manual_fallback": float(self._entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)),
-            "source": "PSE API (api.raporty.pse.pl)" if self._cached_rcem else "manual input",
+            "source": "PSE API (api.raporty.pse.pl)" if coord_cache else "manual input",
+            "vat_note": "×1.23 w Bank PLN (Dz.U. 1847)",
         }
 
     async def async_update_rcem(self):
-        """Fetch RCEm from PSE API. Called by coordinator or on demand."""
+        """Manual trigger — delegate to coordinator cache refresh."""
         try:
             rcem = await self._api.async_fetch_rcem()
             if rcem is not None:
-                self._cached_rcem = rcem
-                self._last_fetch = datetime.now()
-                _LOGGER.info("RCEm auto-fetched: %.5f PLN/kWh", rcem)
-            else:
-                _LOGGER.warning("RCEm auto-fetch failed, using manual fallback")
+                self.coordinator._rce_cache = rcem
+                from datetime import datetime as _dt
+                self.coordinator._rce_last_fetch = _dt.now()
+                self.async_write_ha_state()
+                _LOGGER.info("RCEm manual fetch: %.5f PLN/kWh", rcem)
         except Exception as err:
-            _LOGGER.warning("RCEm auto-fetch error: %s", err)
+            _LOGGER.warning("RCEm manual fetch error: %s", err)
