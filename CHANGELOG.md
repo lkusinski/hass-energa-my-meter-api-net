@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.22 (2026-09-04)
+- Wyrównanie manifestu (0.2.21 miała manifest 0.2.20); kod = v0.2.21.
+
+## v0.2.21 (2026-09-04)
+- Logowanie serwisu `fetch_history` (diagnostyka importu historii).
+
 ## v0.2.20 (2026-09-04)
 
 ### 🧠 Bank liczony sam + naprawiona detekcja startu
