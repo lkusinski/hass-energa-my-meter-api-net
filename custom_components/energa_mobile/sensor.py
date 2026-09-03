@@ -60,6 +60,7 @@ from .const import (
     get_price_for_key,
 )
 from .settlement import (
+    FlowAccumulator,
     days_to_settlement,
     deposit_valid_until,
     month_to_date_forecast,
@@ -452,6 +453,20 @@ async def async_setup_entry(
                             has_zones=has_zones,
                         )
                     )
+            # v0.2.12 native bank flows (Energy battery, live stock):
+            # charge/discharge totals from Bilans deltas (old) or
+            # export/import deltas (new). Replaces bank_energii.yaml.
+            for direction in ("charge", "discharge"):
+                sensors.append(
+                    EnergaBankFlowSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        has_zones=has_zones,
+                        direction=direction,
+                    )
+                )
             sensors.append(
                 EnergaFirstDataDateSensor(
                     coordinator=coordinator,
@@ -1337,7 +1352,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             "compensation_export_pln": round(comp_export, 2),
             "import_cost_pln": round(net_imp_cost, 2),
             "initial_pln": initial,
-            "source": "net-billing RCE×1.23 miesięczny (nowy) — faktura G12W nowe zasady",
+            "source": "net-billing RCE×1.23 miesięczny (nowy system)",
             "formula": "initial + export×RCE×1.23 - import×cena_strefa",
             "unit": "PLN — pozycja netto (depozyt minus koszt importu); ujemny = do zapłaty",
         }
@@ -1374,6 +1389,117 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         self._attr_extra_state_attributes = attrs
 
         return round(bank, 2)
+
+
+class EnergaBankFlowSensor(CoordinatorEntity, SensorEntity):
+    """Native bank charge/discharge totals for the Energy battery (v0.2.12).
+
+    Energy Dashboard batteries need total_increasing FLOW sensors, while
+    Bank kWh/PLN sensors expose STATE. These two sensors (charge/discharge)
+    accumulate Bilans movement between coordinator updates via
+    FlowAccumulator (first reading only anchors, restart-safe through
+    HA state restore). Replaces the bank_energii.yaml template pair.
+
+    - Old net-metering: base is Bilans (net_exp*coeff - net_imp).
+    - New net-billing: charge follows net_export, discharge net_import
+      (raw kWh; money value lives in Bank PLN).
+    """
+
+    def __init__(
+        self, coordinator, meter_id: str, device_info: DeviceInfo,
+        entry: ConfigEntry, has_zones: bool = False,
+        direction: str = "charge",
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._has_zones = has_zones
+        self._direction = direction
+        self._flows = FlowAccumulator()
+        is_charge = direction == "charge"
+        self._attr_name = (
+            "Bank Ładowanie" if is_charge else "Bank Rozładowanie"
+        )
+        self._attr_unique_id = f"energa_{meter_id}_bank_{direction}"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_icon = (
+            "mdi:battery-charging" if is_charge else "mdi:battery-discharging"
+        )
+        self._attr_device_info = device_info
+
+    async def async_added_to_hass(self) -> None:
+        """Seed totals from the previous HA state (restart-safe)."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is None or last.state in (None, "unknown", "unavailable", "none"):
+            return
+        try:
+            value = float(last.state)
+        except (ValueError, TypeError):
+            return
+        # Seed both sides; each mode reads only its own side.
+        self._flows.restore(value, value)
+
+    def _nets(self):
+        """(net_import, net_export) from meter totals minus baselines."""
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return None
+        opts = self._entry.options
+        mid = self._meter_id
+        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        if self._has_zones:
+            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
+            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
+            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
+            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            if bi1 == bi and bi2 == bi:
+                net_imp = float(totals.get("import", 0)) - bi
+                net_exp = float(totals.get("export", 0)) - be
+            else:
+                imp1 = float(totals.get("import_1", totals.get("import", 0)))
+                imp2 = float(totals.get("import_2", 0))
+                exp1 = float(totals.get("export_1", totals.get("export", 0)))
+                exp2 = float(totals.get("export_2", 0))
+                net_imp = (imp1 - bi1) + (imp2 - bi2)
+                net_exp = (exp1 - be1) + (exp2 - be2)
+        else:
+            net_imp = float(totals.get("import", 0)) - bi
+            net_exp = float(totals.get("export", 0)) - be
+        return (net_imp, net_exp)
+
+    @property
+    def native_value(self):
+        nets = self._nets()
+        if nets is None:
+            return None
+        net_imp, net_exp = nets
+        opts = self._entry.options
+        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        value: float | None = None
+        if coeff >= 0.7:  # old net-metering: follow Bilans movement
+            base = net_exp * coeff - net_imp
+            flows = self._flows.update(base)
+            value = flows[0] if self._direction == "charge" else flows[1]
+            mode = "bilans"
+        else:  # new net-billing: raw export/import growth
+            # Meter totals only grow, so growth lands on side [0].
+            base = net_exp if self._direction == "charge" else net_imp
+            value = self._flows.update(base)[0]
+            mode = "flows"
+        value = charge if self._direction == "charge" else discharge
+        self._attr_extra_state_attributes = {
+            "settlement_mode": mode,
+            "coefficient": coeff,
+            "net_import_kwh": round(net_imp, 2),
+            "net_export_kwh": round(net_exp, 2),
+            "source": "natywna para do Baterii w Panelu Energia (zastępuje bank_energii.yaml)",
+        }
+        return round(value, 2) if value is not None else None
 
 
 class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
@@ -1770,7 +1896,8 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "PLN/kWh"
-        self._attr_device_class = SensorDeviceClass.MONETARY
+        # NOTE: no monetary device_class — PLN/kWh is a price, and
+        # monetary+measurement is rejected by HA (v0.2.12 fix).
         self._attr_icon = "mdi:chart-line"
         self._attr_device_info = device_info
 
@@ -1834,7 +1961,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_native_unit_of_measurement = "PLN"
-        self._attr_device_class = SensorDeviceClass.MONETARY
+        # NOTE: no monetary device_class (monetary+measurement rejected
+        # by HA, v0.2.12 fix); forecast is a projection, not a meter total.
         self._attr_icon = "mdi:calendar-clock"
 
     def _mtd_parts(self):

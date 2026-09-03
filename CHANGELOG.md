@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.12 (2026-09-03)
+
+### 🔋 Natywne przepływy Banku (bateria na żywo w Panelu Energia)
+- **Nowe sensory `Bank Ładowanie` / `Bank Rozładowanie`** (`total_increasing`,
+  kWh, per licznik prosumencki): narastają z delty Bilansu między odczytami
+  (stare: `Δ(export×coeff-import)`; nowe: wzrost exportu/importu). Pierwszy
+  odczyt tylko kotwiczy bazę (bez skoku), restart odtwarza stan z HA.
+  Zastępują parę template z `bank_energii.yaml` — do podepięcia jako
+  `Bateria` w `Ustawienia → Pulpity → Energia`.
+- **Stan Bank kWh/PLN bez zmian** (gauge w Lovelace pokazuje pełną wartość
+  od razu, bateria dobudowuje historię z przepływów).
+
+### 🐛 Bug Fixes
+- **Warning `RCEm monetary+measurement`:** `RCEm (auto)` nie ma już
+  `device_class monetary` (cena PLN/kWh + `measurement`); to samo dla
+  `Prognozy Rachunku` (PLN + `measurement`, bez `monetary`).
+
+### 🔒 Prywatność
+- Z opisów wersji i dokumentacji usunięto numery liczników, PPE, numery
+  faktur i adresy. Instalacje opisane ogólnie: `G12W stare zasady`,
+  `G12W nowe zasady`, `G11 Odbiorca`; w przykładach `<nr-licznika>`.
+
 ## v0.2.11 (2026-09-04)
 
 ### ⚖️ Autokalibracja rozliczeń (FIFO 12 m-cy, nie reset kalendarzowy)
@@ -27,8 +49,8 @@
   ze strony PSE** (`pse.pl/oire/rcem...`, parser w `settlement.py`), fallback: średnia
   RCE. Reguła miesiąca: przed 11. dniem → M-2, po 11. → M-1. `coordinator._rce_source`
   mówi skąd wartość (`PSE RCEm official` / `PSE RCE avg fallback` / `manual`).
-  Zweryfikowano: faktura G12W nowe zasady 07.2026 `456×0.26288×1.23=147.44` = RCEm z tabeli PSE.
-- **Weryfikacja fakturowa:** G12W stare zasady bank `1358+1114.18=2472.18` zgodny prod==lab;
+   Zweryfikowano: faktura G12W-nowe 07.2026 `456×0.26288×1.23=147.44` = RCEm z tabeli PSE.
+- **Weryfikacja fakturowa:** bank G12W-stare `1358+1114.18=2472.18` zgodny prod==lab;
   przybliżenie deltami vs bilans godzinowy sprzedawcy ~1% (1344 vs 1358).
   Prod atrybuty `formula` (783 / +147.44) są nieaktualne — kosmetyka po stronie prod.
 
@@ -84,7 +106,7 @@
 ## v0.2.5 (2026-09-02)
 
 ### 🐛 Bug Fixes
-- **Puste pole w menu Opcji i ukryta Data:** Brak `detect_first` w `translations/pl.json` → puste pole między `Pobierz Historię` a `Wyczyść Statystyki` (zrzut 18:06). Dodano tłumaczenie + przeniesiono `Data pierwszego odczytu` z `diagnostic` na widoczne (`None`) + dopisano `Proszę czekać — aplikacja próbuje znaleźć datę pierwszego odczytu (~15 sekund).` w `strings.json`/`pl.json` dla `Podaj dane logowania` (lab: `prosument-g12w` długo myśli).
+- **Puste pole w menu Opcji i ukryta Data:** Brak `detect_first` w `translations/pl.json` → puste pole między `Pobierz Historię` a `Wyczyść Statystyki` (zrzut 18:06). Dodano tłumaczenie + przeniesiono `Data pierwszego odczytu` z `diagnostic` na widoczne (`None`) + dopisano `Proszę czekać — aplikacja próbuje znaleźć datę pierwszego odczytu (~15 sekund).` w `strings.json`/`pl.json` dla `Podaj dane logowania` (lab: login z wielkiej litery długo myśli).
 
 ## v0.2.4 (2026-09-02)
 

@@ -39,7 +39,7 @@ class TestFetchAllMeters:
 
         assert len(meters) == 1
         m = meters[0]
-        assert m["meter_serial"] == "71000001"
+        assert m["meter_serial"] == "12345678"
         assert m["tariff"] == "G12W"
         assert m["zone_count"] == 2
         assert m["total_plus_1"] == 19279.234

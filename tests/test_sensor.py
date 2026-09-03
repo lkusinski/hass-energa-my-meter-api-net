@@ -196,7 +196,7 @@ class TestSensorCreationLogic:
 class TestChartZoneData:
     """Tests for chart API zone structure interpretation.
 
-    Based on real API data from G12W account 71000001, 2026-03-27.
+    Based on sample data from a G12W test account, 2026-03-27.
     zones[] array: index 0 = Strefa 1 (dzienna), index 1 = Strefa 2 (nocna).
     """
 

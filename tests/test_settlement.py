@@ -61,7 +61,7 @@ class TestDaysToSettlement:
     def test_unset(self):
         assert days_to_settlement("") is None
 
-    def test_G12W stare zasady_invoice_anniversary(self):
+    def test_g12w_stare_invoice_anniversary(self):
         # 2026-06-30 anniversary, today 2026-09-03 -> 2027-06-30
         assert days_to_settlement("2026-06-30", date(2026, 9, 3)) == 300
 
@@ -96,7 +96,7 @@ class TestOfficialRcemTable:
 
 class TestRollingBank:
     def test_surplus(self):
-        # 2022.55 * 0.8 - 503.86 = 1114.18 (G12W stare zasady scenario)
+        # 2022.55 * 0.8 - 503.86 = 1114.18 (G12W-stare scenario)
         assert rolling_kwh_bank(2022.55, 503.86, 0.8) == 1114.18
 
     def test_floored_at_zero(self):

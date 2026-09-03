@@ -124,10 +124,10 @@ def g12w_user_data():
         "response": {
             "meterPoints": [
                 {
-                    "id": 310002,
-                    "dev": "71000001",
+                    "id": 300001,
+                    "dev": "12345678",
                     "tariff": "G12W",
-                    "name": "71000001",
+                    "name": "12345678",
                     "lastMeasurements": [
                         {"zone": "A+ strefa 1", "value": 19279.234, "unit": ""},
                         {"zone": "A+ strefa 2", "value": 26170.309, "unit": ""},
@@ -140,13 +140,13 @@ def g12w_user_data():
                         {"obis": "1-0:2.8.1*255", "name": None},
                         {"obis": "1-0:2.8.2*255", "name": None},
                     ],
-                    "agreementPoints": [{"code": "590243890000000071"}],
+                    "agreementPoints": [{"code": "590243890000000001"}],
                 }
             ],
             "agreementPoints": [
                 {
-                    "code": "590243890000000071",
-                    "address": "00-001 G12W stare zasady",
+                    "code": "590243890000000001",
+                    "address": "ul. Testowa 1",
                 }
             ],
             "activationDate": "2026-03-15",

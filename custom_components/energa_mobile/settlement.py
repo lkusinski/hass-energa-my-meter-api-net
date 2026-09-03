@@ -178,3 +178,45 @@ def deposit_valid_until(year: int, month: int) -> date:
 def _last_day_of(year: int, month: int) -> date:
     last = calendar.monthrange(year, month)[1]
     return date(year, month, last)
+
+
+class FlowAccumulator:
+    """Pure helper (no HA) splitting a moving base value into charge/discharge.
+
+    Feeds the native Bank charge/discharge sensors (v0.2.12, Energy battery):
+    - old net-metering: feed with Bilans (net_exp*coeff - net_imp);
+      Bilans growth charges the battery, shrinkage discharges it.
+    - new net-billing: feed one instance with net_export (charge side)
+      and a second instance with net_import (discharge side).
+
+    First update() only anchors the baseline (no spike after restart);
+    use restored to re-seed totals after HA restart.
+    """
+
+    def __init__(self, initial: float = 0.0) -> None:
+        self.charge = round(float(initial), 2)
+        self.discharge = round(float(initial), 2)
+        self._last: float | None = None
+
+    def restore(self, charge: float | None, discharge: float | None) -> None:
+        """Re-seed totals (e.g. from HA last state after restart)."""
+        if charge is not None:
+            self.charge = round(float(charge), 2)
+        if discharge is not None:
+            self.discharge = round(float(discharge), 2)
+
+    def update(self, base: float | None) -> tuple[float, float]:
+        """Fold a new base reading into (charge, discharge) totals."""
+        if base is None:
+            return (self.charge, self.discharge)
+        base = float(base)
+        if self._last is None:
+            self._last = base
+            return (self.charge, self.discharge)
+        delta = base - self._last
+        self._last = base
+        if delta > 0:
+            self.charge = round(self.charge + delta, 2)
+        elif delta < 0:
+            self.discharge = round(self.discharge - delta, 2)
+        return (self.charge, self.discharge)
