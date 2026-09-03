@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.16 (2026-09-03)
+
+### 🐛 Bug Fixes (wykryte na żywym lab2)
+- **Flaga `is_prosumer` to był `obis_minus` w przebraniu:** `api.py`
+  ustawiał ją też dla samych kodów OBIS eksportu (`or bool(mp.obis_minus
+  ...)`), więc bramka `is_export_prosumer` z v0.2.15 przepuszczała liczniki
+  konsumenckie (G11 bez fotowoltaiki nadal dostawała Bilans/Bank/przepływy).
+  Flaga to już czysty `type == Wytwórca`; realny eksport wykrywają
+  niezerowe liczniki `total_minus*`. Zweryfikowane na lab2: pełna
+  `Prognoza Rachunku` brutto działa na żywym HA (`do_zapłaty` 100.58,
+  MTD brutto 66.37, RCEm official).
+
 ## v0.2.15 (2026-09-03)
 
 ### 🧹 Czysty konsument (G11 bez PV): zero sensorów prosumenckich

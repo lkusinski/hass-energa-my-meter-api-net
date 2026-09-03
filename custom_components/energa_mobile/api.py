@@ -633,13 +633,12 @@ class EnergaAPI:
                 # Fallback to dealer.start if activationDate not at response level
                 activation_ts = ag.get("dealer", {}).get("start")
 
-            # Check if prosumer (Wytwórca = producer = prosumer)
-            is_prosumer = ag.get("type") == "Wytwórca" or bool(
-                mp.get("obis_minus") or any(
-                    obj.get("obis", "").startswith("1-0:2.8.0")
-                    for obj in mp.get("meterObjects", [])
-                )
-            )
+            # Seller flag ONLY (type Wytwórca). Do NOT OR with obis_minus
+            # here: consumer meters (e.g. G11 without PV) also report
+            # export OBIS codes with zero readings. Real export ability is
+            # detected separately from non-zero export totals
+            # (see settlement.is_export_prosumer, v0.2.15+).
+            is_prosumer = ag.get("type") == "Wytwórca"
 
             meter_obj = {
                 "meter_point_id": mp.get("id"),
