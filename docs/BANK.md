@@ -6,8 +6,8 @@
 
 | Adres | Licznik | Taryfa | System | Sensor | Jednostka | Formuła |
 |---|---|---|---|---|---|---|
-| G12W stare zasady `590243890000000071` `71000001` | G12W | **stare** net-metering roczny | `sensor.energa_71000001_bank_wirtualny_kwh` | kWh | `max(0, (export-baseline)×0.8 - (import-baseline)) + initial_kwh` |
-| G12W nowe zasady `590243890000000072` `72000002` | G12W | **nowe** net-billing miesięczny | `sensor.energa_72000002_bank_wirtualny_pln` + `sensor.energa_72000002_rcem_auto` | PLN | `initial_pln + export×RCE×1.23 - import×cena_strefa` |
+| G12W stare zasady `590243890000000071` `71000001` | G12W | **stare** net-metering roczny | `sensor.bank_wirtualny_kwh_3` (`energa_310002_bank_kwh`) | kWh | `max(0, (export-baseline)×0.8 - (import-baseline)) + initial_kwh` |
+| G12W nowe zasady `590243890000000072` `72000002` | G12W | **nowe** net-billing miesięczny | `sensor.bank_wirtualny_pln` (`energa_310003_bank_pln`) + `sensor.energa_72000002_rcem_auto` | PLN | `initial_pln + export×RCE×1.23 - import×cena_strefa` |
 
 * `initial_kwh` = **1358** (`752+606` `Faktura 4100000041/FES/XXXXX` z `30.06.2026` `IMG_7953/54` — stan `Razem w magazynie` po rozliczeniu; wcześniejsze `783` z `31.12.2025` już skonsumowane w tym saldzie). Ustaw `balance_baseline_import/export` na wskazania z faktury `19 543,235 / 26 736,058` + `bank_initial_kwh=1358`. `Bilans>0` nadbudowuje bank.
 * `initial_pln` = `0.00` na `01.08.2026` (`Faktura 3253000044/FES/XXXXX` `456×0.26288×1.23=147.44` `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U.1847.
@@ -25,15 +25,15 @@ cards:
   - type: entities
     title: 🔋 Magazyn Wirtualny — G12W stare zasady (stare 0.8)
     entities:
-      - entity: sensor.energa_71000001_bank_wirtualny_kwh
+      - entity: sensor.bank_wirtualny_kwh_3
         name: Bank kWh (do odebrania)
         icon: mdi:battery-charging-80
       - entity: sensor.energa_71000001_bilans_prosumencki
         name: Bilans (export×0.8 - import)
-      - entity: sensor.energa_71000001_data_pierwszego_odczytu
+      - entity: sensor.data_pierwszego_odczytu_2
         name: Od kiedy liczymy
   - type: gauge
-    entity: sensor.energa_71000001_bank_wirtualny_kwh
+    entity: sensor.bank_wirtualny_kwh_3
     min: 0
     max: 5000
     severity:
@@ -45,10 +45,10 @@ cards:
   - type: entities
     title: 💰 Magazyn — G12W nowe zasady (nowe RCE×1.23)
     entities:
-      - entity: sensor.energa_72000002_bank_wirtualny_pln
+      - entity: sensor.bank_wirtualny_pln
         name: Depozyt PLN (ujemny = do zapłaty)
       - entity: sensor.energa_72000002_rcem_auto
-        name: RCEm PLN/kWh (PSE lub manual 0.26288)
+        name: RCEm PLN/kWh (PSE 0.59287 auto)
       - entity: sensor.energa_72000002_bilans_prosumencki
         name: Bilans kWh
   - type: markdown
@@ -76,3 +76,12 @@ cards:
 * G12W nowe zasady `3253000044/FES/XXXXX` `01.07.2026` `456×0.26288×1.23=147.44` → `Depozyt po 0.00` → bank PLN start `0.00`, potem `export×RCE×1.23 - import×cena` per strefa. Sprawdź w `Deweloperskie → Stany → Bank PLN atrybuty`.
 
 > Po `v0.2.10` możesz usunąć `packages/bank_energii.yaml` — bank jest natywny.
+
+## Lab zweryfikowany 2026-09-03 08:40
+
+- `sensor.bank_wirtualny_kwh_3` 2472.18 kWh (G12W stare zasady, baseline per-strefa `19543.235/26736.058` + `17072.943/15371.476`), `sensor.bank_wirtualny_pln -415.57 PLN` (G12W nowe zasady, baseline `1932.634/2423.794` + `400.52/287.581`, RCE `0.59287` auto), `sensor.energa_72000002_rcem_auto 0.59287`
+- Czyszczenie `core.entity_registry` przy `ha core stop` (`jq` na `/mnt/data/supervisor/homeassistant/.storage/`): usunięto 3 orphan `bank_pln` + 3 duplikaty `button` `serial` → 3 banki + 3 `data_pierwszego_odczytu` + 3 `button` (point_id)
+
+## Dalej — v0.2.11 prognoza rachunku
+
+Plan: `EnergaBillForecastSensor` (`sensor.energa_XXX_prognoza_rachunku`) — `mtd_cost = net_import_mtd×cena - net_export_mtd×RCE×1.23` + `forecast = mtd/days_elapsed*days_in_month` + `stałe` (opłata handlowa z faktury); atrybuty `mtd_kwh`, `forecast_kwh`, `rce_source`; `enable_bill_forecast` w `Options`. Dla starego systemu `forecast_kwh = max(0, mag - mtd_import)`. Szczegóły w `PLAN.md:4`.
