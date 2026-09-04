@@ -210,9 +210,14 @@ def compute_bill(
     vat = netto * VAT_RATE
     brutto = netto + vat
 
+    sale_gross = round(sale_total * (1.0 + VAT_RATE), 2)
+    distr_gross = round(distr_total * (1.0 + VAT_RATE), 2)
+
     if deposit_pln is None:
         deposit_pln = export_kwh * float(rcem) * 1.23
-    applied = min(max(0.0, float(deposit_pln)), brutto)
+    # P0 fix (Ustawa o OZE art. 4 ust. 11): deposit is allocated ONLY to eligible
+    # energy sale gross (sale_gross), never to distribution and fixed grid fees.
+    applied = min(max(0.0, float(deposit_pln)), sale_gross)
     do_zaplaty = round(brutto - applied, 2)
 
     def _r(x: float) -> float:
@@ -225,6 +230,7 @@ def compute_bill(
         "excise_note": "informacyjnie — akcyza jest już w cenie energii (faktura G11)",
         "trade_fee": _r(f["trade_fee"] * months),
         "sale_total": _r(sale_total),
+        "sale_gross": _r(sale_gross),
         "distr_var_day": _r(distr_var_day),
         "distr_var_night": _r(distr_var_night),
         "distr_quality": _r(distr_quality),
@@ -232,6 +238,7 @@ def compute_bill(
         "distr_cogen": _r(distr_cogen),
         "distr_fixed": _r((f["abonament"] + f["grid_fixed"] + f["capacity"]) * months),
         "distr_total": _r(distr_total),
+        "distr_gross": _r(distr_gross),
         "netto": _r(netto),
         "vat": _r(vat),
         "brutto": _r(brutto),

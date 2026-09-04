@@ -6,7 +6,7 @@ Supports multi-zone tariffs (G12w: strefa 1 + strefa 2).
 """
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import override
 from zoneinfo import ZoneInfo
 
@@ -1400,6 +1400,9 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             "formula": "max(0, (export-baseline)*coeff - (import-baseline)) + initial",
             "unit": "kWh — ile energii możesz jeszcze odebrać za darmo",
             "settlement_mode": mode,
+            "rule_version": "net_metering_fifo_12m_v1",
+            "settlement_type": "net_metering",
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
         if mode == "rolling_365d":
             attrs["coverage_days"] = coverage
@@ -1535,6 +1538,9 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             "source": "net-billing RCE×1.23 miesięczny (nowy system)",
             "formula": "initial + export×RCE×1.23 - import×cena_strefa",
             "unit": "PLN — pozycja netto (depozyt minus koszt importu); ujemny = do zapłaty",
+            "rule_version": "net_billing_fifo_12m_v1",
+            "settlement_type": "net_billing_rcem",
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
         if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             from datetime import date as _date
@@ -2511,6 +2517,10 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",
             "formula": "mtd_net/days_elapsed*days_in_month; mtd_net=export×RCE×1.23-import×cena",
             "note": "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)",
+            "rule_version": "ustawa_oze_art4_ust11_v1",
+            "settlement_type": "net_metering" if old_system else "net_billing_rcem",
+            "period": f"{today.year}-{today.month:02d}",
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
         if bill_mtd is not None and bill_fc is not None:
             self._attr_extra_state_attributes.update({
@@ -2524,8 +2534,10 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "mtd_vat_pln": bill_mtd["vat"],
                 "mtd_brutto_pln": bill_mtd["brutto"],
                 "mtd_deposit_pln": bill_mtd["deposit"],
+                "mtd_deposit_applied_pln": bill_mtd["deposit_applied"],
                 "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
                 "forecast_brutto_pln": bill_fc["brutto"],
+                "forecast_deposit_applied_pln": bill_fc["deposit_applied"],
                 "forecast_do_zaplaty_pln": bill_fc["do_zaplaty"],
                 "cover_day_kwh": cover_d,
                 "cover_night_kwh": cover_n,

@@ -2,13 +2,18 @@
 
 ## v0.3.9 (2026-09-04)
 
-### 🐛 Bug Fixes (bateria jedno-strefowa)
+### 🐛 Bug Fixes (bateria jedno-strefowa & alokacja depozytu)
 - **Eksport jednej strefy trafiał do slotu importu:** backfill
   przepływów wkładał `export` do kubełka 0 zamiast 1 — ładowanie
   stało w `0.0`, a rozładowanie rosło o import+eksport naraz.
   Niewidoczne na konsumentach (brak eksportu) i G12W (osobna
   ścieżka); wykryte na żywym G11 z PV (rozładowanie ≈ import+eksport
   co do kWh). Mapowanie wydzielone do testowalnego `bucket_flows`.
+- **P0: alokacja depozytu tylko do energii czynnej:** depozyt
+  net-billingowy alokowany jest wyłącznie do kwalifikowanych pozycji
+  sprzedaży energii czynnej brutto (`sale_gross`, art. 4 ust. 11 ustawy
+  o OZE), a nie od całego brutto faktury. Dystrybucja i opłaty stałe
+  pozostają zawsze do zapłaty.
 
 ## v0.3.8 (2026-09-04)
 
