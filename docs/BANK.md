@@ -20,6 +20,8 @@
 * Per-strefa G12W: `import_1/export_1` (L1 droga) + `import_2/export_2` (L2 tania). Ceny `import_price_1 1.30` / `import_price_2 0.65` w `Options → Ceny` (lub zostaw `1.2453/0.5955` default — ujednolicisz).
 * `Bilans Prosumencki` to diagnostic (ukryty półprodukt: `Bank=max(0,Bilans)+initial`). Nie wieszaj go obok Banku — to ta sama energia liczona podwójnie.
 * `G11 Odbiorca` (faktura `1200000017/FES/XXXXX`, G11 bez fotowoltaiki 2159 kWh): własna tabela opłat (handlowa `16,18`, sieciowa stała `11,77`, zmienna `0,3485`) — prognoza liczona jak faktura (`2271,74` netto → `2794,24` brutto co do grosza). Akcyza jest już w cenie energii (tylko przypis na fakturze).
+* **Wymiana licznika:** historia mchart obejmuje też poprzedni licznik (G12W nowe zasady: sumy 730d większe niż stan nowego). Bank liczony z nowego licznika (baseline) jest poprawny; FIFO i słupki pokazują historię gospodarstwa, nie licznika.
+* **Reimporty są bezpieczne (v0.3.4):** serie przepływów kontynuują zaimportowane sumy (kotwica sprzed zakresu), pełne backfille startują od 0. Sensor ładuje MAX z 14 dni — restarty nie zwijają słupków baterii.
 
 ## Gdzie zobaczyć
 
