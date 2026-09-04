@@ -5,6 +5,7 @@ Implements invisible statistics sensors for Energy Dashboard integration.
 Supports multi-zone tariffs (G12w: strefa 1 + strefa 2).
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import override
