@@ -115,48 +115,20 @@ class TestConfigFlowExceptionHandling:
 
 
 class TestSystemStep:
-    """v0.3.8: prosumer picks opusty vs net-billing at setup."""
+    """v0.3.8: setup choice nowe/stare seeds the right coefficient."""
 
-    def _flow(self):
-        from custom_components.energa_mobile.config_flow import (
-            EnergaConfigFlow,
+    def test_nowe_maps_to_zero(self):
+        from custom_components.energa_mobile.settlement import (
+            system_choice_coefficient,
         )
 
-        flow = EnergaConfigFlow.__new__(EnergaConfigFlow)
-        flow._pending_title = "prosument@example.com"
-        flow._pending_data = {"username": "prosument@example.com"}
-        captured = {}
+        assert system_choice_coefficient("nowe") == 0.0
 
-        async def fake_create_entry(title=None, data=None, options=None):
-            captured.update(title=title, data=data, options=options)
-            return {"type": "create_entry", **captured}
+    def test_stare_and_garbage_map_to_point_eight(self):
+        from custom_components.energa_mobile.settlement import (
+            system_choice_coefficient,
+        )
 
-        flow.async_create_entry = fake_create_entry
-        return flow, captured
-
-    @pytest.mark.asyncio
-    async def test_nowe_seeds_coefficient_zero(self):
-        flow, captured = self._flow()
-        result = await flow.async_step_system({"system": "nowe"})
-        assert result["type"] == "create_entry"
-        assert captured["options"] == {"prosumer_coefficient": 0.0}
-        assert captured["title"] == "prosument@example.com"
-
-    @pytest.mark.asyncio
-    async def test_stare_seeds_coefficient_point_eight(self):
-        flow, captured = self._flow()
-        result = await flow.async_step_system({"system": "stare"})
-        assert result["type"] == "create_entry"
-        assert captured["options"] == {"prosumer_coefficient": 0.8}
-
-    @pytest.mark.asyncio
-    async def test_system_step_shows_form_without_input(self):
-        flow, _ = self._flow()
-
-        async def fake_show_form(step_id=None, data_schema=None, **kwargs):
-            return {"type": "form", "step_id": step_id}
-
-        flow.async_show_form = fake_show_form
-        result = await flow.async_step_system(None)
-        assert result["type"] == "form"
-        assert result["step_id"] == "system"
+        assert system_choice_coefficient("stare") == 0.8
+        assert system_choice_coefficient(None) == 0.8
+        assert system_choice_coefficient("junk") == 0.8

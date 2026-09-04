@@ -448,6 +448,20 @@ def month_to_date_forecast(
     return round(mtd_net_pln / elapsed * days_in_month, 2)
 
 
+def system_choice_coefficient(choice) -> float:
+    """Prosumer coefficient for the setup-wizard system choice (v0.3.8).
+
+    "nowe" (net-billing) → 0.0, anything else → 0.8 (opusty default).
+    Pure function, unit-tested.
+    """
+    try:
+        if str(choice).strip().lower() == "nowe":
+            return 0.0
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return 0.8
+
+
 def deposit_valid_until(year: int, month: int) -> date:
     """Date until which a monthly deposit stays valid (assignment + 12m).
 

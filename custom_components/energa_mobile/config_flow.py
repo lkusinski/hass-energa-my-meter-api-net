@@ -14,7 +14,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EnergaAPI, EnergaAuthError, EnergaConnectionError
-from .settlement import is_export_prosumer
+from .settlement import is_export_prosumer, system_choice_coefficient
 from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
@@ -203,7 +203,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         (still changeable later in Options → Ceny).
         """
         if user_input is not None:
-            coeff = 0.0 if user_input.get("system") == "nowe" else 0.8
+            coeff = system_choice_coefficient(user_input.get("system"))
             return self.async_create_entry(
                 title=getattr(self, "_pending_title", "Energa My Meter"),
                 data=getattr(self, "_pending_data", {}),
