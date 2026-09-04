@@ -406,30 +406,24 @@ async def async_setup_entry(
                 )
             )
 
-        # === PROSUMER BALANCE SENSOR ===
-        # (only for prosumers — meters with export capability)
-        if is_export_prosumer(meter):
-            sensors.append(
-                EnergaProsumerBalanceSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    device_info=device_info,
-                    entry=entry,
-                    has_zones=has_zones,
-                    serial=serial,
-                )
-            )
-
-        # === BANK SENSORS (native, per strefa, old kWh + new PLN, issue #37) ===
-        # Auto-detect old (net-metering, coeff 0.8/0.7) vs new (net-billing, coeff < 0.7)
-        # coefficient 0.8 = old system (roczny bilans kWh)
-        # coefficient 0.7 = old system with 0.7 opłata (przejściowy)
-        # coefficient 0.0 = new system (net-billing, RCE×1.23, miesięczny PLN)
+        # === PROSUMER & BANK SENSORS ===
+        # Auto-detect old (net-metering, coeff >= 0.7) vs new (net-billing, coeff < 0.7)
         if is_export_prosumer(meter):
             coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
             is_old_system = coeff >= 0.7  # 0.8 or 0.7 = old net-metering
 
             if is_old_system:
+                # Old net-metering: virtual warehouse in kWh, bilans, fill level, and battery flows
+                sensors.append(
+                    EnergaProsumerBalanceSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
                 sensors.append(
                     EnergaBankKwhSensor(
                         coordinator=coordinator,
@@ -451,7 +445,22 @@ async def async_setup_entry(
                         serial=serial,
                     )
                 )
+                # Native bank flows (Energy battery, live stock)
+                for direction in ("charge", "discharge"):
+                    sensors.append(
+                        EnergaBankFlowSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            has_zones=has_zones,
+                            direction=direction,
+                            serial=serial,
+                        )
+                    )
             else:
+                # New net-billing: monetary deposit in PLN, RCEm auto-fetch
+                # (No virtual battery/warehouse or kWh bilans in net-billing)
                 sensors.append(
                     EnergaBankPlnSensor(
                         coordinator=coordinator,
@@ -462,7 +471,6 @@ async def async_setup_entry(
                         serial=serial,
                     )
                 )
-                # RCEm auto sensor only for new system (net-billing)
                 sensors.append(
                     EnergaRceSensor(
                         coordinator=coordinator,
@@ -470,21 +478,6 @@ async def async_setup_entry(
                         device_info=device_info,
                         entry=entry,
                         api=api,
-                        serial=serial,
-                    )
-                )
-            # v0.2.12 native bank flows (Energy battery, live stock):
-            # charge/discharge totals from Bilans deltas (old) or
-            # export/import deltas (new). Replaces bank_energii.yaml.
-            for direction in ("charge", "discharge"):
-                sensors.append(
-                    EnergaBankFlowSensor(
-                        coordinator=coordinator,
-                        meter_id=meter_id,
-                        device_info=device_info,
-                        entry=entry,
-                        has_zones=has_zones,
-                        direction=direction,
                         serial=serial,
                     )
                 )
@@ -1560,11 +1553,14 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             net_imp_cost = net_imp * price
 
         comp_export = net_exp * rce * 1.23
-        bank = initial + comp_export - net_imp_cost
+        gross_deposit = max(0.0, initial + comp_export)
+        net_balance = initial + comp_export - net_imp_cost
+        deposit_applied = min(gross_deposit, max(0.0, net_imp_cost))
+        deposit_remaining = max(0.0, gross_deposit - deposit_applied)
 
         _LOGGER.debug(
-            "BankPln %s: net_imp_cost=%.2f net_exp=%.2f rce=%.5f comp_export=%.2f initial=%.2f bank=%.2f",
-            mid, net_imp_cost, net_exp, rce, comp_export, initial, bank,
+            "BankPln %s: net_imp_cost=%.2f net_exp=%.2f rce=%.5f comp_export=%.2f initial=%.2f deposit_remaining=%.2f net_balance=%.2f",
+            mid, net_imp_cost, net_exp, rce, comp_export, initial, deposit_remaining, net_balance,
         )
 
         coord_cache = getattr(self.coordinator, "_rce_cache", None)
@@ -1581,9 +1577,13 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             "compensation_export_pln": round(comp_export, 2),
             "import_cost_pln": round(net_imp_cost, 2),
             "initial_pln": initial,
+            "gross_deposit_pln": round(gross_deposit, 2),
+            "deposit_applied_pln": round(deposit_applied, 2),
+            "deposit_remaining_pln": round(deposit_remaining, 2),
+            "net_financial_balance_pln": round(net_balance, 2),
             "source": "net-billing RCE×1.23 miesięczny (nowy system)",
-            "formula": "initial + export×RCE×1.23 - import×cena_strefa",
-            "unit": "PLN — pozycja netto (depozyt minus koszt importu); ujemny = do zapłaty",
+            "formula": "max(0, initial + export×RCE×1.23 - import×cena_strefa)",
+            "unit": "PLN — depozyt prosumencki (aktywo, nigdy ujemne); bilans netto w atrybucie net_financial_balance_pln",
             "rule_version": "net_billing_fifo_12m_v1",
             "settlement_type": "net_billing_rcem",
             "calculated_at": datetime.now(timezone.utc).isoformat(),
@@ -1620,7 +1620,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             })
         self._attr_extra_state_attributes = attrs
 
-        return round(bank, 2)
+        return round(deposit_remaining, 2)
 
 
 class EnergaBankLevelSensor(CoordinatorEntity, SensorEntity):
@@ -1897,6 +1897,8 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         self._data_key = data_key
         self._entry = entry
 
+        self._last_sum: float | None = None
+
         # Entity attributes
         self._attr_name = name
         self._attr_unique_id = f"energa_{meter_id}_{data_key}_stats"
@@ -1904,8 +1906,8 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
 
         # Sensor class attributes — state_class is required for Energy
         # Dashboard to list this entity in its configuration dropdown.
-        # native_value intentionally returns None (data flows via
-        # async_import_statistics in _handle_coordinator_update).
+        # native_value returns the latest cumulative sum so the entity is
+        # available in HA Energy dashboard without warnings.
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -1921,12 +1923,13 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return None - statistics are imported via async_import_statistics.
-
-        Returning a value here would cause HA Recorder to auto-create
-        statistics with state=value and sum=0, causing spikes
-        on the Energy Dashboard.
-        """
+        """Return cumulative sum so Energy Dashboard sees entity as valid."""
+        if self._last_sum is not None:
+            return round(self._last_sum, 3)
+        pre = (self.coordinator.get_pre_fetched_stats() or {}).get(self.entity_id)
+        if pre and pre.get("sum") is not None:
+            self._last_sum = pre.get("sum")
+            return round(self._last_sum, 3)
         return None
 
     @property
@@ -2015,6 +2018,8 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             self.entity_id,
         )
         async_import_statistics(self.hass, energy_metadata, energy_stats)
+        if energy_stats and "sum" in energy_stats[-1]:
+            self._last_sum = energy_stats[-1]["sum"]
 
         # === IMPORT COST STATISTICS (v0.3.0: import only) ===
         # Export has no static cost: in old net-metering it feeds the kWh
@@ -2397,6 +2402,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             )
             if cov >= ROLLING_MIN_COVERAGE_DAYS and float(imp365) > 0:
                 return float(imp365)
+            if cov >= 30 and float(imp365) > 0:
+                return round(float(imp365) / cov * 365, 1)
         except (ValueError, TypeError):
             pass
         totals = (getattr(self.coordinator, "_meter_totals", {}) or {}).get(mid)
@@ -2532,11 +2539,39 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             )
         except (ValueError, TypeError):
             bill_mtd = None
-        # Linear extrapolation of flows to month end, then re-price.
+        # Extrapolation of flows to month end, then re-price.
+        # Early-month volatility smoothing (day 1-6): blend MTD with trailing history
         days_in_month = _cal.monthrange(today.year, today.month)[1]
         elapsed = min(max(today.day, 1), days_in_month)
-        factor = days_in_month / elapsed
-        f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
+
+        rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(self._meter_id), {})
+        cov = int(rolling.get("_coverage_days", 0)) if rolling else 0
+
+        if elapsed < 7 and cov >= 14:
+            w_mtd = elapsed / 7.0
+            w_hist = 1.0 - w_mtd
+
+            t_imp_d = float(rolling.get("import_1" if self._has_zones else "import", 0)) / cov
+            t_imp_n = float(rolling.get("import_2", 0)) / cov if self._has_zones else 0.0
+            t_exp = (
+                (float(rolling.get("export_1", 0)) + float(rolling.get("export_2", 0))) / cov
+                if self._has_zones
+                else float(rolling.get("export", 0)) / cov
+            )
+
+            m_imp_d = imp_d / elapsed
+            m_imp_n = imp_n / elapsed
+            m_exp = exp_tot / elapsed
+
+            f_imp_d = (w_mtd * m_imp_d + w_hist * t_imp_d) * days_in_month
+            f_imp_n = (w_mtd * m_imp_n + w_hist * t_imp_n) * days_in_month
+            f_exp = (w_mtd * m_exp + w_hist * t_exp) * days_in_month
+            forecast_method = f"smoothed_blend_7d (dzień {elapsed}/7, {w_hist*100:.0f}% historia)"
+        else:
+            factor = days_in_month / elapsed
+            f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
+            forecast_method = "linear_mtd"
+
         if old_system:
             f_cover_d, f_cover_n = split_cover(
                 self._warehouse_cover(), f_imp_d, f_imp_n
@@ -2559,6 +2594,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             "mtd_export_kwh": round(exp_mtd, 2),
             "mtd_net_pln": round(mtd_net, 2),
             "forecast_pln": forecast,
+            "forecast_method": forecast_method,
             "day_of_month": today.day,
             "rce_price": rce,
             "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",

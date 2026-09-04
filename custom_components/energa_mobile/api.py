@@ -808,11 +808,15 @@ class EnergaAPI:
                             )
 
                     return data
-            except (aiohttp.ClientError, RuntimeError) as err:
-                if attempt == 0 and (
-                    self._session.closed or "Session is closed" in str(err)
-                ):
-                    _LOGGER.warning("Request failed (session issue: %s), retrying", err)
+            except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError, RuntimeError) as err:
+                if attempt == 0:
+                    _LOGGER.warning(
+                        "Request to %s failed (%s: %s), retrying in 2s...",
+                        url,
+                        type(err).__name__,
+                        err,
+                    )
+                    await asyncio.sleep(2)
                     continue
                 raise EnergaConnectionError(str(err)) from err
         # Should not reach here, but safety net
