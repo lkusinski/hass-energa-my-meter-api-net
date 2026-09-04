@@ -170,7 +170,8 @@ def fifo_kwh_bank(
         today: reference date (default: today).
 
     Returns (bank_kwh, detail) where detail holds expired_kwh,
-    uncovered_kwh and months_used. Pure function, unit-tested.
+    uncovered_kwh, deposits_kwh (total credited in the live window)
+    and months_used. Pure function, unit-tested.
     """
     from collections import defaultdict
     from datetime import date as _date
@@ -188,13 +189,15 @@ def fifo_kwh_bank(
             agg[(int(y), int(m))][1] += max(0.0, float(exp))
         except (ValueError, TypeError):
             continue
-    detail = {"expired_kwh": 0.0, "uncovered_kwh": 0.0, "months_used": 0}
+    detail = {"expired_kwh": 0.0, "uncovered_kwh": 0.0, "months_used": 0,
+              "deposits_kwh": 0.0}
     if not agg:
         return (0.0, detail)
     cur_idx = today.year * 12 + today.month
     buckets: list = []  # [expiry_month_idx, balance_kwh]
     expired = 0.0
     uncovered = 0.0
+    deposited = 0.0
     used = 0
     for (y, m) in sorted(agg):
         idx = y * 12 + m
@@ -211,6 +214,7 @@ def fifo_kwh_bank(
         intro = agg[(y, m)][1] * coeff
         if intro > 0:
             buckets.append([idx + 12, intro])
+            deposited += intro
         need = agg[(y, m)][0]
         if need > 0 or intro > 0:
             used += 1
@@ -232,8 +236,26 @@ def fifo_kwh_bank(
         "expired_kwh": round(expired, 2),
         "uncovered_kwh": round(uncovered, 2),
         "months_used": used,
+        "deposits_kwh": round(deposited, 2),
     })
     return (round(bank, 2), detail)
+
+
+def warehouse_level_pct(bank_kwh: float | None, deposits_kwh: float | None) -> float | None:
+    """Poziom magazynu w % (stary net-metering, v0.3.0).
+
+    bank vs suma wkładów (export×coeff) z żywego okna 12 m-cy:
+    100% = nic nie odebrane / nic nie wygasło, 0% = magazyn pusty.
+    None, gdy brak historii (tryb baseline) — nie zgadujemy.
+    """
+    try:
+        deposits = float(deposits_kwh)  # type: ignore[arg-type]
+        bank = float(bank_kwh)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return None
+    if deposits <= 0:
+        return None
+    return round(max(0.0, min(1.0, bank / deposits)) * 100.0, 1)
 
 
 def is_export_prosumer(meter: dict | None) -> bool:
@@ -306,6 +328,24 @@ def orphan_bank_uids(
     if coeff >= 0.7:
         return {f"energa_{mid}_bank_pln", f"energa_{mid}_rcem_auto"}
     return {f"energa_{mid}_bank_kwh"}
+
+
+def orphan_removed_uids(meter_id: str, serial: str) -> set:
+    """Unique IDs of entities removed in v0.3.0 (auto-cleaned, v0.3.0).
+
+    - `Wykryj pierwszy odczyt` button: blind 730-day auto-backfill on
+      setup replaced manual detection (overengineering, per user ask).
+    - Export cost placeholders/stats: export is priced live via the
+      RCEm/Cena Oddania entity now, never frozen at 0.95.
+    Pure helper so the rule stays unit-tested; sensor.py applies it.
+    """
+    mid, ser = str(meter_id), str(serial or meter_id)
+    return {
+        f"energa_{mid}_detect_first_data",
+        f"energa_{ser}_export_cost_stats",
+        f"energa_{ser}_export_1_cost_stats",
+        f"energa_{ser}_export_2_cost_stats",
+    }
 
 
 def month_to_date_forecast(

@@ -71,16 +71,53 @@ from .settlement import (
     month_to_date_forecast,
     next_settlement_date,
     orphan_bank_uids,
+    orphan_removed_uids,
     parse_settlement_date,
     rolling_kwh_bank,
     trailing_months,
+    warehouse_level_pct,
 )
-from .tariff import capacity_for_annual_use, compute_bill, fees_from_options, split_cover
+from .tariff import (
+    capacity_for_annual_use,
+    compute_bill,
+    fees_from_options,
+    split_cover,
+    tariff_family,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 # Timezone for Energa data
 TIMEZONE = ZoneInfo("Europe/Warsaw")
+
+
+def _fifo_bank_from_monthly(monthly: dict, coeff: float):
+    """Shared FIFO-12m bank math (v0.3.0).
+
+    Args:
+        monthly: coordinator._monthly[meter_id] = {(y, m): {suffix: kWh}}.
+        coeff: prosumer coefficient.
+
+    Returns (bank_kwh, detail) when ~11 months of flows exist,
+    else (None, None). Same rule as the Bank sensor so the Level (%)
+    sensor never disagrees with it.
+    """
+    from datetime import date as _date
+
+    if not monthly:
+        return (None, None)
+    flows = []
+    for (fy, fm) in trailing_months(_date.today(), 13):
+        d = monthly.get((fy, fm), {})
+        try:
+            exp = float(d.get("export", d.get("export_1", 0) + d.get("export_2", 0)))
+            imp = float(d.get("import", d.get("import_1", 0) + d.get("import_2", 0)))
+        except (ValueError, TypeError):
+            exp, imp = 0.0, 0.0
+        flows.append((fy, fm, imp, exp))
+    if sum(1 for (_, _, i, e) in flows if i > 0 or e > 0) < FIFO_MIN_COVERAGE_MONTHS:
+        return (None, None)
+    return fifo_kwh_bank(flows, coeff)
 
 
 async def async_setup_entry(
@@ -329,6 +366,10 @@ async def async_setup_entry(
             )
 
         # Export statistics
+        # v0.3.0: energy stats only (solar wiring for old net-metering,
+        # grid return for new net-billing). Cost stats are NOT created:
+        # old system sells nothing, new system pays live RCEm×1.23 via
+        # the Cena Oddania price entity (a frozen 0.95 stat would lie).
         if is_export_prosumer(meter) and has_zones:
             # Per-zone export for G12w
             sensors.append(
@@ -342,17 +383,6 @@ async def async_setup_entry(
                 )
             )
             sensors.append(
-                EnergaCostStatisticsSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    data_key="export_1",
-                    name="Panel Energia Produkcja Strefa 1 Rekompensata",
-                    device_info=device_info,
-                    entry=entry,
-                    serial=serial,
-                )
-            )
-            sensors.append(
                 EnergaStatisticsSensor(
                     coordinator=coordinator,
                     meter_id=meter_id,
@@ -360,17 +390,6 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja Strefa 2",
                     device_info=device_info,
                     entry=entry,
-                )
-            )
-            sensors.append(
-                EnergaCostStatisticsSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    data_key="export_2",
-                    name="Panel Energia Produkcja Strefa 2 Rekompensata",
-                    device_info=device_info,
-                    entry=entry,
-                    serial=serial,
                 )
             )
         elif is_export_prosumer(meter):
@@ -382,17 +401,6 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja",
                     device_info=device_info,
                     entry=entry,
-                )
-            )
-            sensors.append(
-                EnergaCostStatisticsSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    data_key="export",
-                    name="Panel Energia Produkcja Rekompensata",
-                    device_info=device_info,
-                    entry=entry,
-                    serial=serial,
                 )
             )
 
@@ -427,6 +435,17 @@ async def async_setup_entry(
                         device_info=device_info,
                         entry=entry,
                         has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
+                # v0.3.0: warehouse fill level % (needs FIFO history;
+                # unknown until ~11 months of statistics exist).
+                sensors.append(
+                    EnergaBankLevelSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
                         serial=serial,
                     )
                 )
@@ -516,6 +535,7 @@ async def async_setup_entry(
         for p_key, p_name, p_icon in price_keys:
             sensors.append(
                 EnergaPriceSensor(
+                    coordinator=coordinator,
                     data_key=p_key,
                     name=p_name,
                     icon=p_icon,
@@ -550,11 +570,13 @@ async def async_setup_entry(
                     )
                 )
 
-    # === CLEANUP CONSUMER LEFTOVERS (v0.2.15+) ===
+    # === CLEANUP CONSUMER LEFTOVERS (v0.2.15+) + v0.3.0 REMOVALS ===
     # Consumer meters (no export) no longer get prosumer sensors, and
     # prosumer meters drop the bank of the inactive settlement system
-    # (v0.2.19). Remove orphans so they don't linger as unavailable
-    # (replaces the manual jq entity_registry cleanup from v0.2.10).
+    # (v0.2.19). v0.3.0 also drops the Wykryj button (auto-backfill) and
+    # export cost placeholders (live RCEm pricing). Remove orphans so
+    # they don't linger as unavailable (replaces the manual jq
+    # entity_registry cleanup from v0.2.10).
     try:
         from homeassistant.helpers import entity_registry as er
 
@@ -575,6 +597,12 @@ async def async_setup_entry(
                     str(_m.get("meter_serial", _m["meter_point_id"])),
                     _pros,
                     _coeff,
+                )
+            )
+            _doomed.update(
+                orphan_removed_uids(
+                    str(_m["meter_point_id"]),
+                    str(_m.get("meter_serial", _m["meter_point_id"])),
                 )
             )
         if _doomed:
@@ -1099,6 +1127,14 @@ class EnergaLiveSensor(CoordinatorEntity, SensorEntity):
 class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
     """Prosumer balance sensor: (export − baseline_export) × coeff − (import − baseline_import).
 
+    INTERNAL intermediate (v0.3.0: diagnostic, hidden by default): the
+    user-facing values are Bank kWh/PLN (state) and Magazyn Poziom (%).
+    Bilans is just Bank-minus-initial without the max(0,·) floor —
+    showing both next to each other double-counts the same energy and
+    confuses (e.g. G12W stare zasady Bilans 1128 kWh vs Bank 2486 kWh differ by
+    exactly initial 1358 kWh). In the new net-billing system (coeff 0.0)
+    it degenerates to −import, i.e. zero information.
+
     Uses real-time meter totals from the API minus user-configured baselines.
     Baselines represent meter readings at the start of the tracking period
     (e.g. the values from a prosumer bill on Feb 1).
@@ -1126,6 +1162,8 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"Bilans Prosumencki ({serial or meter_id})"
         self._attr_unique_id = f"energa_{meter_id}_prosumer_balance"
         self._attr_has_entity_name = True
+        # Diagnostic: internal math detail, not a user-facing reading.
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
         # Sensor class attributes — no device_class because balance
         # can be negative (not compatible with SensorDeviceClass.ENERGY
@@ -1212,7 +1250,7 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
             "calculation_method": "API meter totals minus baselines",
             "formula": "(export − baseline_export) × coefficient − (import − baseline_import)",
             "source": "Energa API: real-time meter readings (lastMeasurements)",
-            "note": "Ustaw baseline_import/export w Opcjach integracji na stan licznika z początku okresu rozliczeniowego",
+            "note": "Półprodukt do Banku (Bank=max(0,Bilans)+initial). Patrz Bank kWh/PLN i Magazyn Poziom %.",
         }
 
     @property
@@ -1329,23 +1367,18 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         # v0.2.20 FIFO mode: warehouse reconstructed from monthly flows
         # (no invoice typing). Wins over rolling/baseline when ~11 months
         # of statistics exist (needs Download History once).
+        # Shared helper with the Level (%) sensor (v0.3.0).
         fifo_detail = None
         if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
             if monthly:
-                from datetime import date as _date
-
-                flows = []
-                for (fy, fm) in trailing_months(_date.today(), 13):
-                    d = monthly.get((fy, fm), {})
-                    try:
-                        exp = float(d.get("export", d.get("export_1", 0) + d.get("export_2", 0)))
-                        imp = float(d.get("import", d.get("import_1", 0) + d.get("import_2", 0)))
-                    except (ValueError, TypeError):
-                        exp, imp = 0.0, 0.0
-                    flows.append((fy, fm, imp, exp))
-                if sum(1 for (_, _, i, e) in flows if i > 0 or e > 0) >= FIFO_MIN_COVERAGE_MONTHS:
-                    bank, fifo_detail = fifo_kwh_bank(flows, coeff)
+                try:
+                    coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+                except (ValueError, TypeError):
+                    coeff_f = DEFAULT_PROSUMER_COEFFICIENT
+                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f)
+                if _fifo_bank is not None and fifo_detail is not None:
+                    bank = _fifo_bank
                     mode = "fifo_12m"
                     _LOGGER.debug(
                         "BankKwh %s fifo: bank=%.2f expired=%.2f uncovered=%.2f",
@@ -1371,6 +1404,7 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             attrs["fifo_months"] = fifo_detail.get("months_used")
             attrs["fifo_expired_kwh"] = fifo_detail.get("expired_kwh")
             attrs["fifo_uncovered_kwh"] = fifo_detail.get("uncovered_kwh")
+            attrs["fifo_deposits_kwh"] = fifo_detail.get("deposits_kwh")
             attrs["fifo_note"] = (
                 "Magazyn odtworzony z miesięcznych przepływów (FIFO 12 m-cy, "
                 "bez przepisywania z faktury). Wymaga historii ~11 mies."
@@ -1534,6 +1568,59 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         return round(bank, 2)
 
 
+class EnergaBankLevelSensor(CoordinatorEntity, SensorEntity):
+    """Warehouse fill level in % (old net-metering only, v0.3.0).
+
+    level = Bank kWh / deposits (export×coeff credited in the live
+    12-month window) × 100. 100% = nothing withdrawn/expired yet,
+    0% = warehouse empty. Needs ~11 months of history (FIFO mode);
+    without history the state is None (unknown) instead of a guess —
+    the kWh gauge (Bank) stays the source of truth meanwhile.
+
+    device_class BATTERY + % unit: renders as a battery gauge in HA.
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, serial: str = "") -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._attr_name = f"Magazyn Poziom ({serial or meter_id})"
+        self._attr_unique_id = f"energa_{meter_id}_bank_level"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_device_class = SensorDeviceClass.BATTERY
+        self._attr_icon = "mdi:battery-medium"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self):
+        opts = self._entry.options
+        try:
+            coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        except (ValueError, TypeError):
+            coeff = DEFAULT_PROSUMER_COEFFICIENT
+        if coeff < 0.7:
+            return None  # new net-billing has no kWh warehouse
+        if not opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+            return None
+        monthly = getattr(self.coordinator, "_monthly", {}).get(str(self._meter_id), {})
+        bank, detail = _fifo_bank_from_monthly(monthly, coeff)
+        if bank is None or not detail:
+            return None
+        level = warehouse_level_pct(bank, detail.get("deposits_kwh"))
+        self._attr_extra_state_attributes = {
+            "bank_kwh": bank,
+            "deposits_12m_kwh": detail.get("deposits_kwh"),
+            "expired_12m_kwh": detail.get("expired_kwh"),
+            "uncovered_12m_kwh": detail.get("uncovered_kwh"),
+            "months_used": detail.get("months_used"),
+            "source": "FIFO 12 m-cy z miesięcznych przepływów (jak Bank kWh)",
+            "formula": "Bank / wkłady_12m × 100",
+        }
+        return level
+
+
 class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     """Native bank charge/discharge totals for the Energy battery (v0.2.12).
 
@@ -1665,11 +1752,11 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
 
 
 class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
-    """Date of first reading (auto-detected hierarchically, per strefa G12W).
+    """Start of the history window (v0.3.0: blind 730-day auto-backfill).
 
-    Created as diagnostic entity, disabled by default if user prefers.
-    Value is set after async_find_first_data_date (year→half→month→day, ~14 req).
-    Can be manually triggered via button.energa_xxx_wykryj_pierwszy_odczyt.
+    Fresh entries store `auto_history_start` (today−730d) in entry data;
+    legacy entries keep the hierarchically detected date in options.
+    Either way this is the day the Panel Energia history starts from.
     """
 
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, serial: str = "") -> None:
@@ -1685,8 +1772,10 @@ class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        # Stored in entry.options["first_data_date"] after detection, or from API contract_date
-        val = self._entry.options.get(f"meter_{self._meter_id}_first_data_date") or self._entry.options.get("first_data_date")
+        # v0.3.0 blind window first, then legacy detected dates.
+        val = (getattr(self._entry, "data", {}) or {}).get("auto_history_start")
+        if not val:
+            val = self._entry.options.get(f"meter_{self._meter_id}_first_data_date") or self._entry.options.get("first_data_date")
         if val:
             try:
                 from datetime import datetime
@@ -1848,8 +1937,12 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         )
         async_import_statistics(self.hass, energy_metadata, energy_stats)
 
-        # === IMPORT COST STATISTICS ===
-        if cost_stats:
+        # === IMPORT COST STATISTICS (v0.3.0: import only) ===
+        # Export has no static cost: in old net-metering it feeds the kWh
+        # warehouse (no sale), in new net-billing it is paid at the live
+        # monthly RCEm×1.23 — wire the RCEm/Cena Oddania price entity in
+        # the Energy panel instead of a frozen 0.95 compensation stat.
+        if cost_stats and not self._data_key.startswith("export"):
             cost_entity_id = f"{self.entity_id}_cost"
             if self._data_key == "import_1":
                 cost_name = "Panel Energia Strefa 1 Koszt"
@@ -1988,15 +2081,22 @@ class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
         return self.coordinator.data is not None
 
 
-class EnergaPriceSensor(SensorEntity):
+class EnergaPriceSensor(CoordinatorEntity, SensorEntity):
     """Diagnostic sensor exposing configured energy price as HA entity.
 
     Enables Energy Dashboard "Use entity with current price" mode.
-    Not tied to coordinator — value comes from config options.
+    Import prices come from config options; the EXPORT price (v0.3.0)
+    is the live sale price in the new net-billing system
+    (RCEm×1.23 from the coordinator cache, manual fallback) so the
+    Energy panel values the grid return exactly like the deposit.
+    In the old net-metering system nothing is sold (export feeds the
+    kWh warehouse instead), so the export price is unknown by design —
+    wire the export sensors as solar/battery there, not as grid return.
     """
 
     def __init__(
         self,
+        coordinator,
         data_key: str,
         name: str,
         icon: str,
@@ -2006,6 +2106,7 @@ class EnergaPriceSensor(SensorEntity):
         meter_id: str,
     ) -> None:
         """Initialize price sensor."""
+        super().__init__(coordinator)
         self._data_key = data_key
         self._entry = entry
         self._serial = serial
@@ -2025,15 +2126,58 @@ class EnergaPriceSensor(SensorEntity):
             self._attr_native_unit_of_measurement = "PLN/kWh"
             self._attr_state_class = SensorStateClass.MEASUREMENT
 
+    def _is_old_system(self) -> bool:
+        try:
+            coeff = float(
+                self._entry.options.get(
+                    CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                )
+            )
+        except (ValueError, TypeError):
+            coeff = DEFAULT_PROSUMER_COEFFICIENT
+        return coeff >= 0.7
+
+    def _sale_rce(self) -> float:
+        """RCEm used for the sale price (cache first, manual fallback)."""
+        opts = self._entry.options
+        if opts.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH):
+            cached = getattr(self.coordinator, "_rce_cache", None)
+            if cached is not None:
+                try:
+                    return float(cached)
+                except (ValueError, TypeError):
+                    pass
+        try:
+            return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+        except (ValueError, TypeError):
+            return DEFAULT_BANK_RCE_PRICE
+
     @property
     def native_value(self):
-        """Return price from config options."""
+        """Return price from config options (export = live sale price)."""
         opts = dict(self._entry.options)
 
         if self._data_key == "coefficient":
             return float(
                 opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
             )
+
+        if self._data_key == "export":
+            if self._is_old_system():
+                # Warehouse system: export is credited in kWh, not sold.
+                self._attr_extra_state_attributes = {
+                    "note": "Stary net-metering: nadwyżka trafia do magazynu kWh, nie na sprzedaż — brak ceny.",
+                }
+                return None
+            rce = self._sale_rce()
+            self._attr_extra_state_attributes = {
+                "rce_price": rce,
+                "vat_multiplier": 1.23,
+                "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",
+                "note": "Cena sprzedaży nadwyżki = RCEm×1.23 (jak depozyt w Bank PLN). Podepnij jako cenę zwrotu w Panelu Energia.",
+                "formula": "RCEm × 1.23",
+            }
+            return round(rce * 1.23, 5)
 
         return get_price_for_key(
             opts, self._data_key, meter_id=self._meter_id
@@ -2241,6 +2385,13 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             return float(coord_rce)
         return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
 
+    def _meter_tariff(self):
+        """Tariff string of this meter (G11 vs G12W fee table, v0.3.0)."""
+        for m in self.coordinator.data or []:
+            if str(m.get("meter_point_id")) == str(self._meter_id):
+                return m.get("tariff")
+        return None
+
     @property
     def native_value(self):
         from datetime import date as _date
@@ -2270,7 +2421,9 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         )
 
         # === v0.2.14 full-bill math (invoice reconstruction) ===
-        fees = fees_from_options(opts)
+        # v0.3.0: fee table follows the meter tariff (G11 invoice table
+        # for single-zone meters, G12W otherwise).
+        fees = fees_from_options(opts, self._meter_tariff())
         # v0.2.18: capacity fee auto-bracket (URE 2026) unless overridden.
         capacity_source = "manual (Options tariff_capacity)"
         if CONF_TARIFF_CAPACITY not in (opts or {}):
@@ -2350,7 +2503,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "cover_day_kwh": cover_d,
                 "cover_night_kwh": cover_n,
                 "capacity_source": capacity_source,
-                "fee_note": "Stawki z Options (taryfa) lub domyślne G12W z faktur; "
+                "fee_table": tariff_family(self._meter_tariff()),
+                "fee_note": "Stawki z Options (taryfa) lub domyślne z faktur (G11: 1200000017/FES/XXXXX, G12W: 07 i 05-06.2026); "
                 "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
                 "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "
                 "godzinowo — przybliżenie ~1% (kWh) / ~13% (depozyt PLN)",

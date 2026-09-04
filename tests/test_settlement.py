@@ -248,3 +248,65 @@ class TestFlowHistorySeries:
         # invalid row keeps totals, next valid row anchors (no delta yet)
         ch, dis = flow_history_series([("x", None), (1.0, 2.0)], 0.8, True)
         assert (ch, dis) == ([0.0, 0.0], [0.0, 0.0])
+
+
+class TestFifoDepositsAndLevel:
+    """v0.3.0: deposits total + warehouse fill level %."""
+
+    def test_deposits_counted(self):
+        from datetime import date as _date
+
+        from custom_components.energa_mobile.settlement import (
+            fifo_kwh_bank,
+            warehouse_level_pct,
+        )
+
+        flows = [(2025, m, 50.0, 100.0) for m in range(9, 13)]
+        flows += [(2026, m, 50.0, 100.0) for m in range(1, 9)]
+        bank, detail = fifo_kwh_bank(flows, 0.8, _date(2026, 9, 3))
+        assert bank == 360.0
+        # 12 live months x 100 x 0.8 credited
+        assert detail["deposits_kwh"] == 960.0
+        assert warehouse_level_pct(bank, detail["deposits_kwh"]) == 37.5
+
+    def test_level_bounds_and_unknown(self):
+        from custom_components.energa_mobile.settlement import (
+            warehouse_level_pct,
+        )
+
+        assert warehouse_level_pct(0.0, 100.0) == 0.0
+        assert warehouse_level_pct(100.0, 100.0) == 100.0
+        assert warehouse_level_pct(200.0, 100.0) == 100.0  # capped
+        assert warehouse_level_pct(50.0, 0.0) is None
+        assert warehouse_level_pct(None, 100.0) is None
+        assert warehouse_level_pct(50.0, None) is None
+        assert warehouse_level_pct("junk", 100.0) is None
+
+    def test_empty_detail_has_deposits_key(self):
+        from custom_components.energa_mobile.settlement import fifo_kwh_bank
+
+        _, detail = fifo_kwh_bank([], 0.8)
+        assert detail["deposits_kwh"] == 0.0
+
+
+class TestOrphanRemovedUids:
+    """v0.3.0 removals: Wykryj button + export cost placeholders."""
+
+    def test_button_and_export_costs_doomed(self):
+        from custom_components.energa_mobile.settlement import (
+            orphan_removed_uids,
+        )
+
+        doomed = orphan_removed_uids("310002", "71000001")
+        assert "energa_310002_detect_first_data" in doomed
+        assert "energa_71000001_export_cost_stats" in doomed
+        assert "energa_71000001_export_1_cost_stats" in doomed
+        assert "energa_71000001_export_2_cost_stats" in doomed
+
+    def test_import_costs_survive(self):
+        from custom_components.energa_mobile.settlement import (
+            orphan_removed_uids,
+        )
+
+        doomed = orphan_removed_uids("310002", "71000001")
+        assert not any("import" in u for u in doomed)

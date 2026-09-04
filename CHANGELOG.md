@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.3.0 (2026-09-04)
+
+### 🧭 Nowy first boot: historia sama w tle, zero blokowania
+- **Auto-backfill 730 dni:** po dodaniu integracji historia z 2 lat
+  pobiera się sama w tle (powiadomienie `Energa: Pobieranie danych`),
+  gdy statystyki jeszcze nie istnieją. Koniec z zamrożonym UI
+  (hierarchiczna detekcja potrafiła mielić minutę przy ~15 s obietnicy).
+- **Usunięty overengineering:** platforma `button` (`Wykryj pierwszy
+  odczyt`) i krok `detect_first` w Options wyleciały; sieroty sprzątają
+  się same przy starcie. Zostały: `Ceny`, `Pobierz Historię` (ręczny
+  re-import), `Wyczyść Statystyki`.
+- **Uczciwe tłumaczenia:** koniec z `~15 sekund`, poprawione `początkowy`,
+  uzupełniony angielski, taryfowe defaulty formularza G11/G12W.
+
+### 🔋 Panel Energia od nowa: stary = off-grid, nowy = sprzedaż
+- **Stary net-metering:** eksport NIE jest zwrotem do sieci (trafia do
+  magazynu kWh). Rekomendowane wpięcie: import = sieć, eksport = ☀️
+  instalacja PV, przepływy = bateria. Koszty eksportu po 0,95
+  przestały powstawać (placeholder bez pokrycia).
+- **Nowy net-billing:** nadprodukcja JEST sprzedawana — `Cena Oddania`
+  to teraz żywa cena sprzedaży `RCEm×1.23` (cache PSE, fallback opcja);
+  podepnij ją jako cenę zwrotu w Panelu Energia zamiast zamrożonej
+  rekompensaty. W starym systemie cena jest `unknown` (brak sprzedaży).
+- **Bilans Prosumencki = diagnostic (ukryty):** półprodukt do Banku
+  (`Bank=max(0,Bilans)+initial`; np. G12W stare zasady 1128,1 vs 2486,1 różnią
+  się dokładnie o `initial` 1358). W nowym systemie degeneruje się do
+  `−import` (zero informacji). Patrz Bank i Magazyn Poziom.
+- **Nowy sensor `Magazyn Poziom %`** (stary system, klasa `battery`):
+  Bank / wkłady 12 m-cy × 100 z trybu FIFO; bez historii `unknown`
+  zamiast zgadywania. Atrybuty FIFO: `fifo_deposits_kwh` i reszta.
+
+### 🧾 Koszty jak na fakturze G11 + akcyza informacyjnie
+- **Tabela G11** z faktury `1200000017/FES/XXXXX` (G11 bez fotowoltaiki, 2159 kWh):
+  energia `0,6114`, handlowa `16,18/mies.`, abonament `0,70`, sieciowa
+  stała `11,77`, zmienna `0,3485`, mocowa `24,05` → netto `2271,74`,
+  brutto `2794,24` co do grosza. Prognoza konsumenta wreszcie poprawna
+  (dotąd liczyła defaultami G12W z handlową `0,00`).
+- **Akcyza 5 PLN/MWh już w cenie energii** (faktura G11 dowodzi:
+  bez dodawania suma gra; linijka `naliczono akcyzę` to przypis).
+  `compute_bill` raportuje ją jako info, nie dolicza.
+- Tabela opłat dobierana po taryfie licznika (`tariff_family`);
+  formularz Cen pokazuje defaulty G11 dla kont czysto-G11; migracja:
+  opcje G11 z nietkniętymi defaultami G12W używają tabeli G11.
+
+### 🧪 Testy
+- **~200 testów**: faktura G11 co do grosza, `tariff_family`,
+  migracja opcji, `warehouse_level_pct`, `deposits_kwh` w FIFO,
+  `orphan_removed_uids`, brak kosztów eksportu.
+
 ## v0.2.23 (2026-09-04)
 
 ### 🔋 Historia także dla baterii (koniec 0/0)
@@ -13,7 +62,7 @@
   `Bank kWh/PLN`.
 
 ### 🧪 Testy
-- **185 testów** (było 179): serie historyczne przepływów.
+- **182 testy** (było 179): serie historyczne przepływów.
 
 ## v0.2.22 (2026-09-04)
 - Wyrównanie manifestu (0.2.21 miała manifest 0.2.20); kod = v0.2.21.

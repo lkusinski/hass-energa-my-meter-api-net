@@ -1,15 +1,19 @@
-"""Tests for v0.2.14 tariff math (hidden fees).
+"""Tests for v0.2.14 tariff math (hidden fees), v0.3.0 G11 table.
 
- Fee table: G12W_DEFAULT_FEES. Reference numbers come from real invoices:
+ Fee tables: G12W_DEFAULT_FEES, G11_DEFAULT_FEES (exact values from G11
+ consumer invoice 1200000017/FES/XXXXX, 04.02-05.04.2026, 2159 kWh:
+ sale 1352.37 + distribution 919.37 = netto 2271.74 -> brutto 2794.24).
+ Reference numbers come from real invoices:
  - G12W-nowe 07.2026: sale 195.06 (100.15+0.20+94.56+0.15), distribution
    148.45, netto 343.51, brutto 422.52, deposit 147.44, payable 275.16.
-   Excise base on that invoice reads 0.040+0.029 MWh (case under
-   verification); the formula charges excise on the full import, which
-   moves the total by <1% either way (see WIZJA open questions).
  - G12W-stare 05-06.2026 (2 months, fully covered by the warehouse):
    sale 34.18 (0+0.55+0+1.27 + handlowa 2x16.18), distribution 92.92
    (variable + quality rows 0.00 when covered), netto 127.10,
    brutto 156.33.
+ - v0.3.0: excise (5 PLN/MWh) is INFORMATIONAL — already inside the
+   energy price (G11 invoice matches to the grosz only without adding
+   it). compute_bill still reports it under "excise" but excludes it
+   from sale_total/netto.
 """
 
 import importlib.util
@@ -24,6 +28,8 @@ compute_bill = _mod.compute_bill
 fees_from_options = _mod.fees_from_options
 split_cover = _mod.split_cover
 G12W_DEFAULT_FEES = _mod.G12W_DEFAULT_FEES
+G11_DEFAULT_FEES = _mod.G11_DEFAULT_FEES
+tariff_family = _mod.tariff_family
 capacity_for_annual_use = _mod.capacity_for_annual_use
 
 
@@ -68,14 +74,22 @@ class TestOldSystemCovered:
         assert res["distr_var_day"] == 0.0
         assert res["distr_var_night"] == 0.0
         assert res["distr_quality"] == 0.0
-        # Excise + OZE/cogen stay on the full import:
+        # Excise + OZE/cogen reported on the full import (excise is
+        # informational only, excluded from the total since v0.3.0):
         assert res["excise"] == 1.5
         assert res["distr_oze"] == 2.18
         assert res["distr_cogen"] == 0.9
         assert res["trade_fee"] == 32.36
-        assert abs(res["netto"] - 127.10) / 127.10 < 0.01
-        assert abs(res["brutto"] - 156.33) / 156.33 < 0.01
-        assert abs(res["do_zaplaty"] - 156.33) / 156.33 < 0.01
+        # Exact model values (no excise in total):
+        assert res["sale_total"] == 32.36
+        assert res["netto"] == 125.28
+        assert res["brutto"] == 154.09
+        # Invoice (127.10 / 156.33) had a small UNCOVERED remainder
+        # (energy lines 0.55 + 1.27 = 1.82); our fully-covered
+        # reconstruction matches it within 2%.
+        assert abs(res["netto"] - 127.10) / 127.10 < 0.02
+        assert abs(res["brutto"] - 156.33) / 156.33 < 0.02
+        assert abs(res["do_zaplaty"] - 156.33) / 156.33 < 0.02
 
     def test_partial_cover_pays_rest(self):
         res = compute_bill(
@@ -175,7 +189,9 @@ class TestBillSensorWiring:
                            cover_day=day, cover_night=night)
         assert res["sale_energy_day"] == 0.0
         assert res["sale_energy_night"] == 0.0
-        assert abs(res["brutto"] - 156.33) / 156.33 < 0.01
+        # Fully-covered reconstruction vs invoice with a small uncovered
+        # remainder (see TestOldSystemCovered): within 2%.
+        assert abs(res["brutto"] - 156.33) / 156.33 < 0.02
 
     def test_old_system_never_applies_deposit(self):
         # Old net-metering with export must NOT get a PLN deposit:
@@ -222,3 +238,100 @@ class TestCapacityBrackets:
         assert r_small["distr_fixed"] == round(0.74 + 20.17 + 10.31, 2)
         assert r_big["distr_fixed"] == round(0.74 + 20.17 + 24.05, 2)
         assert r_big["do_zaplaty"] > r_small["do_zaplaty"]
+
+
+class TestG11Invoice:
+    """G11 consumer invoice 1200000017/FES/XXXXX (G11 bez fotowoltaiki, v0.3.0).
+
+    Period 04.02-05.04.2026 (2 months), 2159 kWh single-zone, meter
+    8927.584 -> 11086.221. Every line must match to the grosz.
+    """
+
+    def test_exact_lines(self):
+        fees = fees_from_options({}, "G11")
+        res = compute_bill(2159.0, 0.0, 0.0, 0.0, fees, months=2,
+                           deposit_pln=0.0)
+        assert res["sale_energy_day"] == 1320.01
+        assert res["sale_energy_night"] == 0.0
+        assert res["trade_fee"] == 32.36
+        assert res["sale_total"] == 1352.37
+        assert res["distr_var_day"] == 752.41
+        assert res["distr_quality"] == 71.68
+        assert res["distr_oze"] == 15.76
+        assert res["distr_cogen"] == 6.48
+        assert res["distr_fixed"] == 73.04
+        assert res["distr_total"] == 919.37
+        assert res["netto"] == 2271.74
+        assert res["vat"] == 522.50
+        assert res["brutto"] == 2794.24
+        assert res["deposit"] == 0.0
+        assert res["do_zaplaty"] == 2794.24
+
+    def test_excise_informational_only(self):
+        # 2159 kWh x 5 PLN/MWh = 10.795 reported (10.79 after binary
+        # round-half-even; invoice prints 10.80), NOT added to the total.
+        fees = fees_from_options({}, "G11")
+        res = compute_bill(2159.0, 0.0, 0.0, 0.0, fees, months=2,
+                           deposit_pln=0.0)
+        assert res["excise"] == 10.79
+        assert res["sale_total"] == round(1320.01 + 32.36, 2)
+
+    def test_capacity_bracket_matches_invoice(self):
+        # Invoice annual use 7312 kWh -> top bracket 24.05 (2 x 24.05).
+        assert capacity_for_annual_use(7312.0) == 24.05
+        fees = fees_from_options({}, "G11")
+        res = compute_bill(2159.0, 0.0, 0.0, 0.0, fees, months=2,
+                           deposit_pln=0.0)
+        assert res["distr_fixed"] == round(2 * (0.70 + 11.77 + 24.05), 2)
+
+
+class TestTariffFamily:
+    def test_g11(self):
+        assert tariff_family("G11") == "G11"
+        assert tariff_family("g11") == "G11"
+
+    def test_two_zone_falls_back_to_g12w(self):
+        for t in ("G12W", "G12", "G12AS", "G12R", "G12w", None, "", "junk", 123):
+            assert tariff_family(t) == "G12W"
+
+    def test_fees_default_per_tariff(self):
+        assert fees_from_options({}, "G11") == G11_DEFAULT_FEES
+        assert fees_from_options({}, "G12W") == G12W_DEFAULT_FEES
+        assert fees_from_options({}) == G12W_DEFAULT_FEES
+        assert fees_from_options(None, "G11") == G11_DEFAULT_FEES
+
+    def test_override_wins(self):
+        fees = fees_from_options({"tariff_trade_fee": 9.99}, "G11")
+        assert fees["trade_fee"] == 9.99
+        assert fees["energy_day"] == G11_DEFAULT_FEES["energy_day"]
+
+    def test_g11_migration_untouched_g12w_defaults(self):
+        # Options form used to bake G12W defaults everywhere: a G11
+        # meter with all-G12W tariff_* values gets the G11 table.
+        stale = {f"tariff_{k}": v for k, v in {
+            "energy_day": 0.6107, "energy_night": 0.3990,
+            "excise_mwh": 5.00, "trade_fee": 0.0, "abonament": 0.74,
+            "grid_fixed": 20.17, "grid_var_day": 0.4017,
+            "grid_var_night": 0.0851, "quality": 0.0332, "oze": 0.0073,
+            "cogen": 0.0030, "capacity": 24.05,
+        }.items()}
+        assert fees_from_options(stale, "G11") == G11_DEFAULT_FEES
+
+    def test_g11_migration_customized_value_respected(self):
+        opts = {"tariff_trade_fee": 16.18, "tariff_abonament": 0.70}
+        fees = fees_from_options(opts, "G11")
+        assert fees["trade_fee"] == 16.18
+        assert fees["abonament"] == 0.70
+        # untouched fields fall back to the G11 table, not G12W
+        assert fees["grid_fixed"] == G11_DEFAULT_FEES["grid_fixed"]
+        assert fees["energy_day"] == G11_DEFAULT_FEES["energy_day"]
+
+    def test_g12w_never_migrates(self):
+        stale_g11 = {f"tariff_{k}": v for k, v in {
+            "energy_day": 0.6114, "energy_night": 0.0,
+            "excise_mwh": 5.00, "trade_fee": 16.18, "abonament": 0.70,
+            "grid_fixed": 11.77, "grid_var_day": 0.3485,
+            "grid_var_night": 0.0, "quality": 0.0332, "oze": 0.0073,
+            "cogen": 0.0030, "capacity": 24.05,
+        }.items()}
+        assert fees_from_options(stale_g11, "G12W")["trade_fee"] == 16.18

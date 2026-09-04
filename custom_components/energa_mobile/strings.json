@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Energa My Meter Login",
-                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. Please wait — the integration is trying to find the date of the first reading (~15 seconds).",
+                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. The last 2 years of history download automatically in the background after setup.",
                 "data": {
                     "username": "Username (email)",
                     "password": "Password"
@@ -34,7 +34,6 @@
                     "credentials": "Change Credentials",
                     "prices": "Set Energy Prices",
                     "history": "Download History",
-                    "detect_first": "Wykryj pierwszy odczyt",
                     "clear_stats": "Clear Energy Panel Statistics"
                 }
             },
@@ -83,17 +82,6 @@
                 "data": {
                     "start_date": "Start Date"
                 }
-            },
-            "detect_first": {
-                "title": "Wykryj pierwszy odczyt",
-                "description": "**Wykryto:** {detected_date} (kontrakt: {contract_date})\n\nPotwierdź aby pobrać historię od wykrytego dnia. Dyskretne: ~14 requestów hierarchicznie (rok→pół→miesiąc→dzień) zamiast 365.",
-                "data": {
-                    "start_date": "Start Date"
-                }
-            },
-            "first_data_date_sensor": {
-                "title": "Data pierwszego odczytu",
-                "description": "Automatycznie wykryta data pierwszego dostępnego odczytu w API (hierarchicznie rok→pół→miesiąc→dzień). Służy jako domyślna data startu w 'Pobierz Historię'."
             },
             "clear_stats": {
                 "title": "Clear Statistics",

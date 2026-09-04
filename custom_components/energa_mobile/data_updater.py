@@ -67,6 +67,11 @@ class EnergaDataUpdater:
         if not energy_stats:
             return [], []
 
+        # v0.3.0: export has no static cost (old net-metering sells
+        # nothing; new net-billing pays live RCEm×1.23 via price entity).
+        if data_key.startswith("export"):
+            return energy_stats, []
+
         # Build cost statistics (derived from energy sum)
         cost_stats = []
         for stat in energy_stats:

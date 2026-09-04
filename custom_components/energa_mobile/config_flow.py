@@ -55,18 +55,6 @@ from .const import (
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
     DEFAULT_SETTLEMENT_DATE,
-    DEFAULT_TARIFF_ABONAMENT,
-    DEFAULT_TARIFF_CAPACITY,
-    DEFAULT_TARIFF_COGEN,
-    DEFAULT_TARIFF_ENERGY_DAY,
-    DEFAULT_TARIFF_ENERGY_NIGHT,
-    DEFAULT_TARIFF_EXCISE_MWH,
-    DEFAULT_TARIFF_GRID_FIXED,
-    DEFAULT_TARIFF_GRID_VAR_DAY,
-    DEFAULT_TARIFF_GRID_VAR_NIGHT,
-    DEFAULT_TARIFF_OZE,
-    DEFAULT_TARIFF_QUALITY,
-    DEFAULT_TARIFF_TRADE_FEE,
     DEFAULT_USE_ROLLING_365D,
     DOMAIN,
 )
@@ -74,29 +62,33 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _tariff_fee_schema(options: dict) -> dict:
+def _tariff_fee_schema(options: dict, tariff: str | None = None) -> dict:
     """Optional tariff fee overrides for the full-bill forecast (v0.2.14).
 
-    Shared by the G12W and G11 price forms. Defaults are the G12W invoice
-    values; an empty/unchanged field keeps the default via fees_from_options.
+    Shared by the G12W and G11 price forms. Defaults follow the meter
+    tariff (v0.3.0: G11 has its own invoice-verified table); an
+    empty/unchanged field keeps the default via fees_from_options.
     """
-    defaults = {
-        CONF_TARIFF_ENERGY_DAY: DEFAULT_TARIFF_ENERGY_DAY,
-        CONF_TARIFF_ENERGY_NIGHT: DEFAULT_TARIFF_ENERGY_NIGHT,
-        CONF_TARIFF_EXCISE_MWH: DEFAULT_TARIFF_EXCISE_MWH,
-        CONF_TARIFF_TRADE_FEE: DEFAULT_TARIFF_TRADE_FEE,
-        CONF_TARIFF_ABONAMENT: DEFAULT_TARIFF_ABONAMENT,
-        CONF_TARIFF_GRID_FIXED: DEFAULT_TARIFF_GRID_FIXED,
-        CONF_TARIFF_GRID_VAR_DAY: DEFAULT_TARIFF_GRID_VAR_DAY,
-        CONF_TARIFF_GRID_VAR_NIGHT: DEFAULT_TARIFF_GRID_VAR_NIGHT,
-        CONF_TARIFF_QUALITY: DEFAULT_TARIFF_QUALITY,
-        CONF_TARIFF_OZE: DEFAULT_TARIFF_OZE,
-        CONF_TARIFF_COGEN: DEFAULT_TARIFF_COGEN,
-        CONF_TARIFF_CAPACITY: DEFAULT_TARIFF_CAPACITY,
+    from .tariff import FEE_TABLES, tariff_family
+
+    table = FEE_TABLES.get(tariff_family(tariff))
+    key_map = {
+        CONF_TARIFF_ENERGY_DAY: "energy_day",
+        CONF_TARIFF_ENERGY_NIGHT: "energy_night",
+        CONF_TARIFF_EXCISE_MWH: "excise_mwh",
+        CONF_TARIFF_TRADE_FEE: "trade_fee",
+        CONF_TARIFF_ABONAMENT: "abonament",
+        CONF_TARIFF_GRID_FIXED: "grid_fixed",
+        CONF_TARIFF_GRID_VAR_DAY: "grid_var_day",
+        CONF_TARIFF_GRID_VAR_NIGHT: "grid_var_night",
+        CONF_TARIFF_QUALITY: "quality",
+        CONF_TARIFF_OZE: "oze",
+        CONF_TARIFF_COGEN: "cogen",
+        CONF_TARIFF_CAPACITY: "capacity",
     }
     return {
-        vol.Optional(key, default=options.get(key, default)): vol.Coerce(float)
-        for key, default in defaults.items()
+        vol.Optional(key, default=options.get(key, table[fee])): vol.Coerce(float)
+        for key, fee in key_map.items()
     }
 
 
@@ -112,7 +104,13 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return EnergaOptionsFlow(config_entry)
 
     async def async_step_user(self, user_input=None):
-        """Handle initial user setup."""
+        """Handle initial user setup.
+
+        v0.3.0: fast, non-blocking. Login → create entry immediately.
+        The last-730-day history backfills itself in the background
+        right after setup (notification "Energa: Import Historii");
+        no hierarchical detection freezes the UI anymore.
+        """
         errors = {}
         if user_input is not None:
             original_username = user_input[CONF_USERNAME].strip()
@@ -129,59 +127,25 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 try:
                     await api.async_login()
-                    # Auto-detect first data date hierarchically (dyskretnie ~14 req)
-                    # Show notification to wait ~15s
-                    from homeassistant.components import persistent_notification
-                    try:
-                        persistent_notification.async_create(
-                            self.hass,
-                            "Wykrywam datę pierwszego odczytu (hierarchicznie rok→pół→miesiąc→dzień, ~15s) — proszę czekać...",
-                            title="Energa: Wykrywanie",
-                            notification_id=f"energa_detect_{attempt_username}",
-                        )
-                        # Need meter data first
-                        await api.async_get_data()
-                        if api._meters_data:
-                            first_meter_id = api._meters_data[0]["meter_point_id"]
-                            detected = await api.async_find_first_data_date(first_meter_id)
-                            if detected:
-                                date_str = detected.strftime("%Y-%m-%d")
-                                # Store for sensor/history default
-                                entry_data_first = {
-                                    **user_input,
-                                    CONF_DEVICE_TOKEN: device_token,
-                                    "first_data_date": date_str,
-                                    f"meter_{first_meter_id}_first_data_date": date_str,
-                                }
-                                # Also try per-meter for all meters
-                                for m in api._meters_data:
-                                    mid = m["meter_point_id"]
-                                    try:
-                                        d = await api.async_find_first_data_date(mid)
-                                        if d:
-                                            entry_data_first[f"meter_{mid}_first_data_date"] = d.strftime("%Y-%m-%d")
-                                    except:
-                                        pass
-                                persistent_notification.async_dismiss(self.hass, f"energa_detect_{attempt_username}")
-                                # Save the successful username (lowercase if fallback succeeded)
-                                entry_data_first[CONF_USERNAME] = attempt_username
-                                await self.async_set_unique_id(attempt_username.lower())
-                                self._abort_if_unique_id_configured()
-                                return self.async_create_entry(
-                                    title=attempt_username,
-                                    data=entry_data_first,
-                                )
-                    except Exception as det_err:
-                        _LOGGER.debug("Auto-detect first data failed, fallback to contract_date: %s", det_err)
-                    # Fallback without auto-detect
-                    # Save the successful username (lowercase if fallback succeeded)
-                    user_input[CONF_USERNAME] = attempt_username
-                    await self.async_set_unique_id(attempt_username.lower())
-                    self._abort_if_unique_id_configured()
+                    # Blind 730-day window: the Energa API holds ~2 years.
+                    # The backfill task (see __init__.py) imports it in
+                    # the background; the First-Data sensor shows this
+                    # window start until real statistics land.
+                    from datetime import timedelta
+
+                    from homeassistant.util import dt as dt_util
+
+                    window_start = (
+                        dt_util.now() - timedelta(days=730)
+                    ).date().isoformat()
                     entry_data = {
                         **user_input,
+                        CONF_USERNAME: attempt_username,
                         CONF_DEVICE_TOKEN: device_token,
+                        "auto_history_start": window_start,
                     }
+                    await self.async_set_unique_id(attempt_username.lower())
+                    self._abort_if_unique_id_configured()
                     return self.async_create_entry(
                         title=attempt_username,
                         data=entry_data,
@@ -274,7 +238,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Show options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["credentials", "prices", "history", "detect_first", "clear_stats"],
+            menu_options=["credentials", "prices", "history", "clear_stats"],
         )
 
     async def async_step_credentials(self, user_input=None):
@@ -374,6 +338,23 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             ]
         return []
 
+    def _dominant_tariff(self) -> str:
+        """Fee-table tariff for the prices form (v0.3.0).
+
+        G11 only when every active meter is single-zone G11 (its own
+        invoice table); otherwise G12W. Mixed accounts keep G12W and
+        fine-tune per-field.
+        """
+        meters = self._get_active_meters()
+        if not meters:
+            return "G12W"
+        from .tariff import tariff_family
+
+        families = {tariff_family(m.get("tariff")) for m in meters}
+        if families == {"G11"}:
+            return "G11"
+        return "G12W"
+
     async def async_step_prices(self, user_input=None):
         """Handle energy price configuration."""
         if user_input is not None:
@@ -462,7 +443,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
-                        **_tariff_fee_schema(self._config_entry.options),
+                        **_tariff_fee_schema(self._config_entry.options, self._dominant_tariff()),
                     }
                 ),
             )
@@ -517,7 +498,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
-                        **_tariff_fee_schema(self._config_entry.options),
+                        **_tariff_fee_schema(self._config_entry.options, self._dominant_tariff()),
                     }
                 ),
             )
@@ -594,56 +575,6 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             ),
             description_placeholders={"contract_date": contract_str},
         )
-
-    async def async_step_detect_first(self, user_input=None):
-        """Hierarchically detect first day with data (year → half → month → day).
-
-        Uses single-day mchart probes per level (1 request per check, not 365),
-        with 0.7s sleep for discretion. Starts from activationDate or 2020.
-        Dyskretne: ~14 requestów dla 5 lat vs 365 przy liniowym.
-        """
-        entry_data = self.hass.data.get(DOMAIN, {}).get(self._config_entry.entry_id, {})
-        api = entry_data.get("api") if isinstance(entry_data, dict) else entry_data
-        if not api:
-            return self.async_abort(reason="integration_not_ready")
-
-        if user_input is not None:
-            from . import _import_meter_history
-
-            # User confirmed the detected date, start history import from there
-            start_date = datetime.strptime(user_input["start_date"], "%Y-%m-%d")
-            days = (datetime.now() - start_date).days
-            if days < 1:
-                days = 1
-            try:
-                meters = await api.async_get_data()
-            except Exception as err:
-                return self.async_abort(reason="cannot_connect", description_placeholders={"error": str(err)})
-            active_meters = [m for m in meters if m.get("total_plus") and float(m.get("total_plus", 0)) > 0]
-            for meter in active_meters:
-                self.hass.async_create_task(_import_meter_history(self.hass, api, meter, start_date, days, self._config_entry))
-            return self.async_create_entry(title="", data=dict(self._config_entry.options))
-
-        # Detect first data date via hierarchical search
-        try:
-            meters = await api.async_get_data()
-            if not meters:
-                return self.async_abort(reason="cannot_connect", description_placeholders={"error": "Brak liczników"})
-            meter = meters[0]
-            meter_id = meter["meter_point_id"]
-            detected = await api.async_find_first_data_date(meter_id)
-            if detected:
-                detected_str = detected.strftime("%Y-%m-%d")
-                return self.async_show_form(
-                    step_id="detect_first",
-                    data_schema=vol.Schema({vol.Required("start_date", default=detected_str): selector.DateSelector()}),
-                    description_placeholders={"detected_date": detected_str, "contract_date": str(meter.get("contract_date", "Nieznana"))},
-                )
-            else:
-                return self.async_abort(reason="cannot_connect", description_placeholders={"error": "Nie znaleziono pierwszego odczytu (brak danych w API)"})
-        except Exception as err:
-            _LOGGER.exception("Detect first data failed")
-            return self.async_abort(reason="cannot_connect", description_placeholders={"error": str(err)})
 
     async def async_step_clear_stats(self, user_input=None):
         """Clear Energy Panel statistics for Energa sensors.

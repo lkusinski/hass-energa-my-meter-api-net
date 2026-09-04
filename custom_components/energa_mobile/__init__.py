@@ -44,8 +44,12 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "button"]
+PLATFORMS = ["sensor"]
 TIMEZONE = ZoneInfo("Europe/Warsaw")
+
+# Blind auto-backfill window (v0.3.0): the Energa API holds ~2 years.
+# No detection probing — history just downloads in the background.
+AUTO_HISTORY_DAYS = 730
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -187,6 +191,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Reload integration when options change (e.g. prices updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
+    # v0.3.0: blind 730-day auto-backfill in the background when the
+    # entry has no statistics yet (fresh first boot). Never blocks
+    # setup; progress lands in notifications (energa_import_*).
+    hass.async_create_task(_maybe_auto_backfill(hass, api, entry))
+
     return True
 
 
@@ -208,6 +217,87 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     """Reload integration when options are updated."""
     _LOGGER.debug("Options updated, reloading: %s", list(entry.options.keys()))
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> None:
+    """Schedule the blind 730-day history import for fresh entries.
+
+    Idempotent: runs only when none of the entry meters has Panel
+    Energia statistics yet. Any failure is fully defensive — the user
+    can always trigger Options → Pobierz Historię manually.
+    """
+    try:
+        try:
+            meters = await api.async_get_data(force_refresh=False)
+        except Exception as err:
+            _LOGGER.debug("Auto-backfill: meter fetch failed: %s", err)
+            return
+        active = [
+            m for m in (meters or [])
+            if m.get("total_plus") and float(m.get("total_plus", 0)) > 0
+        ]
+        if not active:
+            return
+        if await _has_any_panel_statistics(hass, active):
+            _LOGGER.debug("Auto-backfill: statistics already present, skipping")
+            return
+        try:
+            start_str = (entry.data or {}).get("auto_history_start")
+            start_date = datetime.strptime(start_str, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            start_date = datetime.now(TIMEZONE) - timedelta(days=AUTO_HISTORY_DAYS)
+        days = (datetime.now(TIMEZONE).date() - start_date.date()).days + 1
+        days = max(1, min(days, AUTO_HISTORY_DAYS + 1))
+        persistent_notification.async_create(
+            hass,
+            "Pobieranie historii z ostatnich 2 lat wystartowało w tle "
+            f"({len(active)} liczników). Panel Energia wypełni się sam — "
+            "to potrwa kilkanaście minut.",
+            title="Energa: Pobieranie danych",
+            notification_id="energa_auto_backfill",
+        )
+        _LOGGER.info(
+            "Auto-backfill: importing %d days from %s for %d meter(s)",
+            days, start_date.date(), len(active),
+        )
+        for meter in active:
+            await _import_meter_history(hass, api, meter, start_date, days, entry)
+    except Exception as err:
+        _LOGGER.debug("Auto-backfill skipped: %s", err)
+
+
+async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
+    """True when any meter already has Panel Energia statistics."""
+    try:
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.statistics import (
+            get_last_statistics,
+        )
+        from homeassistant.helpers import entity_registry as er
+    except Exception:
+        return True  # recorder unavailable → don't duplicate imports
+    try:
+        registry = er.async_get(hass)
+        wanted: list = []
+        for meter in meters:
+            mid = meter.get("meter_point_id")
+            zones = meter.get("zone_count", 1) > 1
+            suffix = "import_1" if zones else "import"
+            uid = f"energa_{mid}_{suffix}_stats"
+            for entity in registry.entities.values():
+                if entity.unique_id == uid:
+                    wanted.append(entity.entity_id)
+                    break
+        if not wanted:
+            return False
+        stats = await get_instance(hass).async_add_executor_job(
+            get_last_statistics, hass, 1, wanted[0], True, {"sum"}
+        )
+        rows = (stats or {}).get(wanted[0]) or []
+        return bool(rows and rows[0].get("sum") is not None)
+    except Exception as err:
+        _LOGGER.debug("Auto-backfill statistics check failed: %s", err)
+        return True
 
 
 async def _import_meter_history(
@@ -503,19 +593,21 @@ async def _import_meter_history(
                     }
                 )
 
-            # Build cost statistics
+            # Build cost statistics (v0.3.0: import only — export is priced
+            # live via the RCEm/Cena Oddania entity, never frozen at 0.95)
             cost_statistics = []
-            for stat in statistics:
-                hourly_energy = stat["state"] or 0
-                hourly_cost = hourly_energy * price
-                cost_sum = stat["sum"] * price
-                cost_statistics.append(
-                    {
-                        "start": stat["start"],
-                        "sum": cost_sum,
-                        "state": hourly_cost,
-                    }
-                )
+            if not entity_suffix.startswith("export"):
+                for stat in statistics:
+                    hourly_energy = stat["state"] or 0
+                    hourly_cost = hourly_energy * price
+                    cost_sum = stat["sum"] * price
+                    cost_statistics.append(
+                        {
+                            "start": stat["start"],
+                            "sum": cost_sum,
+                            "state": hourly_cost,
+                        }
+                    )
 
             # Map entity suffix to sensor name
             suffix_to_name = {
@@ -548,36 +640,42 @@ async def _import_meter_history(
                 "Imported %d energy statistics for %s", len(statistics), entity_id
             )
 
-            # Import cost statistics
+            # Import cost statistics (skipped for export, v0.3.0)
             cost_entity_id = f"{entity_id}_cost"
-            cost_name_map = {
-                "import": "Panel Energia Zużycie Koszt",
-                "import_1": "Panel Energia Strefa 1 Koszt",
-                "import_2": "Panel Energia Strefa 2 Koszt",
-                "export": "Panel Energia Produkcja Rekompensata",
-                "export_1": "Panel Energia Produkcja Strefa 1 Rekompensata",
-                "export_2": "Panel Energia Produkcja Strefa 2 Rekompensata",
-            }
-            cost_name = cost_name_map.get(entity_suffix, f"Koszt {entity_suffix}")
+            if cost_statistics:
+                cost_name_map = {
+                    "import": "Panel Energia Zużycie Koszt",
+                    "import_1": "Panel Energia Strefa 1 Koszt",
+                    "import_2": "Panel Energia Strefa 2 Koszt",
+                    "export": "Panel Energia Produkcja Rekompensata",
+                    "export_1": "Panel Energia Produkcja Strefa 1 Rekompensata",
+                    "export_2": "Panel Energia Produkcja Strefa 2 Rekompensata",
+                }
+                cost_name = cost_name_map.get(entity_suffix, f"Koszt {entity_suffix}")
 
-            cost_metadata = StatisticMetaData(
-                source="recorder",
-                statistic_id=cost_entity_id,
-                name=cost_name,
-                unit_of_measurement="PLN",
-                has_mean=False,
-                has_sum=True,
-                mean_type=StatisticMeanType.NONE,
-                unit_class=None,
-            )
+                cost_metadata = StatisticMetaData(
+                    source="recorder",
+                    statistic_id=cost_entity_id,
+                    name=cost_name,
+                    unit_of_measurement="PLN",
+                    has_mean=False,
+                    has_sum=True,
+                    mean_type=StatisticMeanType.NONE,
+                    unit_class=None,
+                )
 
-            async_import_statistics(hass, cost_metadata, cost_statistics)
-            _LOGGER.info(
-                "Imported %d cost statistics for %s (price: %.4f PLN/kWh)",
-                len(cost_statistics),
-                cost_entity_id,
-                price,
-            )
+                async_import_statistics(hass, cost_metadata, cost_statistics)
+                _LOGGER.info(
+                    "Imported %d cost statistics for %s (price: %.4f PLN/kWh)",
+                    len(cost_statistics),
+                    cost_entity_id,
+                    price,
+                )
+            elif entity_suffix.startswith("export"):
+                _LOGGER.debug(
+                    "Skipping cost statistics for %s (export priced live via RCEm)",
+                    entity_id,
+                )
 
             return len(statistics)
 

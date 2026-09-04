@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Logowanie do Energa My Meter",
-                "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki. Proszę czekać — aplikacja próbuje znaleźć datę pierwszego odczytu (~15 sekund).",
+                "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki. Historia z ostatnich 2 lat pobierze się sama w tle po dodaniu.",
                 "data": {
                     "username": "Login (email)",
                     "password": "Hasło"
@@ -34,7 +34,6 @@
                     "credentials": "Zmień Login/Hasło",
                     "prices": "Ustaw Ceny Energii",
                     "history": "Pobierz Historię Danych",
-                    "detect_first": "Wykryj pierwszy odczyt",
                     "clear_stats": "Wyczyść Statystyki Panelu Energia"
                 }
             },
@@ -57,8 +56,8 @@
                     "balance_baseline_import": "Bazowy odczyt importu prosumenta [kWh]",
                     "balance_baseline_export": "Bazowy odczyt eksportu prosumenta [kWh]",
                     "bank_rce_price": "Cena RCE/RCEm [PLN/kWh] (np. 0.26288 dla 07.2026)",
-                    "bank_initial_kwh": "Bank poczatkowy kWh (stary system, z faktury)",
-                    "bank_initial_pln": "Bank poczatkowy PLN (nowy system, z faktury)",
+                    "bank_initial_kwh": "Bank początkowy kWh (stary system, z faktury)",
+                    "bank_initial_pln": "Bank początkowy PLN (nowy system, z faktury)",
                     "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
                     "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
                     "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
@@ -83,10 +82,6 @@
                 "data": {
                     "start_date": "Data początkowa"
                 }
-            },
-            "detect_first": {
-                "title": "Wykryj pierwszy odczyt",
-                "description": "**Wykryto:** {detected_date} (kontrakt: {contract_date})\n\nPotwierdź aby pobrać historię od wykrytego dnia. Dyskretne: ~14 requestów hierarchicznie (rok→pół→miesiąc→dzień) zamiast 365."
             },
             "clear_stats": {
                 "title": "Czyszczenie Statystyk",

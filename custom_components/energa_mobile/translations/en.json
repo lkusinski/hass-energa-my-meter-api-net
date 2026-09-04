@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Energa My Meter Login",
-                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected.",
+                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. The last 2 years of history download automatically in the background after setup.",
                 "data": {
                     "username": "Username (email)",
                     "password": "Password"

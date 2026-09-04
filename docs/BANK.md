@@ -18,6 +18,8 @@
 * `initial_kwh` = **1358** (`752+606` `Razem w magazynie` z faktury `06.2026` — stan po rozliczeniu). Ustaw `balance_baseline_import/export` na wskazania `do` z tej faktury + `bank_initial_kwh=1358`. `Bilans>0` nadbudowuje bank.
 * `initial_pln` = `0.00` na `01.08.2026` (faktura `07.2026`: `456×0.26288×1.23=147.44`, `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U.1847.
 * Per-strefa G12W: `import_1/export_1` (L1 droga) + `import_2/export_2` (L2 tania). Ceny `import_price_1 1.30` / `import_price_2 0.65` w `Options → Ceny` (lub zostaw `1.2453/0.5955` default — ujednolicisz).
+* `Bilans Prosumencki` to diagnostic (ukryty półprodukt: `Bank=max(0,Bilans)+initial`). Nie wieszaj go obok Banku — to ta sama energia liczona podwójnie.
+* `G11 Odbiorca` (faktura `1200000017/FES/XXXXX`, G11 bez fotowoltaiki 2159 kWh): własna tabela opłat (handlowa `16,18`, sieciowa stała `11,77`, zmienna `0,3485`) — prognoza liczona jak faktura (`2271,74` netto → `2794,24` brutto co do grosza). Akcyza jest już w cenie energii (tylko przypis na fakturze).
 
 ## Gdzie zobaczyć
 
@@ -31,17 +33,17 @@ cards:
   - type: entities
     title: 🔋 Magazyn Wirtualny — G12W stare zasady (0.8)
     entities:
-      - entity: sensor.bank_wirtualny_kwh
+      - entity: sensor.bank_wirtualny_kwh_<nr-licznika>
         name: Bank kWh (do odebrania)
         icon: mdi:battery-charging-80
-      - entity: sensor.energa_<nr-licznika>_bilans_prosumencki
-        name: Bilans (export×0.8 - import)
-      - entity: sensor.bank_ladowanie
+      - entity: sensor.energa_<nr-licznika>_magazyn_poziom_<nr-licznika>
+        name: Poziom magazynu %
+      - entity: sensor.energa_<nr-licznika>_bank_ladowanie_<nr-licznika>
         name: Ładowanie (do Baterii w Panelu Energia)
-      - entity: sensor.bank_rozladowanie
+      - entity: sensor.energa_<nr-licznika>_bank_rozladowanie_<nr-licznika>
         name: Rozładowanie (do Baterii w Panelu Energia)
   - type: gauge
-    entity: sensor.bank_wirtualny_kwh
+    entity: sensor.bank_wirtualny_kwh_<nr-licznika>
     min: 0
     max: 5000
     severity:
@@ -53,20 +55,33 @@ cards:
   - type: entities
     title: 💰 Magazyn — G12W nowe zasady (RCE×1.23)
     entities:
-      - entity: sensor.bank_wirtualny_pln
+      - entity: sensor.bank_wirtualny_pln_<nr-licznika>
         name: Depozyt PLN (ujemny = do zapłaty)
-      - entity: sensor.energa_<nr-licznika>_rcem_auto
+      - entity: sensor.energa_<nr-licznika>_rcem_auto_<nr-licznika>
         name: RCEm PLN/kWh (PSE auto)
-      - entity: sensor.energa_<nr-licznika>_bilans_prosumencki
-        name: Bilans kWh
+      - entity: sensor.prognoza_rachunku_<nr-licznika>
+        name: Prognoza dopłaty
   - type: markdown
     content: >
       RCE auto: `Options → rce_auto_fetch` lub ręcznie `bank_rce_price`.
       Aktualizuj co miesiąc (PSE publikuje ~11. dnia). Formuła w atrybutach encji.
+      (Bilans Prosumencki jest diagnostyczny — to półprodukt do Banku.)
 ```
 
-**Energy Dashboard — bateria (opcjonalnie):**
-`Ustawienia → Pulpity → Energia → Sieć → Dodaj zużycie` `Panel Energia Strefa 1/2` + osobno `Bateria` jeśli chcesz słupki ładowania/rozładowania. Bank `sensor.*_bank_*` jest już `state_class: TOTAL` i nadaje się jako bateria, ale i tak najczytelniej jest karta `gauge` powyżej.
+**Energy Dashboard — jak wpiąć (v0.3.0, bez ściemy):**
+`Ustawienia → Pulpity → Energia`:
+* **Stary net-metering (off-grid):** Sieć = tylko `Panel Energia Strefa 1/2`
+  (pobór, z ceną), ☀️ Fotowoltaika = `Panel Energia Produkcja Strefa 1/2`
+  (BEZ ceny — nadwyżka trafia do magazynu kWh, nie na sprzedaż),
+  Bateria = `Bank Ładowanie/Rozładowanie`. Zwrotu do sieci NIE dodawaj
+  (liczyłbyś eksport podwójnie: raz jako zwrot, raz jako baterię).
+* **Nowy net-billing (sprzedaż):** Sieć pobór = `Panel Energia Strefa 1/2`
+  (z ceną), Sieć zwrot = `Panel Energia Produkcja Strefa 1/2` z ceną =
+  encja `Cena Oddania` (żywa sprzedaż `RCEm×1.23`, nie zamrożone 0,95).
+  Baterii NIE dodawaj (przepływy to kopia import/eksport; depozyt shows
+  `Bank PLN`). Stan depozytu i prognozę pokazuje Lovelace poniżej.
+* Bank `sensor.*_bank_*` + `Magazyn Poziom %` (klasa `battery`) na gauge
+  w Lovelace — Panel Energia słupków stanu nie umie, tylko przepływy.
 
 ## Opcje integracji
 
