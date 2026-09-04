@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.0 (2026-09-04) — Architektura Docelowa
+
+### 🚀 Nowe Możliwości & Architektura
+- **Kanonityczny Magazyn Danych (SQLite WAL):** Trwały, odporny na awarie i wymiany liczników magazyn odczytów (`energa_canonical.db`) powiązany z logicznym punktem poboru (PPE).
+- **Czysty Silnik Rozliczeniowy FIFO (Decimal):**
+  - **Net-Metering (kWh):** Fizyczny magazyn energii FIFO 12 miesięcy, poprawny współczynnik 0.8/0.7, wygasanie energii, natywne serie ładowania i rozładowania dla sekcji Magazynu Energii.
+  - **Net-Billing (PLN):** Finansowy depozyt z dedykowaną alokacją wyłącznie do pozycji energii czynnej (zgodnie z art. 4 ust. 11 ustawy o OZE), obsługa zwrotu niewykorzystanego depozytu (20% RCEm / 30% RCE).
+- **Automatyczny Parser Cen RCEm z PSE:** Pobieranie oficjalnych stawek miesięcznych RCEm z tabeli PSE z uwzględnieniem korekt i publikacji ~11. dnia miesiąca.
+- **Autonomiczna Prognoza Rachunku:** Dokładna estymata faktury brutto z podziałem na taryfy G11 i G12w oraz uwzględnieniem progu opłaty mocowej.
+- **Klasa `monetary` dla encji kosztowych:** Encje `_cost` posiadają klasę `monetary`, co umożliwia ich bezpośredni wybór w sekcji "Użyj encji śledzącej całkowity koszt" w Panelu Energia.
+- **Spójna konfiguracja Panelu Energia:** Wyeliminowanie kolizji `_cost_2`, pełna zgodność z walidacją Home Assistant (`energy/validate` bez błędów).
+- **Kompleksowa aktualizacja dokumentacji:** Nowy, przejrzysty przewodnik w `README.md` obejmujący konfigurację starego i nowego systemu oraz odbiorców taryfy G11.
+
 ## v0.3.9 (2026-09-04)
 
 ### 🐛 Bug Fixes (bateria jedno-strefowa & alokacja depozytu)
