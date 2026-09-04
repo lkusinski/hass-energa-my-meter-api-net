@@ -94,9 +94,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await session.close()
         raise ConfigEntryNotReady(err) from err
 
-    # Store API instance
+    # Initialize Canonical SQLite Storage (v1.0 Architecture)
+    from .storage.sqlite.database import CanonicalStorage
+    db_path = hass.config.path(".storage", "energa_canonical.db")
+    storage = CanonicalStorage(db_path)
+
+    # Store API and storage instances
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"api": api, "session": session}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "api": api,
+        "session": session,
+        "storage": storage,
+    }
 
     # Close session when HA shuts down
     async def _close_session(_event):
@@ -702,6 +711,33 @@ async def _import_meter_history(
             _LOGGER.info(
                 "Imported %d energy statistics for %s", len(statistics), entity_id
             )
+
+            # Canonically archive chunk to SQLite (v1.0 Architecture)
+            storage = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("storage")
+            if storage and points:
+                try:
+                    from decimal import Decimal
+                    from .core.readings.models import IntervalReading
+                    is_export = entity_suffix.startswith("export")
+                    c_readings = [
+                        IntervalReading(
+                            ppe_id=meter_point_id,
+                            meter_id=str(meter_id),
+                            register=entity_suffix,
+                            interval_start_utc=dt_util.as_utc(p["dt"]),
+                            resolution="1h",
+                            import_kwh=Decimal("0.0") if is_export else Decimal(str(round(float(p["value"]), 4))),
+                            export_kwh=Decimal(str(round(float(p["value"]), 4))) if is_export else Decimal("0.0"),
+                            quality="ok",
+                            source="energa",
+                        )
+                        for p in points
+                        if p.get("value") is not None and p["value"] >= 0
+                    ]
+                    if c_readings:
+                        storage.insert_readings_idempotent(c_readings)
+                except Exception as c_err:
+                    _LOGGER.debug("Canonical archive for chunk failed: %s", c_err)
 
             # Import cost statistics (skipped for export, v0.3.0)
             cost_entity_id = f"{entity_id}_cost"

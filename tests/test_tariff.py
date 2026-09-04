@@ -52,13 +52,20 @@ class TestNewSystemJuly:
         assert abs(res["brutto"] - 422.52) / 422.52 < 0.01
         assert abs(res["do_zaplaty"] - 275.16) / 275.16 < 0.01
 
-    def test_deposit_capped_at_brutto(self):
+    def test_deposit_capped_at_sale_gross_not_brutto(self):
+        # P0 fix: even with massive export / deposit, deposit can ONLY cover
+        # eligible energy sale gross (sale_gross). Distribution and fixed fees
+        # must always be paid.
         res = compute_bill(
             import_day=1.0, import_night=0.0, export_kwh=10000.0,
             rcem=0.26288,
         )
-        assert res["do_zaplaty"] == 0.0
-        assert res["deposit_applied"] == res["brutto"]
+        assert res["deposit"] > 3000.0
+        assert res["deposit_applied"] == res["sale_gross"]
+        assert res["deposit_applied"] < 1.0  # only 1 kWh day energy (~0.75 zł gross)
+        assert res["do_zaplaty"] > 0.0
+        assert res["do_zaplaty"] == round(res["brutto"] - res["sale_gross"], 2)
+        assert abs(res["do_zaplaty"] - res["distr_gross"]) <= 0.02  # covers all distribution
 
 
 class TestOldSystemCovered:

@@ -5,6 +5,7 @@ Forward-only calculation: adds hourly values to last known sum (or 0).
 Guarantees monotonically increasing, non-negative sums.
 """
 
+from decimal import Decimal
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,25 +13,35 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
     MAX_HOURLY_KWH,
     get_price_for_key,
 )
+from .core.readings.models import IntervalReading
+from .storage.sqlite.database import CanonicalStorage
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class EnergaDataUpdater:
-    """Handle incremental statistics updates for Energa sensors."""
+    """Handle incremental statistics updates for Energa sensors with canonical persistence."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
         pre_fetched_stats: dict | None = None,
+        storage: CanonicalStorage | None = None,
     ) -> None:
         self.hass = hass
         self.entry = entry
         self._pre_fetched_stats = pre_fetched_stats or {}
+        if storage is not None:
+            self.storage = storage
+        elif hass and entry and DOMAIN in getattr(hass, "data", {}) and entry.entry_id in hass.data.get(DOMAIN, {}):
+            self.storage = hass.data[DOMAIN][entry.entry_id].get("storage")
+        else:
+            self.storage = None
 
     def gather_stats_for_sensor(
         self,
@@ -47,6 +58,10 @@ class EnergaDataUpdater:
         if not hourly_data:
             _LOGGER.debug("No hourly data for %s", entity_id)
             return [], []
+
+        # Persist to SQLite Canonical Storage if available
+        if self.storage:
+            self._persist_canonical_readings(meter_id, data_key, hourly_data)
 
         # Get price for cost calculation
         price = get_price_for_key(dict(self.entry.options), data_key, meter_id=meter_id)
@@ -151,4 +166,38 @@ class EnergaDataUpdater:
         )
 
         return energy_stats
+
+    def _persist_canonical_readings(
+        self, meter_id: str, data_key: str, hourly_data: list[dict]
+    ) -> None:
+        """Canonically archive interval readings into SQLite WAL database."""
+        ppe_id = self.entry.data.get("ppe_id") or f"PPE_{meter_id}"
+        readings: list[IntervalReading] = []
+        is_export = data_key.startswith("export")
+        for point in hourly_data:
+            dt = point.get("dt")
+            val = point.get("value")
+            if dt is None or val is None or val < 0:
+                continue
+            val_dec = Decimal(str(round(float(val), 4)))
+            utc_dt = dt_util.as_utc(dt) if hasattr(dt, "tzinfo") and dt.tzinfo else dt
+            readings.append(
+                IntervalReading(
+                    ppe_id=ppe_id,
+                    meter_id=str(meter_id),
+                    register=data_key,
+                    interval_start_utc=utc_dt,
+                    resolution="1h",
+                    import_kwh=Decimal("0.0") if is_export else val_dec,
+                    export_kwh=val_dec if is_export else Decimal("0.0"),
+                    quality="ok",
+                    source="energa",
+                )
+            )
+        if readings and self.storage:
+            try:
+                self.storage.insert_readings_idempotent(readings)
+            except Exception as err:
+                _LOGGER.debug("CanonicalStorage insert failed for %s: %s", data_key, err)
+
 
