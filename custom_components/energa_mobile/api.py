@@ -464,9 +464,9 @@ class EnergaAPI:
         tz = ZoneInfo("Europe/Warsaw")
         now = datetime.now(tz)
 
-        # Default: 30 days ago if no start_date provided
+        # Default: 1 day ago if no start_date provided (v1.0.1)
         if start_date is None:
-            start_date = now - timedelta(days=30)
+            start_date = now - timedelta(days=1)
 
         # Ensure start_date is timezone-aware
         if start_date.tzinfo is None:
