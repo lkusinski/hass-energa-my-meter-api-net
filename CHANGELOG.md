@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.7 (2026-09-04)
+
+### 🔙 Revert (v0.3.6 cofnięty)
+- **Auto-współczynnik wycofany:** data aktywacji to data aktywacji
+  aplikacji Mój Licznik, nie data umowy prosumenta (licznik ze starą
+  instalacją potrafi mieć tegoroczną datę) — zgadywanie systemu po niej
+  błędnie klasyfikowało. Współczynnik wraca do jawnego ustawienia
+  w Options (`0.8` stare / `0.0` nowe); nic innego z v0.3.6 nie zmienia
+  zachowania.
+
 ## v0.3.6 (2026-09-04)
 
 ### ✨ Nowe (G11 z PV na nowych zasadach)

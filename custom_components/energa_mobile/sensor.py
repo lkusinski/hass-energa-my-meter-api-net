@@ -760,38 +760,6 @@ class EnergaCoordinator(DataUpdateCoordinator):
             except Exception as rce_err:
                 _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
 
-            # === v0.3.6: seed an unset prosumer coefficient from the
-            # agreement activation date (opusty up to 03/2022 → 0.8,
-            # net-billing later → 0.0). A fresh PV account would otherwise
-            # default to the old kWh-bank system until a manual Options
-            # visit. Seeded once (key absent + all prosumer meters agree).
-            try:
-                if CONF_PROSUMER_COEFFICIENT not in (self.entry.options or {}):
-                    from .settlement import suggested_prosumer_coefficient
-
-                    _sugg = {
-                        suggested_prosumer_coefficient(
-                            m.get("activation_date")
-                        )
-                        for m in active_meters
-                        if is_export_prosumer(m)
-                    } - {None}
-                    if len(_sugg) == 1:
-                        _coef = _sugg.pop()
-                        self.hass.config_entries.async_update_entry(
-                            self.entry,
-                            options={
-                                **dict(self.entry.options),
-                                CONF_PROSUMER_COEFFICIENT: _coef,
-                            },
-                        )
-                        _LOGGER.info(
-                            "Energa: prosumer coefficient auto-set to %.1f "
-                            "from activation date", _coef,
-                        )
-            except Exception as _seed_err:
-                _LOGGER.debug("Coefficient auto-seed skipped: %s", _seed_err)
-
             # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===            try:
                 from datetime import datetime as _dt2
                 _opts = self.entry.options
