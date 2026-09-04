@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.6 (2026-09-04)
+
+### ✨ Nowe (G11 z PV na nowych zasadach)
+- **Auto-domyślny współczynnik z daty aktywacji:** prosument bez
+  ustawionego `prosumer_coefficient` dostaje `0.0` (net-billing)
+  gdy umowa startuje od 04.2022, inaczej `0.8` (opusty). Świeży
+  G11 z fotowoltaiką nie wpada już w stary Bank kWh — od pierwszego
+  startu ma Bank PLN + RCEm + prognozę z depozytem. Ręczne ustawienie
+  w Options zawsze wygrywa; mieszane konta (starzy + nowi prosumenci
+  na jednym loginie) zostają bez zmian do decyzji ręcznej.
+- Jednostrefowy Bank PLN / prognoza / przepływy działają bez zmian
+  (gałąź `else` dla liczników bez stref była gotowa — brakowało tylko
+  właściwego współczynnika).
+
 ## v0.3.5 (2026-09-04)
 
 ### 🐛 Bug Fixes (Bank kWh skakał po częściowym reimporcie)

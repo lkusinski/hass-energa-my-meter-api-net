@@ -88,7 +88,9 @@ cards:
 ## Opcje integracji
 
 `Ustawienia → Urządzenia → Energa → Konfiguruj → Ustaw Ceny Energii`:
-* `prosumer_coefficient` `0.8` stara / `0.0` nowa,
+* `prosumer_coefficient` `0.8` stara / `0.0` nowa (od v0.3.6 domyślny
+  z daty aktywacji umowy: start od 04.2022 → `0.0`, wcześniej → `0.8`;
+  ręczne ustawienie zawsze wygrywa),
 * `balance_baseline_import/export` = stan licznika na fakturze początkowej (0 = lifetime),
 * `bank_initial_kwh` / `bank_initial_pln` z faktur,
 * `bank_rce_price` np. `0.26288` + `rce_auto_fetch` (24h cache w coordinatorze, fallback manual).

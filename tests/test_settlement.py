@@ -391,3 +391,33 @@ class TestResetAwareDelta:
         )
         assert bank >= 0.0
         assert detail["deposits_kwh"] == 160.0
+
+
+class TestSuggestedProsumerCoefficient:
+    """v0.3.6: default coefficient from the agreement activation date."""
+
+    def test_net_billing_era(self):
+        from custom_components.energa_mobile.settlement import (
+            suggested_prosumer_coefficient,
+        )
+
+        assert suggested_prosumer_coefficient(1755448068652) == 0.0
+        assert suggested_prosumer_coefficient("2025-08-18") == 0.0
+
+    def test_opusty_era(self):
+        from custom_components.energa_mobile.settlement import (
+            suggested_prosumer_coefficient,
+        )
+
+        assert suggested_prosumer_coefficient(1646092800000) == 0.8
+        assert suggested_prosumer_coefficient("2022-03-31") == 0.8
+        assert suggested_prosumer_coefficient("2022-04-01") == 0.0
+
+    def test_defensive(self):
+        from custom_components.energa_mobile.settlement import (
+            suggested_prosumer_coefficient,
+        )
+
+        assert suggested_prosumer_coefficient(None) is None
+        assert suggested_prosumer_coefficient("") is None
+        assert suggested_prosumer_coefficient("junk") is None

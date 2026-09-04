@@ -407,6 +407,42 @@ def month_to_date_forecast(
     return round(mtd_net_pln / elapsed * days_in_month, 2)
 
 
+def suggested_prosumer_coefficient(activation) -> float | None:
+    """Default prosumer coefficient from the agreement activation date.
+
+    Opusty (net-metering 0.8) cover installations registered up to
+    2022-03-31; later ones settle in net-billing (coefficient 0.0,
+    RCE×1.23). Returns None when the date is missing/unparseable so
+    the caller keeps the existing default. Pure function, unit-tested.
+    """
+    try:
+        if activation is None:
+            return None
+        if isinstance(activation, datetime):
+            day = activation.date()
+        elif isinstance(activation, date):
+            day = activation
+        elif isinstance(activation, (int, float)):
+            ts = float(activation)
+            if ts > 1e11:  # Energa milliseconds
+                ts /= 1000.0
+            day = datetime.fromtimestamp(ts).date()
+        else:
+            text = str(activation).strip()
+            if not text:
+                return None
+            if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+                day = date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+            else:
+                ts = float(text)
+                if ts > 1e11:
+                    ts /= 1000.0
+                day = datetime.fromtimestamp(ts).date()
+    except (ValueError, TypeError, OSError, OverflowError):
+        return None
+    return 0.0 if day >= date(2022, 4, 1) else 0.8
+
+
 def deposit_valid_until(year: int, month: int) -> date:
     """Date until which a monthly deposit stays valid (assignment + 12m).
 
