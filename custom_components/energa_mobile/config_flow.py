@@ -200,6 +200,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     self.reauth_entry,
                     data={
+                        **dict(self.reauth_entry.data),
                         CONF_USERNAME: username,
                         CONF_PASSWORD: password,
                         CONF_DEVICE_TOKEN: device_token,
@@ -262,6 +263,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                     await api.async_login()
                     user_input[CONF_USERNAME] = attempt_username
                     entry_data = {
+                        **dict(self._config_entry.data),
                         **user_input,
                         CONF_DEVICE_TOKEN: device_token,
                     }

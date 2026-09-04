@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.3 (2026-09-04)
+
+### 🐛 Bug Fixes
+- **Re-auth / zmiana loginu nie gubi już `auto_history_start`** (dane wpisu scalane, nie nadpisywane).
+
 ## v0.3.2 (2026-09-04)
 
 ### 🐛 Bug Fixes
