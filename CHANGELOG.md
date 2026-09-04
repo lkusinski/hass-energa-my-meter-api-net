@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.2 (2026-09-04)
+
+### 🐛 Bug Fixes
+- **Serwis `fetch_history` nie blokuje już wołającego:** 730-dniowy import działa w tle (zadanie + powiadomienie), odpowiedź serwisu wraca od razu.
+- **`Data pierwszego odczytu` dla wszystkich liczników** (dotąd tylko prosumenci) — konsumenci też widzą początek okna historii.
+
 ## v0.3.1 (2026-09-04)
 
 ### 🐛 Bug Fixes

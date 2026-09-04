@@ -486,15 +486,17 @@ async def async_setup_entry(
                         serial=serial,
                     )
                 )
-            sensors.append(
-                EnergaFirstDataDateSensor(
-                    coordinator=coordinator,
-                    meter_id=meter_id,
-                    device_info=device_info,
-                    entry=entry,
-                    serial=serial,
-                )
+
+        # === HISTORY WINDOW START (v0.3.2: every meter, not just prosumers) ===
+        sensors.append(
+            EnergaFirstDataDateSensor(
+                coordinator=coordinator,
+                meter_id=meter_id,
+                device_info=device_info,
+                entry=entry,
+                serial=serial,
             )
+        )
 
         # === BILL FORECAST (v0.2.17: every meter, needs history) ===
         # New net-billing: deposit lowers the payable. Old net-metering:

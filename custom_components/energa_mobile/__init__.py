@@ -112,9 +112,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register fetch_history service
+    # Register fetch_history service (v0.3.2: fire-and-forget — a 730d
+    # import takes an hour; the caller gets an ack + notification).
     async def fetch_history_service(call: ServiceCall) -> None:
-        """Service to manually fetch historical data."""
+        """Service to manually fetch historical data (background)."""
         start_date_str = call.data["start_date"]
         days = call.data.get("days", 30)
         _LOGGER.info(
@@ -172,9 +173,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             days,
         )
 
-        # Process each active meter
+        # Fire-and-forget: each meter imports in the background with its
+        # own progress notification (energa_import_*).
         for meter in active_meters:
-            await _import_meter_history(hass, api, meter, start_date, days, entry)
+            hass.async_create_task(
+                _import_meter_history(hass, api, meter, start_date, days, entry)
+            )
 
     hass.services.async_register(
         DOMAIN,
