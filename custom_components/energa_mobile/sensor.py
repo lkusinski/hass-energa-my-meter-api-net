@@ -2109,6 +2109,7 @@ class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
         energy_slug = suffix_to_name.get(data_key, f"panel_{data_key}")
         self.entity_id = f"sensor.energa_{serial}_{energy_slug}_cost"
 
+        self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = "PLN"
 
