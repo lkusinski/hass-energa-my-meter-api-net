@@ -1664,23 +1664,41 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._attr_device_info = device_info
 
     async def async_added_to_hass(self) -> None:
-        """Seed totals from statistics (history backfill) or HA state."""
+        """Seed totals from statistics (history backfill) or HA state.
+
+        v0.3.4: seeds from the MAX sum over the last 14 days, not the
+        last row — after a recorder sum reset (live 0.0 state seen right
+        after a backfill) the last row reads 0.0 while thousands are
+        imported. MAX keeps the battery bars continuous across restarts.
+        """
         await super().async_added_to_hass()
         candidates: list = []
-        # v0.2.23: history backfill writes flow statistics; prefer the last
-        # stats sum so live deltas continue without a reset spike.
+        # v0.2.23: history backfill writes flow statistics; prefer the
+        # recent max sum so live deltas continue without a reset dip.
         try:
+            import functools
+            from datetime import timedelta
+
             from homeassistant.components.recorder import get_instance
             from homeassistant.components.recorder.statistics import (
-                get_last_statistics,
+                statistics_during_period,
             )
+            from homeassistant.util import dt as dt_util
 
-            _stats = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, self.entity_id, True, {"sum"}
+            _end = dt_util.utcnow()
+            _start = _end - timedelta(days=14)
+            _res = await get_instance(self.hass).async_add_executor_job(
+                functools.partial(
+                    statistics_during_period,
+                    self.hass, _start, _end, [self.entity_id], "hour", None, {"sum"},
+                )
             )
-            _rows = _stats.get(self.entity_id) or []
-            if _rows and _rows[0].get("sum") is not None:
-                candidates.append(float(_rows[0]["sum"]))
+            _rows = (_res or {}).get(self.entity_id) or []
+            _sums = [
+                float(r["sum"]) for r in _rows if r.get("sum") is not None
+            ]
+            if _sums:
+                candidates.append(max(0.0, max(_sums)))
         except Exception:
             pass
         last = await self.async_get_last_state()

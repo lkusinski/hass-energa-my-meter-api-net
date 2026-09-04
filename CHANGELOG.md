@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.4 (2026-09-04)
+
+### 🐛 Bug Fixes (słupki baterii znikały po backfillu — G12W nowe zasady)
+- **Reimporty kontynuują sumy, nie startują od 0:** serie przepływów
+  kotwiczone na sumie sprzed zakresu importu (`anchor_flow_series`);
+  pełne backfille startują czysto od 0. Koniec z reset-dipem
+  (5889 kWh → 0,0) odczytywanym przez recorder jako reset licznika.
+- **Seed sensora z MAX 14 dni, nie z ostatniego wiersza:** po resecie
+  sumy ostatni wiersz to 0,0 mimo tysięcy zaimportowanych kWh.
+
 ## v0.3.3 (2026-09-04)
 
 ### 🐛 Bug Fixes

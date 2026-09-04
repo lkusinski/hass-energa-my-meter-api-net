@@ -270,6 +270,49 @@ async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> 
         _LOGGER.debug("Auto-backfill skipped: %s", err)
 
 
+async def _stat_sum_before(
+    hass: HomeAssistant, statistic_id: str, when
+) -> float:
+    """Sum imported strictly before `when` (v0.3.4 flow anchor).
+
+    A reimport continues its series from this base instead of restarting
+    at 0 (which the recorder reads as a meter reset). Full-range
+    backfills find nothing before their start and begin cleanly at 0.0.
+    Fully defensive: flow backfill must never break history import.
+    """
+    try:
+        import functools
+        from datetime import timedelta
+
+        from homeassistant.components.recorder import get_instance
+        from homeassistant.components.recorder.statistics import (
+            statistics_during_period,
+        )
+
+        try:
+            start_dt = when - timedelta(days=30)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=TIMEZONE)
+            end_dt = when
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=TIMEZONE)
+        except Exception:
+            return 0.0
+        stats = await get_instance(hass).async_add_executor_job(
+            functools.partial(
+                statistics_during_period,
+                hass, start_dt, end_dt, [statistic_id], "day", None, {"sum"},
+            )
+        )
+        rows = (stats or {}).get(statistic_id) or []
+        sums = [r.get("sum") for r in rows if r.get("sum") is not None]
+        if sums:
+            return max(0.0, float(sums[-1]))
+    except Exception as err:
+        _LOGGER.debug("Flow anchor lookup failed for %s: %s", statistic_id, err)
+    return 0.0
+
+
 async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
     """True when any meter already has Panel Energia statistics."""
     try:
@@ -721,8 +764,11 @@ async def _import_meter_history(
         # 0/0 until live deltas accrue. Replays live accumulator semantics
         # over the same hourly points (baselines cancel out in deltas, so
         # raw sums are used). Live sensors seed from these sums on setup.
+        # v0.3.4: series are ANCHORED on already-imported sums — a partial
+        # reimport continues the totals instead of restarting at 0 (which
+        # the recorder reads as a meter reset, collapsing battery bars).
         try:
-            from .settlement import flow_history_series
+            from .settlement import anchor_flow_series, flow_history_series
 
             _by_hour: dict = {}
 
@@ -762,11 +808,16 @@ async def _import_meter_history(
                 if not _eid:
                     _LOGGER.debug("Flow backfill: entity missing for %s", _uid)
                     continue
-                _stats = []
-                _prev = 0.0
-                for (_dt, _cum) in zip([d for d, _ in _ordered], _series):
-                    _stats.append({"start": _dt, "sum": _cum, "state": round(_cum - _prev, 3)})
-                    _prev = _cum
+                _base = await _stat_sum_before(hass, _eid, start_date)
+                _anchored = anchor_flow_series(_series, _base)
+                _dts = [d for d, _ in _ordered]
+                if len(_anchored) != len(_dts):
+                    _LOGGER.debug("Flow backfill: length mismatch for %s", _eid)
+                    continue
+                _stats = [
+                    {"start": _dt, "sum": _cum, "state": _st}
+                    for (_dt, (_cum, _st)) in zip(_dts, _anchored)
+                ]
                 if not _stats:
                     continue
                 _meta = StatisticMetaData(

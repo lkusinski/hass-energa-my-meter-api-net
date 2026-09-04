@@ -241,6 +241,31 @@ def fifo_kwh_bank(
     return (round(bank, 2), detail)
 
 
+def anchor_flow_series(cums, base: float = 0.0) -> list:
+    """Anchor a cumulative flow series on an existing sum (v0.3.4).
+
+    Reimports must CONTINUE from already-imported totals: restarting at
+    0 makes the recorder see a meter reset and the battery bars collapse
+    (G12W nowe zasady 09-2026: 5889 kWh -> 0.0 overnight). First point keeps
+    state 0.0 (anchor, no spike); every next state is cum - prev.
+    Pure function, unit-tested.
+    """
+    try:
+        base_f = max(0.0, float(base))
+    except (ValueError, TypeError):
+        base_f = 0.0
+    out: list = []
+    prev = base_f
+    for c in cums or []:
+        try:
+            cum = round(base_f + max(0.0, float(c)), 2)
+        except (ValueError, TypeError):
+            cum = round(prev, 2)
+        out.append((cum, round(cum - prev, 3)))
+        prev = cum
+    return out
+
+
 def warehouse_level_pct(bank_kwh: float | None, deposits_kwh: float | None) -> float | None:
     """Poziom magazynu w % (stary net-metering, v0.3.0).
 

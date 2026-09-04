@@ -310,3 +310,35 @@ class TestOrphanRemovedUids:
 
         doomed = orphan_removed_uids("310002", "71000001")
         assert not any("import" in u for u in doomed)
+
+
+class TestAnchorFlowSeries:
+    """v0.3.4: reimports continue from pre-range sums (no reset dips)."""
+
+    def test_fresh_start_at_zero(self):
+        from custom_components.energa_mobile.settlement import (
+            anchor_flow_series,
+        )
+
+        assert anchor_flow_series([0.0, 1.5, 3.0], 0.0) == [
+            (0.0, 0.0), (1.5, 1.5), (3.0, 1.5),
+        ]
+
+    def test_partial_reimport_continues(self):
+        from custom_components.energa_mobile.settlement import (
+            anchor_flow_series,
+        )
+
+        out = anchor_flow_series([0.0, 2.0], 5889.33)
+        assert out[0] == (5889.33, 0.0)  # anchor, no spike
+        assert out[1] == (5891.33, 2.0)
+
+    def test_defensive(self):
+        from custom_components.energa_mobile.settlement import (
+            anchor_flow_series,
+        )
+
+        assert anchor_flow_series([], 5.0) == []
+        assert anchor_flow_series(None, 5.0) == []
+        assert anchor_flow_series([1.0], None)[0][0] == 1.0
+        assert anchor_flow_series([1.0], "junk")[0] == (1.0, 1.0)
