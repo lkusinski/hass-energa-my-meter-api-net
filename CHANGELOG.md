@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.5 (2026-09-04)
+
+### 🐛 Bug Fixes (Bank kWh skakał po częściowym reimporcie)
+- **Panele też kotwiczą reimporty:** `build_statistics` startuje
+  `running_sum` (i koszty) od sumy sprzed zakresu importu
+  (`_stat_sum_before`, jak przepływy w v0.3.4). Częściowy reimport
+  pisał wiersz graniczny z `sum 0.0`, co zatruwało cały poprzedni
+  miesiąc (`last-first` rzędu −5509 kWh) i ścinało Bank FIFO o setki kWh.
+- **Delty odporne na resety (`reset_aware_delta`):** sumy miesięczne/MTD/
+  rolling liczą tylko dodatnie segmenty szeregu `sum` — jeden zły wiersz
+  nie kasuje już całego miesiąca ani estymaty rocznej do progu mocowego.
+- **Kotwica bierze MAX z 30 dni, nie ostatni wiersz** (`_stat_sum_before`).
+
+### 🧪 Testy
+- **~205 testów**: `reset_aware_delta` (monotoniczny / reset w środku /
+  reset na granicy miesiąca / defensive), clamp ujemnego miesiąca w FIFO.
+
 ## v0.3.4 (2026-09-04)
 
 ### 🐛 Bug Fixes (słupki baterii znikały po backfillu — G12W nowe zasady)
@@ -50,7 +67,7 @@
   podepnij ją jako cenę zwrotu w Panelu Energia zamiast zamrożonej
   rekompensaty. W starym systemie cena jest `unknown` (brak sprzedaży).
 - **Bilans Prosumencki = diagnostic (ukryty):** półprodukt do Banku
-  (`Bank=max(0,Bilans)+initial`; np. G12W stare zasady 1128,1 vs 2486,1 różnią
+  (`Bank=max(0,Bilans)+initial`; np. 1128,1 vs 2486,1 różnią
   się dokładnie o `initial` 1358). W nowym systemie degeneruje się do
   `−import` (zero informacji). Patrz Bank i Magazyn Poziom.
 - **Nowy sensor `Magazyn Poziom %`** (stary system, klasa `battery`):
@@ -58,7 +75,7 @@
   zamiast zgadywania. Atrybuty FIFO: `fifo_deposits_kwh` i reszta.
 
 ### 🧾 Koszty jak na fakturze G11 + akcyza informacyjnie
-- **Tabela G11** z faktury `1200000017/FES/XXXXX` (G11 bez fotowoltaiki, 2159 kWh):
+- **Tabela G11** z faktury konsumenckiej (2159 kWh, brak PV):
   energia `0,6114`, handlowa `16,18/mies.`, abonament `0,70`, sieciowa
   stała `11,77`, zmienna `0,3485`, mocowa `24,05` → netto `2271,74`,
   brutto `2794,24` co do grosza. Prognoza konsumenta wreszcie poprawna
@@ -108,7 +125,7 @@
   (half-probing przeskakiwał maj/czerwiec → zwracał 07-01), retry probek,
   testy regresyjne.
 - Backfill: dla starego systemu potrzeba **≥365 dni** (nie 30!) —
-  tyle trzyma API (730d); start `2025-07-30` na Wiśniowej w tle.
+  tyle trzyma API (730d); start `2025-07-30` w tle.
 
 ### 🧪 Testy
 - **179 testów** (było 172): FIFO + detekcja.
@@ -162,7 +179,7 @@
 - **Flaga `is_prosumer` to był `obis_minus` w przebraniu:** `api.py`
   ustawiał ją też dla samych kodów OBIS eksportu (`or bool(mp.obis_minus
   ...)`), więc bramka `is_export_prosumer` z v0.2.15 przepuszczała liczniki
-  konsumenckie (G11 bez fotowoltaiki nadal dostawała Bilans/Bank/przepływy).
+  konsumenckie (G11 bez PV nadal dostawał Bilans/Bank/przepływy).
   Flaga to już czysty `type == Wytwórca`; realny eksport wykrywają
   niezerowe liczniki `total_minus*`. Zweryfikowane na lab2: pełna
   `Prognoza Rachunku` brutto działa na żywym HA (`do_zapłaty` 100.58,
@@ -172,7 +189,7 @@
 
 ### 🧹 Czysty konsument (G11 bez PV): zero sensorów prosumenckich
 - **Nowa bramka `is_export_prosumer`:** sam `obis_minus` NIE wystarcza —
-  liczniki odbiorcze (np. G11 bez fotowoltaiki) potrafią raportować kody OBIS
+  liczniki odbiorcze (np. G11 bez PV) potrafią raportować kody OBIS
   eksportu z zerowymi odczytami i dostawały bezużyteczny `Bank 0.0`,
   mylące przepływy `Ładowanie/Rozładowanie` oraz `Bilans == -import`.
   Prosument = flaga sprzedawcy (`type: Wytwórca`) LUB niezerowy licznik
@@ -283,7 +300,7 @@
   Prod atrybuty `formula` (783 / +147.44) są nieaktualne — kosmetyka po stronie prod.
 
 ### ✨ Nowe / Ulepszenia
-- **Bank — łatwa widoczność:** `Bank Kwh/Pln` rozbudowane atrybuty (`formula`, `per_strefa_note`, `price_1/2`, `import_1/2` `L1/L2`) + `docs/BANK.md` z gotowym `Lovelace vertical-stack` (gauge + entities) dla Wiśniowej `1358 kWh` i Agrestowej `0.00 PLN`. `bank_energii.yaml` do usunięcia — bank natywnie.
+- **Bank — łatwa widoczność:** `Bank Kwh/Pln` rozbudowane atrybuty (`formula`, `per_strefa_note`, `price_1/2`, `import_1/2` `L1/L2`) + `docs/BANK.md` z gotowym `Lovelace vertical-stack` (gauge + entities) dla G12W stare (`1358 kWh`) i G12W nowe (`0.00 PLN`). `bank_energii.yaml` do usunięcia — bank natywnie.
 - **RCE auto-fetch naprawiony:** `EnergaCoordinator` cache `24h` (`_rce_cache/_rce_last_fetch` w `_async_update_data`), `EnergaRceSensor` czyta z coordinatora (`rce_source: PSE auto/manual`), `Bank PLN` używa cache gdy `rce_auto_fetch`. Brak osobnych sesji per sensor.
 - **Bank tworzony tylko dla prosumenta:** `if meter.get("obis_minus")` — konsumenci bez produkcji nie dostają `Bank kWh/PLN` ani `RCEm` (na życzenie: nie zaśmieca encji).
 

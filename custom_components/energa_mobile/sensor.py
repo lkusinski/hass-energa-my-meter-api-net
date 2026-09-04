@@ -73,6 +73,7 @@ from .settlement import (
     orphan_bank_uids,
     orphan_removed_uids,
     parse_settlement_date,
+    reset_aware_delta,
     rolling_kwh_bank,
     trailing_months,
     warehouse_level_pct,
@@ -985,9 +986,10 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 if len(sums) < 2:
                     continue
                 mid, suffix = wanted[stat_id]
-                out.setdefault(str(mid), {})[suffix] = round(
-                    max(0.0, sums[-1] - sums[0]), 3
-                )
+                # v0.3.5: reset-aware delta — a statistics reimport that
+                # restarts a series at 0 inside the window must not nuke
+                # the whole month (seen live: August read -5509 kWh).
+                out.setdefault(str(mid), {})[suffix] = reset_aware_delta(sums)
                 span = self._stat_span_days(points)
                 prev = out[str(mid)].get("_coverage_days")
                 out[str(mid)]["_coverage_days"] = (
@@ -1133,7 +1135,7 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
     user-facing values are Bank kWh/PLN (state) and Magazyn Poziom (%).
     Bilans is just Bank-minus-initial without the max(0,·) floor —
     showing both next to each other double-counts the same energy and
-    confuses (e.g. G12W stare zasady Bilans 1128 kWh vs Bank 2486 kWh differ by
+    confuses (e.g. Bilans 1128 kWh vs Bank 2486 kWh differ by
     exactly initial 1358 kWh). In the new net-billing system (coeff 0.0)
     it degenerates to −import, i.e. zero information.
 
@@ -2530,7 +2532,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "cover_night_kwh": cover_n,
                 "capacity_source": capacity_source,
                 "fee_table": tariff_family(self._meter_tariff()),
-                "fee_note": "Stawki z Options (taryfa) lub domyślne z faktur (G11: 1200000017/FES/XXXXX, G12W: 07 i 05-06.2026); "
+                "fee_note": "Stawki z Options (taryfa) lub domyślne z faktur (G11 bez PV, G12W 07 i 05-06.2026); "
                 "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
                 "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "
                 "godzinowo — przybliżenie ~1% (kWh) / ~13% (depozyt PLN)",

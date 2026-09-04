@@ -246,7 +246,7 @@ def anchor_flow_series(cums, base: float = 0.0) -> list:
 
     Reimports must CONTINUE from already-imported totals: restarting at
     0 makes the recorder see a meter reset and the battery bars collapse
-    (G12W nowe zasady 09-2026: 5889 kWh -> 0.0 overnight). First point keeps
+    (e.g. G12W prosumer: 5889 kWh -> 0.0 overnight). First point keeps
     state 0.0 (anchor, no spike); every next state is cum - prev.
     Pure function, unit-tested.
     """
@@ -264,6 +264,30 @@ def anchor_flow_series(cums, base: float = 0.0) -> list:
         out.append((cum, round(cum - prev, 3)))
         prev = cum
     return out
+
+
+def reset_aware_delta(sums) -> float:
+    """True flow from a recorder `sum` column with mid-window resets (v0.3.5).
+
+    `last - first` goes hugely negative when a statistics reimport restarts
+    a series at 0 inside the window (seen live: a September panel
+    reimport wrote the month-boundary row with sum 0.0, poisoning the whole
+    previous month bucket to -5509 kWh and cutting the FIFO bank by 492 kWh).
+    Summing only the positive segments instead measures the real flow:
+    monotonic series give exactly `last - first`, a mid-window reset adds
+    the pre-reset flow and the post-reset regrow, and a reset ON the last
+    row counts just the flow before it. Pure function, unit-tested.
+    """
+    try:
+        vals = [float(s) for s in (sums or []) if s is not None]
+    except (ValueError, TypeError):
+        return 0.0
+    if len(vals) < 2:
+        return 0.0
+    total = 0.0
+    for prev, cur in zip(vals, vals[1:]):
+        total += max(0.0, cur - prev)
+    return round(total, 3)
 
 
 def warehouse_level_pct(bank_kwh: float | None, deposits_kwh: float | None) -> float | None:

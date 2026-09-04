@@ -307,7 +307,9 @@ async def _stat_sum_before(
         rows = (stats or {}).get(statistic_id) or []
         sums = [r.get("sum") for r in rows if r.get("sum") is not None]
         if sums:
-            return max(0.0, float(sums[-1]))
+            # v0.3.5: MAX, not last — a reset row inside the lookback
+            # (partial reimport restarted at 0) must not shrink the base.
+            return max(0.0, max(float(s) for s in sums))
     except Exception as err:
         _LOGGER.debug("Flow anchor lookup failed for %s: %s", statistic_id, err)
     return 0.0
@@ -590,8 +592,19 @@ async def _import_meter_history(
             else "",
         )
 
+        # Map entity suffix to sensor name (shared by the anchored caller below)
+        suffix_to_name = {
+            "import": "panel_energia_zuzycie",
+            "import_1": "panel_energia_strefa_1",
+            "import_2": "panel_energia_strefa_2",
+            "export": "panel_energia_produkcja",
+            "export_1": "panel_energia_produkcja_strefa_1",
+            "export_2": "panel_energia_produkcja_strefa_2",
+        }
+
         def build_statistics(
-            points: list, entity_suffix: str, entry: ConfigEntry
+            points: list, entity_suffix: str, entry: ConfigEntry,
+            base: float = 0.0, cost_base: float = 0.0,
         ) -> int:
             if not points:
                 return 0
@@ -617,7 +630,13 @@ async def _import_meter_history(
                     merged.append(dict(point))
             points = merged
 
-            running_sum = 0.0
+            # v0.3.5: start from the anchor base — a partial reimport must
+            # CONTINUE the recorder sums (v0.3.4 did this for flows only;
+            # panels restarted at 0 and poisoned whole months).
+            try:
+                running_sum = max(0.0, float(base))
+            except (ValueError, TypeError):
+                running_sum = 0.0
             statistics = []
 
             for point in points:
@@ -641,30 +660,27 @@ async def _import_meter_history(
                 )
 
             # Build cost statistics (v0.3.0: import only — export is priced
-            # live via the RCEm/Cena Oddania entity, never frozen at 0.95)
+            # live via the RCEm/Cena Oddania entity, never frozen at 0.95).
+            # v0.3.5: incremental from the cost anchor (same reason as above).
             cost_statistics = []
+            try:
+                cost_running = max(0.0, float(cost_base))
+            except (ValueError, TypeError):
+                cost_running = 0.0
             if not entity_suffix.startswith("export"):
                 for stat in statistics:
                     hourly_energy = stat["state"] or 0
                     hourly_cost = hourly_energy * price
-                    cost_sum = stat["sum"] * price
+                    cost_running += hourly_cost
                     cost_statistics.append(
                         {
                             "start": stat["start"],
-                            "sum": cost_sum,
+                            "sum": cost_running,
                             "state": hourly_cost,
                         }
                     )
 
             # Map entity suffix to sensor name
-            suffix_to_name = {
-                "import": "panel_energia_zuzycie",
-                "import_1": "panel_energia_strefa_1",
-                "import_2": "panel_energia_strefa_2",
-                "export": "panel_energia_produkcja",
-                "export_1": "panel_energia_produkcja_strefa_1",
-                "export_2": "panel_energia_produkcja_strefa_2",
-            }
             energy_sensor_name = suffix_to_name.get(
                 entity_suffix, f"panel_{entity_suffix}"
             )
@@ -726,12 +742,38 @@ async def _import_meter_history(
 
             return len(statistics)
 
+        # v0.3.5: anchored panel import — look up the already-imported sum
+        # before the range so a partial reimport CONTINUES the series
+        # instead of restarting at 0 (a 0-based September reimport once
+        # poisoned the previous month bucket and cut the FIFO bank).
+        async def _build_anchored(points: list, entity_suffix: str) -> int:
+            base = 0.0
+            cost_base = 0.0
+            if points:
+                try:
+                    first_dt = min(
+                        p["dt"] for p in points if p.get("dt") is not None
+                    )
+                except (ValueError, TypeError):
+                    first_dt = None
+                if first_dt is not None:
+                    energy_name = suffix_to_name.get(
+                        entity_suffix, f"panel_{entity_suffix}"
+                    )
+                    eid = f"sensor.energa_{meter_id}_{energy_name}"
+                    base = await _stat_sum_before(hass, eid, first_dt)
+                    if not entity_suffix.startswith("export"):
+                        cost_base = await _stat_sum_before(
+                            hass, f"{eid}_cost", first_dt
+                        )
+            return build_statistics(points, entity_suffix, entry, base, cost_base)
+
         # Build and import statistics
         if has_zones:
-            count_1 = build_statistics(import_1_points, "import_1", entry)
-            count_2 = build_statistics(import_2_points, "import_2", entry)
-            count_exp1 = build_statistics(export_1_points, "export_1", entry)
-            count_exp2 = build_statistics(export_2_points, "export_2", entry)
+            count_1 = await _build_anchored(import_1_points, "import_1")
+            count_2 = await _build_anchored(import_2_points, "import_2")
+            count_exp1 = await _build_anchored(export_1_points, "export_1")
+            count_exp2 = await _build_anchored(export_2_points, "export_2")
             total_count = count_1 + count_2 + count_exp1 + count_exp2
 
             persistent_notification.async_create(

@@ -75,11 +75,11 @@ energia `0` bo z magazynu).
   `forecast_brutto`, `forecast_do_zaplaty`, `cover_day/night`)
   z ekstrapolacją liniową przepływów na koniec miesiąca.
 - Stary system: pobór do wysokości Banku = koszt energii `0`
-  (dystrybucja i stałe płatne zawsze — jak faktura Wiśniowej).
+  (dystrybucja i stałe płatne zawsze — jak faktura G12W stare zasady).
 - Nowy system: depozyt MTD (`export×RCEm×1.23`) pomniejsza tylko energię
   czynną, nie dystrybucję ani opłaty stałe.
 
-**Kryterium akceptacji:** lipiec Agrestowej odtworzony z licznika
+**Kryterium akceptacji:** lipiec G12W nowe zasady odtworzony z licznika
 z dokładnością ±5% do `422.52` brutto (granica: bilans godzinowy
 sprzedawcy vs delty licznika + zmiany cen w trakcie miesiąca).
 

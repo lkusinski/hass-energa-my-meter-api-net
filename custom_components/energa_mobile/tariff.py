@@ -11,8 +11,8 @@ Fee tables (net PLN):
   (07.2026 net-billing, 05-06.2026 net-metering). Per-zone variable
   distribution prices were derived from kWh x price = line value and
   are marked for re-check against the OSD tariff PTR.
-- G11_DEFAULT_FEES: single-zone tariff, exact values from the G11
-  consumer invoice 1200000017/FES/XXXXX (04.02-05.04.2026, 2159 kWh):
+- G11_DEFAULT_FEES: single-zone tariff, exact values from a G11
+  consumer invoice (02-04.2026, 2159 kWh, no PV):
   sale 1352.37 + distribution 919.37 = netto 2271.74 -> brutto 2794.24.
 
 NOTE on excise: the invoice states "naliczono akcyze 10,80 zl" as an
@@ -97,10 +97,9 @@ G12W_DEFAULT_FEES = {
     "capacity": 24.05,
 }
 
-# G11 defaults, PLN net — exact values from consumer invoice
-# 1200000017/FES/XXXXX (G11, meter 73000003, 04.02-05.04.2026, 2159 kWh,
-# moc umowna 18 kW). Single zone: night/variable-night keys unused.
-# Annual use on that invoice: 7312 kWh -> top URE capacity bracket.
+# G11 defaults, PLN net — exact values from a G11 consumer invoice
+# (02-04.2026, 2159 kWh, single zone, no PV). Night/variable-night
+# keys unused. Annual use on that invoice: 7312 kWh (top URE bracket).
 G11_DEFAULT_FEES = {
     "energy_day": 0.6114,
     "energy_night": 0.0,
@@ -186,7 +185,7 @@ def compute_bill(
 
     sale_energy = pay_day * f["energy_day"] + pay_night * f["energy_night"]
     # Excise is NOT added: it is already inside the energy price
-    # (G11 invoice 1200000017/FES/XXXXX matches to the grosz without
+    # (G11 consumer invoice matches to the grosz without
     # it; the "naliczono akcyze" line is informational).
     excise_info = (import_day + import_night) * f["excise_mwh"] / 1000.0
     sale_total = sale_energy + f["trade_fee"] * months

@@ -19,7 +19,7 @@
 * `initial_pln` = `0.00` na `01.08.2026` (faktura `07.2026`: `456×0.26288×1.23=147.44`, `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U.1847.
 * Per-strefa G12W: `import_1/export_1` (L1 droga) + `import_2/export_2` (L2 tania). Ceny `import_price_1 1.30` / `import_price_2 0.65` w `Options → Ceny` (lub zostaw `1.2453/0.5955` default — ujednolicisz).
 * `Bilans Prosumencki` to diagnostic (ukryty półprodukt: `Bank=max(0,Bilans)+initial`). Nie wieszaj go obok Banku — to ta sama energia liczona podwójnie.
-* `G11 Odbiorca` (faktura `1200000017/FES/XXXXX`, G11 bez fotowoltaiki 2159 kWh): własna tabela opłat (handlowa `16,18`, sieciowa stała `11,77`, zmienna `0,3485`) — prognoza liczona jak faktura (`2271,74` netto → `2794,24` brutto co do grosza). Akcyza jest już w cenie energii (tylko przypis na fakturze).
+* `G11 bez PV` (faktura konsumencka, 2159 kWh): własna tabela opłat (handlowa `16,18`, sieciowa stała `11,77`, zmienna `0,3485`) — prognoza liczona jak faktura (`2271,74` netto → `2794,24` brutto co do grosza). Akcyza jest już w cenie energii (tylko przypis na fakturze).
 * **Wymiana licznika:** historia mchart obejmuje też poprzedni licznik (G12W nowe zasady: sumy 730d większe niż stan nowego). Bank liczony z nowego licznika (baseline) jest poprawny; FIFO i słupki pokazują historię gospodarstwa, nie licznika.
 * **Reimporty są bezpieczne (v0.3.4):** serie przepływów kontynuują zaimportowane sumy (kotwica sprzed zakresu), pełne backfille startują od 0. Sensor ładuje MAX z 14 dni — restarty nie zwijają słupków baterii.
 
@@ -102,11 +102,6 @@ cards:
 
 > Po `v0.2.10` możesz usunąć `packages/bank_energii.yaml` — bank jest natywny.
 
-## Lab zweryfikowany 2026-09-03 08:40
-
-- `sensor.bank_wirtualny_kwh` 2472.18 kWh (G12W stare, baseline per-strefa ze wskazań `do` faktury 06.2026), `sensor.bank_wirtualny_pln -415.57 PLN` (G12W nowe, baseline ze wskazań `do` faktury 07.2026, RCE `0.59287` auto — przed fixem RCEm w v0.2.11), `sensor.energa_<nr-licznika>_rcem_auto 0.59287`
-- Czyszczenie `core.entity_registry` przy `ha core stop` (`jq` na `/mnt/data/supervisor/homeassistant/.storage/`): usunięto 3 orphan `bank_pln` + 3 duplikaty `button` `serial` → 3 banki + 3 `data_pierwszego_odczytu` + 3 `button` (point_id)
-
 ## Dalej — v0.2.11 autokalibracja rozliczeń (FIFO 12 m-cy)
 
 > Reset „1 stycznia" (stare) i „co miesiąc" (nowe) byłyby NIEZGODNE z przepisami.
@@ -133,19 +128,14 @@ rozliczenie prosumenta (depozyt / pokrycie magazynem). Stan = prognozowana
 dopłata na koniec miesiąca, atrybuty = pełny rozkład MTD i prognozy.
 Stawki w `Options → Ceny` (`tariff_*`, domyślne G12W z faktur 2026).
 
-## Weryfikacja fakturowa 2026-09-04 (prod read-only vs lab)
+## Weryfikacja fakturowa (kotwice liczbowe)
 
 * Faktura G12W-stare 01.05–30.06: magazyn przed `0/0`, po `752+606=1358`;
   przybliżenie deltami `(1067.7+1066.3)×0.8−(109.4+253.6)=1344` vs faktura `1358`
-  (~1% — różnica to bilansowanie godzinowe sprzedawcy). `1358+1114.18=2472.18` prod==lab.
-* Faktura G12W-nowe 07.2026: `456×0.26288×1.23=147.44`, depozyt po `0.00`.
+  (~1% — różnica to bilansowanie godzinowe sprzedawcy).
+* Faktura G12W-nowe 07: `456×0.26288×1.23=147.44`, depozyt po `0.00`.
   Faktura liczy z sumy sald godzinowych (456 kWh), sensor z delty licznika (523 kWh) —
   znane ~13% przybliżenie (`hourly_netting_note`). Bank PLN to pozycja netto
   (depozyt − koszt importu), nie sam depozyt.
-* RCEm 07 `0.26288` z faktury = RCEm z tabeli PSE (publ. 11.08.2026). Prod `0.26288`
-  poprawne na dziś (RCEm sierpnia dopiero 11.09).
-* Znalezione niespójności prod (do poprawy ręcznie, NIE ruszane):
-   sensor magazynu (stare): atrybut `formula` mówi `783`, a liczy `1358`;
-   sensor magazynu (nowe): atrybut `formula` mówi `+147.44`, a liczy bez offsetu (poprawnie);
-   Licznik G12W-nowe na prod ma `coefficient 0.8` (stara formuła bilansu) zamiast `0.0`;
-  prod jedzie na upstream `v4.15.2` (brak natywnego banku) — do migracji na fork.
+* RCEm z faktury = RCEm z tabeli PSE (publikacja ~11. dnia miesiąca);
+  przed 11. dniem obowiązuje M-2, po 11. — M-1.

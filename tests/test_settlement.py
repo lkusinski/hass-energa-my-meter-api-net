@@ -128,7 +128,7 @@ class TestDepositValidUntil:
 class TestIsExportProsumer:
     """v0.2.15: obis_minus alone must not spawn prosumer sensors.
 
-    Consumer meters (e.g. G11 bez fotowoltaiki without PV) may still report
+    Consumer meters (e.g. G11 without PV) may still report
     export OBIS codes with zero readings — Bank 0.0, phantom
     charge/discharge flows and a Bilans == -import are noise.
     """
@@ -342,3 +342,52 @@ class TestAnchorFlowSeries:
         assert anchor_flow_series(None, 5.0) == []
         assert anchor_flow_series([1.0], None)[0][0] == 1.0
         assert anchor_flow_series([1.0], "junk")[0] == (1.0, 1.0)
+
+
+class TestResetAwareDelta:
+    """v0.3.5: monthly/MTD/rolling sums survive a mid-window series reset."""
+
+    def test_monotonic_equals_last_minus_first(self):
+        from custom_components.energa_mobile.settlement import (
+            reset_aware_delta,
+        )
+
+        assert reset_aware_delta([10.0, 12.5, 15.0]) == 5.0
+
+    def test_mid_window_reset_counts_both_sides(self):
+        from custom_components.energa_mobile.settlement import (
+            reset_aware_delta,
+        )
+
+        assert reset_aware_delta([100.0, 105.0, 110.0, 20.0, 25.0]) == 15.0
+
+    def test_reset_on_last_row_counts_flow_before_it(self):
+        from custom_components.energa_mobile.settlement import (
+            reset_aware_delta,
+        )
+
+        # Month-boundary row rewritten with sum 0.0: only August flow counts.
+        assert reset_aware_delta([5512.09, 5579.83, 2.68]) == 67.74
+
+    def test_defensive(self):
+        from custom_components.energa_mobile.settlement import (
+            reset_aware_delta,
+        )
+
+        assert reset_aware_delta([]) == 0.0
+        assert reset_aware_delta(None) == 0.0
+        assert reset_aware_delta([5.0]) == 0.0
+        assert reset_aware_delta([7.0, 7.0, 7.0]) == 0.0
+
+    def test_negative_month_clamped_in_fifo(self):
+        from custom_components.energa_mobile.settlement import (
+            fifo_kwh_bank,
+        )
+
+        # A raw negative month (pre-v0.3.5 data) must not corrupt the bank.
+        bank, detail = fifo_kwh_bank(
+            [(2026, 7, 100.0, 200.0), (2026, 8, -5509.0, -6290.0)], 0.8,
+            today=__import__("datetime").date(2026, 9, 4),
+        )
+        assert bank >= 0.0
+        assert detail["deposits_kwh"] == 160.0

@@ -1,7 +1,7 @@
 """Tests for v0.2.14 tariff math (hidden fees), v0.3.0 G11 table.
 
  Fee tables: G12W_DEFAULT_FEES, G11_DEFAULT_FEES (exact values from G11
- consumer invoice 1200000017/FES/XXXXX, 04.02-05.04.2026, 2159 kWh:
+ consumer invoice (G11, 02-04.2026, 2159 kWh, no PV):
  sale 1352.37 + distribution 919.37 = netto 2271.74 -> brutto 2794.24).
  Reference numbers come from real invoices:
  - G12W-nowe 07.2026: sale 195.06 (100.15+0.20+94.56+0.15), distribution
@@ -205,7 +205,7 @@ class TestBillSensorWiring:
         assert res["do_zaplaty"] == res["brutto"]
 
     def test_consumer_full_import_bill(self):
-        # G11 consumer (G11 bez fotowoltaiki): no export, no cover — pays everything.
+        # G11 consumer (no PV): no export, no cover — pays everything.
         fees = fees_from_options({})
         res = compute_bill(150.0, 0.0, 0.0, 0.26288, fees, deposit_pln=0.0)
         assert res["sale_energy_day"] == round(150.0 * 0.6107, 2)
@@ -241,9 +241,9 @@ class TestCapacityBrackets:
 
 
 class TestG11Invoice:
-    """G11 consumer invoice 1200000017/FES/XXXXX (G11 bez fotowoltaiki, v0.3.0).
+    """G11 consumer invoice (no PV, v0.3.0).
 
-    Period 04.02-05.04.2026 (2 months), 2159 kWh single-zone, meter
+    Period 02-04.2026 (2 months), 2159 kWh single-zone, meter
     8927.584 -> 11086.221. Every line must match to the grosz.
     """
 
