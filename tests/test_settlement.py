@@ -391,3 +391,54 @@ class TestResetAwareDelta:
         )
         assert bank >= 0.0
         assert detail["deposits_kwh"] == 160.0
+
+
+class TestBucketFlows:
+    """v0.3.9: hourly points land in the right (import, export) slot."""
+
+    def test_single_zone_export_goes_to_slot_1(self):
+        from datetime import datetime
+
+        from custom_components.energa_mobile.settlement import bucket_flows
+
+        h1 = datetime(2026, 9, 1, 12)
+        h2 = datetime(2026, 9, 1, 13)
+        out = bucket_flows(
+            [
+                ([{"dt": h1, "value": 2.0}, {"dt": h2, "value": 3.0}], 0),
+                ([{"dt": h1, "value": 5.0}, {"dt": h2, "value": 7.0}], 1),
+            ]
+        )
+        assert out == [(h1, (2.0, 5.0)), (h2, (3.0, 7.0))]
+
+    def test_zoned_series_share_slots(self):
+        from datetime import datetime
+
+        from custom_components.energa_mobile.settlement import bucket_flows
+
+        h = datetime(2026, 9, 1, 12)
+        out = bucket_flows(
+            [
+                ([{"dt": h, "value": 1.0}], 0),
+                ([{"dt": h, "value": 2.0}], 0),
+                ([{"dt": h, "value": 3.0}], 1),
+                ([{"dt": h, "value": 4.0}], 1),
+            ]
+        )
+        assert out == [(h, (3.0, 7.0))]
+
+    def test_guards(self):
+        from datetime import datetime
+
+        from custom_components.energa_mobile.settlement import bucket_flows
+
+        h = datetime(2026, 9, 1, 12)
+        out = bucket_flows(
+            [
+                ([{"dt": h, "value": -1.0}, {"dt": h, "value": 500.0}], 0),
+                ([{"dt": h, "value": "junk"}], 1),
+                ([{"dt": h, "value": 1.0}], 7),
+            ],
+            max_hourly=100.0,
+        )
+        assert out == []

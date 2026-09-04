@@ -290,6 +290,47 @@ def reset_aware_delta(sums) -> float:
     return round(total, 3)
 
 
+def bucket_flows(series, max_hourly=None) -> list:
+    """Group hourly flow points by timestamp into (import, export) slots.
+
+    Args:
+        series: iterable of (points, slot) where each point is
+            {"dt": datetime, "value": kWh} and slot is 0 (import)
+            or 1 (export). Same hour from several series adds up
+            (DST fallback duplicates included).
+        max_hourly: optional per-hour spike guard (kWh); higher
+            values are skipped entirely.
+
+    Returns ordered list of (dt, (import_kwh, export_kwh)).
+    Pure function, unit-tested.
+    """
+    by_hour: dict = {}
+    for points, idx in series or []:
+        try:
+            slot_idx = int(idx)
+        except (ValueError, TypeError):
+            continue
+        if slot_idx not in (0, 1):
+            continue
+        for p in points or []:
+            try:
+                dt = p["dt"]
+                v = float(p["value"])
+            except (ValueError, TypeError, KeyError, AttributeError):
+                continue
+            if v < 0:
+                continue
+            if max_hourly is not None:
+                try:
+                    if v > float(max_hourly):
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            slot = by_hour.setdefault(dt, [0.0, 0.0])
+            slot[slot_idx] += max(0.0, v)
+    return [(dt, (v[0], v[1])) for dt, v in sorted(by_hour.items())]
+
+
 def warehouse_level_pct(bank_kwh: float | None, deposits_kwh: float | None) -> float | None:
     """Poziom magazynu w % (stary net-metering, v0.3.0).
 

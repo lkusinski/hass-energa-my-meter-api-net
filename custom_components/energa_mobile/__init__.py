@@ -810,30 +810,27 @@ async def _import_meter_history(
         # reimport continues the totals instead of restarting at 0 (which
         # the recorder reads as a meter reset, collapsing battery bars).
         try:
-            from .settlement import anchor_flow_series, flow_history_series
+            from .settlement import (
+                anchor_flow_series,
+                bucket_flows,
+                flow_history_series,
+            )
 
-            _by_hour: dict = {}
-
-            def _add_flow_points(points: list, _idx: int) -> None:
-                for _p in points:
-                    try:
-                        _v = float(_p["value"])
-                    except (ValueError, TypeError, KeyError):
-                        continue
-                    if _v < 0 or _v > MAX_HOURLY_KWH:
-                        continue
-                    _slot = _by_hour.setdefault(_p["dt"], [0.0, 0.0])
-                    _slot[_idx] += max(0.0, _v)
-
+            # v0.3.9: single-zone export goes to slot 1 (it sat in
+            # slot 0, zeroing charge and doubling discharge).
             if has_zones:
-                _add_flow_points(import_1_points, 0)
-                _add_flow_points(import_2_points, 0)
-                _add_flow_points(export_1_points, 1)
-                _add_flow_points(export_2_points, 1)
+                _pairs = [
+                    (import_1_points, 0),
+                    (import_2_points, 0),
+                    (export_1_points, 1),
+                    (export_2_points, 1),
+                ]
             else:
-                _add_flow_points(import_points, 0)
-                _add_flow_points(export_points, 0)
-            _ordered = sorted(_by_hour.items())
+                _pairs = [(import_points, 0), (export_points, 1)]
+            _ordered = [
+                (dt, list(vals))
+                for dt, vals in bucket_flows(_pairs, max_hourly=MAX_HOURLY_KWH)
+            ]
             try:
                 _coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
             except (ValueError, TypeError):

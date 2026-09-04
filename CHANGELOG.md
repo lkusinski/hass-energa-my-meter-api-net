@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.9 (2026-09-04)
+
+### 🐛 Bug Fixes (bateria jedno-strefowa)
+- **Eksport jednej strefy trafiał do slotu importu:** backfill
+  przepływów wkładał `export` do kubełka 0 zamiast 1 — ładowanie
+  stało w `0.0`, a rozładowanie rosło o import+eksport naraz.
+  Niewidoczne na konsumentach (brak eksportu) i G12W (osobna
+  ścieżka); wykryte na żywym G11 z PV (rozładowanie ≈ import+eksport
+  co do kWh). Mapowanie wydzielone do testowalnego `bucket_flows`.
+
 ## v0.3.8 (2026-09-04)
 
 ### ✨ Nowe (wybór systemu przy dodawaniu)
