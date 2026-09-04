@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.1 (2026-09-04)
+
+### 🐛 Bug Fixes
+- **`Data pierwszego odczytu` `unknown` na starych wpisach:** legacy wpisy trio trzymały wykryte daty w `entry.data`, a sensor czytał tylko `options` — teraz czyta oba.
+
 ## v0.3.0 (2026-09-04)
 
 ### 🧭 Nowy first boot: historia sama w tle, zero blokowania
