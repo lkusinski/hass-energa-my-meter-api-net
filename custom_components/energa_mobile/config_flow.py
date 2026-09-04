@@ -1,5 +1,6 @@
 """Config flow for Energa My Meter integration."""
 
+import asyncio
 import logging
 import secrets
 from datetime import datetime
@@ -13,6 +14,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import EnergaAPI, EnergaAuthError, EnergaConnectionError
+from .settlement import is_export_prosumer
 from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
@@ -146,6 +148,23 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                     await self.async_set_unique_id(attempt_username.lower())
                     self._abort_if_unique_id_configured()
+                    # v0.3.8: prosumers pick the settlement system up
+                    # front — no API field tells opusty apart from
+                    # net-billing (activation date is the app date,
+                    # dealer.start the supply contract). One bounded
+                    # meter fetch; fail-open to the old direct create.
+                    try:
+                        async with asyncio.timeout(20):
+                            _meters = await api._fetch_all_meters()
+                        _prosumer = any(
+                            is_export_prosumer(m) for m in (_meters or [])
+                        )
+                    except Exception:
+                        _prosumer = False
+                    if _prosumer:
+                        self._pending_title = attempt_username
+                        self._pending_data = entry_data
+                        return await self.async_step_system()
                     return self.async_create_entry(
                         title=attempt_username,
                         data=entry_data,
@@ -174,6 +193,34 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_system(self, user_input=None):
+        """Ask the settlement system for prosumer accounts (v0.3.8).
+
+        Opusty (old) vs net-billing (new) cannot be told apart from API
+        data, so the user picks once; the choice seeds the entry options
+        (still changeable later in Options → Ceny).
+        """
+        if user_input is not None:
+            coeff = 0.0 if user_input.get("system") == "nowe" else 0.8
+            return self.async_create_entry(
+                title=getattr(self, "_pending_title", "Energa My Meter"),
+                data=getattr(self, "_pending_data", {}),
+                options={CONF_PROSUMER_COEFFICIENT: coeff},
+            )
+        return self.async_show_form(
+            step_id="system",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("system", default="nowe"): vol.In(
+                        {
+                            "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
+                            "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+                        }
+                    )
+                }
+            ),
         )
 
     async def async_step_reauth(self, entry_data):

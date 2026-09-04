@@ -376,7 +376,7 @@ def orphan_bank_uids(
         return set()
     if coeff >= 0.7:
         return {f"energa_{mid}_bank_pln", f"energa_{mid}_rcem_auto"}
-    return {f"energa_{mid}_bank_kwh"}
+    return {f"energa_{mid}_bank_kwh", f"energa_{mid}_bank_level"}
 
 
 def orphan_removed_uids(meter_id: str, serial: str) -> set:

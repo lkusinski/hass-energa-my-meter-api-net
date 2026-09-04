@@ -1,108 +1,115 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "title": "Energa My Meter Login",
-                "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. The last 2 years of history download automatically in the background after setup.",
-                "data": {
-                    "username": "Username (email)",
-                    "password": "Password"
-                }
-            },
-            "reauth_confirm": {
-                "title": "Update Password",
-                "description": "Re-login for account {username}.",
-                "data": {
-                    "password": "New Password"
-                }
-            }
-        },
-        "error": {
-            "cannot_connect": "Connection error",
-            "invalid_auth": "Invalid authentication",
-            "unknown": "Unknown error"
-        },
-        "abort": {
-            "already_configured": "Account already configured",
-            "reauth_successful": "Password updated successfully"
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energa My Meter Login",
+        "description": "Enter credentials for Mój Licznik. Meters and OBIS codes will be auto-detected. The last 2 years of history download automatically in the background after setup.",
+        "data": {
+          "username": "Username (email)",
+          "password": "Password"
         }
+      },
+      "system": {
+        "title": "Settlement system",
+        "description": "Your account has solar export. Pick how Energa settles it (check your invoice if unsure — it cannot be detected automatically).",
+        "data": {
+          "system": "Settlement system"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update Password",
+        "description": "Re-login for account {username}.",
+        "data": {
+          "password": "New Password"
+        }
+      }
     },
-    "options": {
-        "step": {
-            "init": {
-                "menu_options": {
-                    "credentials": "Change Credentials",
-                    "prices": "Set Energy Prices",
-                    "history": "Download History",
-                    "clear_stats": "Clear Energy Panel Statistics"
-                }
-            },
-            "credentials": {
-                "title": "Update Credentials",
-                "data": {
-                    "username": "Username",
-                    "password": "New Password"
-                }
-            },
-            "prices": {
-                "title": "Energy Prices",
-                "description": "Set energy prices for cost calculation in Energy Panel.",
-                "data": {
-                    "import_price": "Price per kWh (consumption) [PLN]",
-                    "import_price_1": "Zone 1 price per kWh (peak) [PLN]",
-                    "import_price_2": "Zone 2 price per kWh (off-peak) [PLN]",
-                    "export_price": "Rate per kWh (production) [PLN]",
-                    "prosumer_coefficient": "Prosumer coefficient (0-1)",
-                    "balance_baseline_import": "Prosumer baseline import [kWh]",
-                    "balance_baseline_export": "Prosumer baseline export [kWh]",
-                    "bank_rce_price": "RCE/RCEm price [PLN/kWh] (e.g. 0.26288 for 07.2026)",
-                    "bank_initial_kwh": "Bank initial kWh (old system, from invoice)",
-                    "bank_initial_pln": "Bank initial PLN (new system, from invoice)",
-                    "rce_auto_fetch": "Auto-fetch RCEm from PSE API every 24h",
-                    "settlement_date": "Annual settlement anniversary YYYY-MM-DD (old system, e.g. invoice date)",
-                    "enable_auto_settlement": "Show settlement/expiry calibration attributes",
-                    "use_rolling_365d": "Old system: rolling 365-day FIFO bank from statistics (needs history)",
-                    "tariff_energy_day": "Tariff: sale energy day L1 [PLN/kWh]",
-                    "tariff_energy_night": "Tariff: sale energy night L2 [PLN/kWh]",
-                    "tariff_excise_mwh": "Tariff: excise duty [PLN/MWh of import]",
-                    "tariff_trade_fee": "Tariff: monthly trade fee [PLN] (from your invoice!)",
-                    "tariff_abonament": "Tariff: subscription fee [PLN/month]",
-                    "tariff_grid_fixed": "Tariff: fixed grid fee [PLN/month]",
-                    "tariff_grid_var_day": "Tariff: variable grid day [PLN/kWh]",
-                    "tariff_grid_var_night": "Tariff: variable grid night [PLN/kWh]",
-                    "tariff_quality": "Tariff: quality fee [PLN/kWh] (from your invoice!)",
-                    "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
-                    "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
-                    "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)"
-                }
-            },
-            "history": {
-                "title": "Download History",
-                "description": "**Contract Date:** {contract_date}\n\nSelect start date. Data download runs in background for all meters.",
-                "data": {
-                    "start_date": "Start Date"
-                }
-            },
-            "clear_stats": {
-                "title": "Clear Statistics",
-                "description": "{warning}\n\nDo you want to continue?"
-            }
-        }
+    "error": {
+      "cannot_connect": "Connection error",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unknown error"
     },
-    "services": {
-        "fetch_history": {
-            "name": "Fetch history",
-            "description": "Fetches historical hourly data from the Energa API.",
-            "fields": {
-                "start_date": {
-                    "name": "Start date",
-                    "description": "Date to start fetching from (format YYYY-MM-DD)."
-                },
-                "days": {
-                    "name": "Number of days",
-                    "description": "How many days to fetch (default 30)."
-                }
-            }
-        }
+    "abort": {
+      "already_configured": "Account already configured",
+      "reauth_successful": "Password updated successfully"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "credentials": "Change Credentials",
+          "prices": "Set Energy Prices",
+          "history": "Download History",
+          "clear_stats": "Clear Energy Panel Statistics"
+        }
+      },
+      "credentials": {
+        "title": "Update Credentials",
+        "data": {
+          "username": "Username",
+          "password": "New Password"
+        }
+      },
+      "prices": {
+        "title": "Energy Prices",
+        "description": "Set energy prices for cost calculation in Energy Panel.",
+        "data": {
+          "import_price": "Price per kWh (consumption) [PLN]",
+          "import_price_1": "Zone 1 price per kWh (peak) [PLN]",
+          "import_price_2": "Zone 2 price per kWh (off-peak) [PLN]",
+          "export_price": "Rate per kWh (production) [PLN]",
+          "prosumer_coefficient": "Prosumer coefficient (0-1)",
+          "balance_baseline_import": "Prosumer baseline import [kWh]",
+          "balance_baseline_export": "Prosumer baseline export [kWh]",
+          "bank_rce_price": "RCE/RCEm price [PLN/kWh] (e.g. 0.26288 for 07.2026)",
+          "bank_initial_kwh": "Bank initial kWh (old system, from invoice)",
+          "bank_initial_pln": "Bank initial PLN (new system, from invoice)",
+          "rce_auto_fetch": "Auto-fetch RCEm from PSE API every 24h",
+          "settlement_date": "Annual settlement anniversary YYYY-MM-DD (old system, e.g. invoice date)",
+          "enable_auto_settlement": "Show settlement/expiry calibration attributes",
+          "use_rolling_365d": "Old system: rolling 365-day FIFO bank from statistics (needs history)",
+          "tariff_energy_day": "Tariff: sale energy day L1 [PLN/kWh]",
+          "tariff_energy_night": "Tariff: sale energy night L2 [PLN/kWh]",
+          "tariff_excise_mwh": "Tariff: excise duty [PLN/MWh of import]",
+          "tariff_trade_fee": "Tariff: monthly trade fee [PLN] (from your invoice!)",
+          "tariff_abonament": "Tariff: subscription fee [PLN/month]",
+          "tariff_grid_fixed": "Tariff: fixed grid fee [PLN/month]",
+          "tariff_grid_var_day": "Tariff: variable grid day [PLN/kWh]",
+          "tariff_grid_var_night": "Tariff: variable grid night [PLN/kWh]",
+          "tariff_quality": "Tariff: quality fee [PLN/kWh] (from your invoice!)",
+          "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
+          "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
+          "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)"
+        }
+      },
+      "history": {
+        "title": "Download History",
+        "description": "**Contract Date:** {contract_date}\n\nSelect start date. Data download runs in background for all meters.",
+        "data": {
+          "start_date": "Start Date"
+        }
+      },
+      "clear_stats": {
+        "title": "Clear Statistics",
+        "description": "{warning}\n\nDo you want to continue?"
+      }
+    }
+  },
+  "services": {
+    "fetch_history": {
+      "name": "Fetch history",
+      "description": "Fetches historical hourly data from the Energa API.",
+      "fields": {
+        "start_date": {
+          "name": "Start date",
+          "description": "Date to start fetching from (format YYYY-MM-DD)."
+        },
+        "days": {
+          "name": "Number of days",
+          "description": "How many days to fetch (default 30)."
+        }
+      }
+    }
+  }
 }

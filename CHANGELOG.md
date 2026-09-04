@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.8 (2026-09-04)
+
+### ✨ Nowe (wybór systemu przy dodawaniu)
+- **Pytanie o system w kreatorze:** konta prosumenckie wybierają
+  stare (0.8) albo nowe (0.0) zasady od razu przy logowaniu —
+  API nie zdradza systemu (data aktywacji to data aplikacji),
+  więc pyta człowiek raz, zamiast zgadywać. Wybór ląduje w Options
+  (Ceny) i da się zmienić.
+- **Sierota Magazyn Poziom sprzątana** w nowym systemie (stary sensor
+  poziomu nie ma tam sensu i wisiał jako `unavailable`).
+
+### 🧪 Testy
+- Orphan-set nowego systemu zawiera poziom; ~210 testów.
+
 ## v0.3.7 (2026-09-04)
 
 ### 🔙 Revert (v0.3.6 cofnięty)

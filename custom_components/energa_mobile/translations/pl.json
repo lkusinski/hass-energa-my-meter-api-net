@@ -1,108 +1,115 @@
 {
-    "config": {
-        "step": {
-            "user": {
-                "title": "Logowanie do Energa My Meter",
-                "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki. Historia z ostatnich 2 lat pobierze się sama w tle po dodaniu.",
-                "data": {
-                    "username": "Login (email)",
-                    "password": "Hasło"
-                }
-            },
-            "reauth_confirm": {
-                "title": "Wymagana aktualizacja hasła",
-                "description": "Zaloguj się ponownie dla konta {username}.",
-                "data": {
-                    "password": "Nowe hasło"
-                }
-            }
-        },
-        "error": {
-            "cannot_connect": "Błąd połączenia z API",
-            "invalid_auth": "Błędne hasło lub login",
-            "unknown": "Nieznany błąd"
-        },
-        "abort": {
-            "already_configured": "To konto jest już skonfigurowane",
-            "reauth_successful": "Hasło zostało zaktualizowane"
+  "config": {
+    "step": {
+      "user": {
+        "title": "Logowanie do Energa My Meter",
+        "description": "Podaj dane logowania do Mój Licznik. Integracja sama wykryje kody OBIS i liczniki. Historia z ostatnich 2 lat pobierze się sama w tle po dodaniu.",
+        "data": {
+          "username": "Login (email)",
+          "password": "Hasło"
         }
+      },
+      "system": {
+        "title": "System rozliczeń",
+        "description": "Twoje konto oddaje energię do sieci. Wybierz jak rozlicza ją Energa (sprawdź fakturę jeśli nie wiesz — nie da się tego wykryć automatycznie).",
+        "data": {
+          "system": "System rozliczeń"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Wymagana aktualizacja hasła",
+        "description": "Zaloguj się ponownie dla konta {username}.",
+        "data": {
+          "password": "Nowe hasło"
+        }
+      }
     },
-    "options": {
-        "step": {
-            "init": {
-                "menu_options": {
-                    "credentials": "Zmień Login/Hasło",
-                    "prices": "Ustaw Ceny Energii",
-                    "history": "Pobierz Historię Danych",
-                    "clear_stats": "Wyczyść Statystyki Panelu Energia"
-                }
-            },
-            "credentials": {
-                "title": "Zmiana Danych",
-                "data": {
-                    "username": "Login",
-                    "password": "Nowe hasło"
-                }
-            },
-            "prices": {
-                "title": "Ceny Energii",
-                "description": "Ustaw ceny energii do kalkulacji kosztów w Panelu Energia.",
-                "data": {
-                    "import_price": "Cena za kWh (zużycie) [PLN]",
-                    "import_price_1": "Cena za kWh strefa 1 (droga) [PLN]",
-                    "import_price_2": "Cena za kWh strefa 2 (tania) [PLN]",
-                    "export_price": "Stawka za kWh (produkcja) [PLN]",
-                    "prosumer_coefficient": "Współczynnik prosumencki (0-1)",
-                    "balance_baseline_import": "Bazowy odczyt importu prosumenta [kWh]",
-                    "balance_baseline_export": "Bazowy odczyt eksportu prosumenta [kWh]",
-                    "bank_rce_price": "Cena RCE/RCEm [PLN/kWh] (np. 0.26288 dla 07.2026)",
-                    "bank_initial_kwh": "Bank początkowy kWh (stary system, z faktury)",
-                    "bank_initial_pln": "Bank początkowy PLN (nowy system, z faktury)",
-                    "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
-                    "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
-                    "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
-                    "use_rolling_365d": "Stary system: kroczący bank 365d FIFO ze statystyk (wymaga historii)",
-                    "tariff_energy_day": "Taryfa: sprzedaż energii dzień L1 [PLN/kWh]",
-                    "tariff_energy_night": "Taryfa: sprzedaż energii noc L2 [PLN/kWh]",
-                    "tariff_excise_mwh": "Taryfa: akcyza [PLN/MWh poboru]",
-                    "tariff_trade_fee": "Taryfa: opłata handlowa [PLN/mies.] (z faktury!)",
-                    "tariff_abonament": "Taryfa: opłata abonamentowa [PLN/mies.]",
-                    "tariff_grid_fixed": "Taryfa: sieciowa stała [PLN/mies.]",
-                    "tariff_grid_var_day": "Taryfa: sieciowa zmienna dzień [PLN/kWh]",
-                    "tariff_grid_var_night": "Taryfa: sieciowa zmienna noc [PLN/kWh]",
-                    "tariff_quality": "Taryfa: opłata jakościowa [PLN/kWh] (z faktury!)",
-                    "tariff_oze": "Taryfa: opłata OZE [PLN/kWh]",
-                    "tariff_cogen": "Taryfa: opłata kogeneracyjna [PLN/kWh]",
-                    "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.] (puste = auto próg URE 2026)"
-                }
-            },
-            "history": {
-                "title": "Pobieranie Historii",
-                "description": "**Data umowy:** {contract_date}\n\nWybierz datę początkową. Integracja pobierze dane godzinowe w tle dla wszystkich liczników.",
-                "data": {
-                    "start_date": "Data początkowa"
-                }
-            },
-            "clear_stats": {
-                "title": "Czyszczenie Statystyk",
-                "description": "{warning}\n\nCzy chcesz kontynuować?"
-            }
-        }
+    "error": {
+      "cannot_connect": "Błąd połączenia z API",
+      "invalid_auth": "Błędne hasło lub login",
+      "unknown": "Nieznany błąd"
     },
-    "services": {
-        "fetch_history": {
-            "name": "Pobierz historię",
-            "description": "Pobiera historyczne dane godzinowe z API Energi.",
-            "fields": {
-                "start_date": {
-                    "name": "Data początkowa",
-                    "description": "Data, od której rozpocząć pobieranie (format RRRR-MM-DD)."
-                },
-                "days": {
-                    "name": "Liczba dni",
-                    "description": "Ile dni pobrać (domyślnie 30)."
-                }
-            }
-        }
+    "abort": {
+      "already_configured": "To konto jest już skonfigurowane",
+      "reauth_successful": "Hasło zostało zaktualizowane"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "credentials": "Zmień Login/Hasło",
+          "prices": "Ustaw Ceny Energii",
+          "history": "Pobierz Historię Danych",
+          "clear_stats": "Wyczyść Statystyki Panelu Energia"
+        }
+      },
+      "credentials": {
+        "title": "Zmiana Danych",
+        "data": {
+          "username": "Login",
+          "password": "Nowe hasło"
+        }
+      },
+      "prices": {
+        "title": "Ceny Energii",
+        "description": "Ustaw ceny energii do kalkulacji kosztów w Panelu Energia.",
+        "data": {
+          "import_price": "Cena za kWh (zużycie) [PLN]",
+          "import_price_1": "Cena za kWh strefa 1 (droga) [PLN]",
+          "import_price_2": "Cena za kWh strefa 2 (tania) [PLN]",
+          "export_price": "Stawka za kWh (produkcja) [PLN]",
+          "prosumer_coefficient": "Współczynnik prosumencki (0-1)",
+          "balance_baseline_import": "Bazowy odczyt importu prosumenta [kWh]",
+          "balance_baseline_export": "Bazowy odczyt eksportu prosumenta [kWh]",
+          "bank_rce_price": "Cena RCE/RCEm [PLN/kWh] (np. 0.26288 dla 07.2026)",
+          "bank_initial_kwh": "Bank początkowy kWh (stary system, z faktury)",
+          "bank_initial_pln": "Bank początkowy PLN (nowy system, z faktury)",
+          "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
+          "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
+          "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
+          "use_rolling_365d": "Stary system: kroczący bank 365d FIFO ze statystyk (wymaga historii)",
+          "tariff_energy_day": "Taryfa: sprzedaż energii dzień L1 [PLN/kWh]",
+          "tariff_energy_night": "Taryfa: sprzedaż energii noc L2 [PLN/kWh]",
+          "tariff_excise_mwh": "Taryfa: akcyza [PLN/MWh poboru]",
+          "tariff_trade_fee": "Taryfa: opłata handlowa [PLN/mies.] (z faktury!)",
+          "tariff_abonament": "Taryfa: opłata abonamentowa [PLN/mies.]",
+          "tariff_grid_fixed": "Taryfa: sieciowa stała [PLN/mies.]",
+          "tariff_grid_var_day": "Taryfa: sieciowa zmienna dzień [PLN/kWh]",
+          "tariff_grid_var_night": "Taryfa: sieciowa zmienna noc [PLN/kWh]",
+          "tariff_quality": "Taryfa: opłata jakościowa [PLN/kWh] (z faktury!)",
+          "tariff_oze": "Taryfa: opłata OZE [PLN/kWh]",
+          "tariff_cogen": "Taryfa: opłata kogeneracyjna [PLN/kWh]",
+          "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.] (puste = auto próg URE 2026)"
+        }
+      },
+      "history": {
+        "title": "Pobieranie Historii",
+        "description": "**Data umowy:** {contract_date}\n\nWybierz datę początkową. Integracja pobierze dane godzinowe w tle dla wszystkich liczników.",
+        "data": {
+          "start_date": "Data początkowa"
+        }
+      },
+      "clear_stats": {
+        "title": "Czyszczenie Statystyk",
+        "description": "{warning}\n\nCzy chcesz kontynuować?"
+      }
+    }
+  },
+  "services": {
+    "fetch_history": {
+      "name": "Pobierz historię",
+      "description": "Pobiera historyczne dane godzinowe z API Energi.",
+      "fields": {
+        "start_date": {
+          "name": "Data początkowa",
+          "description": "Data, od której rozpocząć pobieranie (format RRRR-MM-DD)."
+        },
+        "days": {
+          "name": "Liczba dni",
+          "description": "Ile dni pobrać (domyślnie 30)."
+        }
+      }
+    }
+  }
 }
