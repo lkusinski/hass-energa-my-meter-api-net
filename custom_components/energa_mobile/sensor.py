@@ -836,7 +836,10 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
         tz = ZoneInfo("Europe/Warsaw")
         now = dt_datetime.now(tz)
-        default_start = now - timedelta(days=30)
+        # v1.0.1: fresh startup fallback must be 1 day (today + yesterday),
+        # never 30 days — a 30-day fetch takes >75s and exceeds HA's 60s setup watchdog.
+        # Background auto-backfill handles the full 730-day history asynchronously.
+        default_start = now - timedelta(days=1)
 
         # Find entity_id for this meter's import sensor
         registry = er.async_get(self.hass)
@@ -858,8 +861,34 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 break
 
         if not entity_id:
+            # Fall back to checking candidate statistic ID directly in recorder
+            candidate_id = f"sensor.energa_{meter_id}_{'panel_energia_strefa_1' if has_zones else 'panel_energia_zuzycie'}"
+            try:
+                last_stats = await get_instance(self.hass).async_add_executor_job(
+                    get_last_statistics, self.hass, 1, candidate_id, True, {"sum"}
+                )
+                if candidate_id in last_stats and last_stats[candidate_id]:
+                    last_ts = last_stats[candidate_id][0].get("start")
+                    if last_ts:
+                        if isinstance(last_ts, (int, float)):
+                            last_dt = dt_util.utc_from_timestamp(last_ts).astimezone(tz)
+                        else:
+                            last_dt = last_ts.astimezone(tz)
+                        start_date = last_dt + timedelta(hours=1)
+                        _LOGGER.debug(
+                            "Smart fetch for %s (candidate): last_stat=%s, start=%s",
+                            candidate_id,
+                            last_dt,
+                            start_date,
+                        )
+                        return start_date
+            except Exception as err:
+                _LOGGER.debug("Candidate stats lookup failed for %s: %s", candidate_id, err)
+
             _LOGGER.debug(
-                "No entity found for meter %s, using default 30 days", meter_id
+                "No entity or statistics found for meter %s, using initial fallback (%s)",
+                meter_id,
+                default_start.date(),
             )
             return default_start
 

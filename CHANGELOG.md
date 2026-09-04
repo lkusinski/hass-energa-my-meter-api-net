@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.1 (2026-09-04) — Szybki Start & Odporność Onboardingu
+
+### 🐛 Bug Fixes
+- **Eliminacja timeoutu 60s platformy sensorów przy czystym onboardingu:**
+  - W `_get_smart_start_date` fallback przy braku wcześniejszych statystyk został skrócony z 30 dni do 1 dnia (`now - timedelta(days=1)`). Pobieranie 30 dni synchronicznie w `async_setup_entry` zajmowało ponad 75 sekund i przekraczało limit 60s watchdoga platformy Home Assistant.
+  - Dodano wyszukiwanie istniejących statystyk w rejestratorze (`recorder`) po przewidywalnym `statistic_id`, zanim koordynator sięgnie po domyślny fallback.
+  - Pierwsze uruchomienie po dodaniu integracji trwa teraz poniżej 3 sekund bez żadnych ostrzeżeń HA, a pełna 730-dniowa historia pobiera się asynchronicznie w tle przez `_maybe_auto_backfill`.
+
 ## v1.0.0 (2026-09-04) — Architektura Docelowa
 
 ### 🚀 Nowe Możliwości & Architektura
