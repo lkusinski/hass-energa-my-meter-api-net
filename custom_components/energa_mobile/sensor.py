@@ -633,6 +633,21 @@ async def async_setup_entry(
     )
     async_add_entities(sensors, update_before_add=True)
 
+    # Ensure post-startup settlement calibration runs once recorder and entities are ready
+    if entry.options.get(
+        CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
+    ):
+        async def _async_delayed_settlement_calibration():
+            await asyncio.sleep(10)
+            _LOGGER.debug("Energa: running delayed settlement calibration after startup")
+            await coordinator.async_request_refresh()
+
+        entry.async_create_background_task(
+            hass,
+            _async_delayed_settlement_calibration(),
+            "energa_delayed_settlement_calibration",
+        )
+
     # === CLEANUP STALE DEVICES ===
     # Remove devices for meters no longer returned by the API
     # (e.g., after user switches Energa account)
@@ -760,7 +775,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
             except Exception as rce_err:
                 _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
 
-            # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===            try:
+            # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===
+            try:
                 from datetime import datetime as _dt2
                 _opts = self.entry.options
                 if _opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
