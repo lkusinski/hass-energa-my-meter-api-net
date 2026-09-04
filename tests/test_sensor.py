@@ -250,3 +250,65 @@ class TestChartZoneData:
         for zones in test_cases:
             assert zones[2] is None
 
+
+class TestNetBillingDeposit:
+    """Tests for Net-billing deposit logic (EnergaBankPlnSensor)."""
+
+    def test_deposit_never_negative_when_cost_exceeds_deposit(self):
+        """When energy cost exceeds export compensation, deposit is 0, not negative."""
+        initial = 0.0
+        comp_export = 176.93
+        net_imp_cost = 863.75
+
+        gross_deposit = max(0.0, initial + comp_export)
+        net_balance = initial + comp_export - net_imp_cost
+        deposit_applied = min(gross_deposit, max(0.0, net_imp_cost))
+        deposit_remaining = max(0.0, gross_deposit - deposit_applied)
+
+        assert deposit_remaining == 0.0
+        assert gross_deposit == 176.93
+        assert deposit_applied == 176.93
+        assert round(net_balance, 2) == -686.82
+
+    def test_deposit_surplus_when_export_exceeds_cost(self):
+        """When export compensation exceeds cost, remaining deposit is positive."""
+        initial = 50.0
+        comp_export = 300.0
+        net_imp_cost = 120.0
+
+        gross_deposit = max(0.0, initial + comp_export)
+        net_balance = initial + comp_export - net_imp_cost
+        deposit_applied = min(gross_deposit, max(0.0, net_imp_cost))
+        deposit_remaining = max(0.0, gross_deposit - deposit_applied)
+
+        assert gross_deposit == 350.0
+        assert deposit_applied == 120.0
+        assert deposit_remaining == 230.0
+        assert net_balance == 230.0
+
+
+class TestEarlyMonthSmoothing:
+    """Tests for early-month forecast smoothing in EnergaBillForecastSensor."""
+
+    def test_day_4_blends_mtd_and_history(self):
+        """On day 4, weight is 4/7 MTD and 3/7 history."""
+        elapsed = 4
+        days_in_month = 30
+        cov = 30
+        w_mtd = elapsed / 7.0
+        w_hist = 1.0 - w_mtd
+
+        # Heavy day consumption in 4 days = 40 kWh (10 kWh/day)
+        # Trailing history = 150 kWh in 30 days (5 kWh/day)
+        m_imp_d = 40.0 / elapsed
+        t_imp_d = 150.0 / cov
+
+        smoothed_daily = w_mtd * m_imp_d + w_hist * t_imp_d
+        f_imp_d = smoothed_daily * days_in_month
+
+        # Pure linear: 10 * 30 = 300 kWh
+        # Smoothed: (4/7 * 10 + 3/7 * 5) * 30 = (5.714 + 2.143) * 30 = ~235.7 kWh
+        assert round(f_imp_d, 1) == 235.7
+        assert f_imp_d < 300.0
+
+

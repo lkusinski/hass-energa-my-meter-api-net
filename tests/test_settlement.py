@@ -177,7 +177,13 @@ class TestOrphanBankUids:
 
     def test_new_system_dooms_kwh_bank(self):
         doomed = orphan_bank_uids("72000002", "72000002", True, 0.0)
-        assert doomed == {"energa_72000002_bank_kwh", "energa_72000002_bank_level"}
+        assert doomed == {
+            "energa_72000002_bank_kwh",
+            "energa_72000002_bank_level",
+            "energa_72000002_prosumer_balance",
+            "energa_72000002_bank_charge",
+            "energa_72000002_bank_discharge",
+        }
 
     def test_invalid_coefficient_dooms_nothing(self):
         assert orphan_bank_uids("1", "1", True, None) == set()
