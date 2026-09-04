@@ -112,3 +112,51 @@ class TestConfigFlowExceptionHandling:
         )
         assert result["type"] == "form"
         assert result["errors"]["base"] == "unknown"
+
+
+class TestSystemStep:
+    """v0.3.8: prosumer picks opusty vs net-billing at setup."""
+
+    def _flow(self):
+        from custom_components.energa_mobile.config_flow import (
+            EnergaConfigFlow,
+        )
+
+        flow = EnergaConfigFlow.__new__(EnergaConfigFlow)
+        flow._pending_title = "prosument@example.com"
+        flow._pending_data = {"username": "prosument@example.com"}
+        captured = {}
+
+        async def fake_create_entry(title=None, data=None, options=None):
+            captured.update(title=title, data=data, options=options)
+            return {"type": "create_entry", **captured}
+
+        flow.async_create_entry = fake_create_entry
+        return flow, captured
+
+    @pytest.mark.asyncio
+    async def test_nowe_seeds_coefficient_zero(self):
+        flow, captured = self._flow()
+        result = await flow.async_step_system({"system": "nowe"})
+        assert result["type"] == "create_entry"
+        assert captured["options"] == {"prosumer_coefficient": 0.0}
+        assert captured["title"] == "prosument@example.com"
+
+    @pytest.mark.asyncio
+    async def test_stare_seeds_coefficient_point_eight(self):
+        flow, captured = self._flow()
+        result = await flow.async_step_system({"system": "stare"})
+        assert result["type"] == "create_entry"
+        assert captured["options"] == {"prosumer_coefficient": 0.8}
+
+    @pytest.mark.asyncio
+    async def test_system_step_shows_form_without_input(self):
+        flow, _ = self._flow()
+
+        async def fake_show_form(step_id=None, data_schema=None, **kwargs):
+            return {"type": "form", "step_id": step_id}
+
+        flow.async_show_form = fake_show_form
+        result = await flow.async_step_system(None)
+        assert result["type"] == "form"
+        assert result["step_id"] == "system"
