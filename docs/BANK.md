@@ -72,11 +72,15 @@ cards:
 
 **Energy Dashboard — jak wpiąć (v0.3.0, bez ściemy):**
 `Ustawienia → Pulpity → Energia`:
-* **Stary net-metering (off-grid):** Sieć = tylko `Panel Energia Strefa 1/2`
-  (pobór, z ceną), ☀️ Fotowoltaika = `Panel Energia Produkcja Strefa 1/2`
-  (BEZ ceny — nadwyżka trafia do magazynu kWh, nie na sprzedaż),
-  Bateria = `Bank Ładowanie/Rozładowanie`. Zwrotu do sieci NIE dodawaj
-  (liczyłbyś eksport podwójnie: raz jako zwrot, raz jako baterię).
+* **Stary net-metering (off-grid):** Sieć pobór = `Panel Energia Strefa 1/2`
+  (z ceną), Sieć zwrot = `Panel Energia Produkcja Strefa 1/2` BEZ ceny
+  (nadwyżka trafia do magazynu kWh, nie na sprzedaż — brak rekompensaty),
+  Bateria = `Bank Ładowanie/Rozładowanie`.
+  ☀️ Fotowoltaika = TYLKO prawdziwe encje falownika, NIGDY eksport
+  z licznika: eksport to nadwyżka PO autokonsumpcji, więc produkcja
+  jest wyższa niż zwrot (podpięcie eksportu jako solara zaniża produkcję
+  i podwójnie liczy energię: raz jako zwrot, raz jako baterię —
+  zwrotu do sieci NIE dodawaj obok baterii).
 * **Nowy net-billing (sprzedaż):** Sieć pobór = `Panel Energia Strefa 1/2`
   (z ceną), Sieć zwrot = `Panel Energia Produkcja Strefa 1/2` z ceną =
   encja `Cena Oddania` (żywa sprzedaż `RCEm×1.23`, nie zamrożone 0,95).
