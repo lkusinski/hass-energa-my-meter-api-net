@@ -1772,8 +1772,14 @@ class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        # v0.3.0 blind window first, then legacy detected dates.
-        val = (getattr(self._entry, "data", {}) or {}).get("auto_history_start")
+        # v0.3.0 blind window first, then legacy dates (trio entries
+        # historically stored them in entry DATA, not options).
+        data = (getattr(self._entry, "data", {}) or {})
+        val = (
+            data.get("auto_history_start")
+            or data.get(f"meter_{self._meter_id}_first_data_date")
+            or data.get("first_data_date")
+        )
         if not val:
             val = self._entry.options.get(f"meter_{self._meter_id}_first_data_date") or self._entry.options.get("first_data_date")
         if val:
