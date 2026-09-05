@@ -312,3 +312,33 @@ class TestEarlyMonthSmoothing:
         assert f_imp_d < 300.0
 
 
+class TestBillCurrentSensor:
+    """Tests for EnergaBillCurrentSensor (MTD actual bill)."""
+
+    def test_current_bill_calculation(self):
+        """MTD bill reflects actual consumed energy minus prosumer settlement."""
+        from custom_components.energa_mobile.tariff import compute_bill, G12W_DEFAULT_FEES
+
+        # 4 days MTD: 51.74 kWh day, 9.70 kWh night, 41.58 kWh export, RCEm 0.26288
+        imp_d = 51.74
+        imp_n = 9.70
+        exp_tot = 41.58
+        rce = 0.26288
+        fees = dict(G12W_DEFAULT_FEES)
+        fees["capacity"] = 16.01
+
+        bill = compute_bill(imp_d, imp_n, exp_tot, rce, fees)
+        assert bill is not None
+        assert "do_zaplaty" in bill
+        # Verify MTD do_zaplaty matches expected formula with bracketed capacity: 105.46 PLN
+        assert round(bill["do_zaplaty"], 2) == 105.46
+        assert round(bill["deposit"], 2) == 13.44
+        assert round(bill["deposit_applied"], 2) == 13.44
+        assert round(bill["brutto"], 2) == 118.90
+
+        # With default capacity fee:
+        bill_default = compute_bill(imp_d, imp_n, exp_tot, rce)
+        assert round(bill_default["do_zaplaty"], 2) == 115.35
+
+
+

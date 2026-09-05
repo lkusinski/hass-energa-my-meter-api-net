@@ -510,6 +510,16 @@ async def async_setup_entry(
                     serial=serial,
                 )
             )
+            sensors.append(
+                EnergaBillCurrentSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    has_zones=has_zones,
+                    serial=serial,
+                )
+            )
 
         # === PRICE SENSORS (F1: v4.14) ===
 
@@ -2640,3 +2650,107 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             self.coordinator.data is not None
             and str(self._meter_id) in getattr(self.coordinator, "_mtd", {})
         )
+
+
+class EnergaBillCurrentSensor(EnergaBillForecastSensor):
+    """Month-to-date actual bill so far (v1.0.3).
+
+    Calculates the exact bill to pay from day 1 of the month until today
+    based on actual consumption, distribution fees, and prosumer settlement
+    (deducting deposit for energy purchase in net-billing, or warehouse coverage
+    in net-metering).
+    """
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        has_zones: bool = False,
+        serial: str = "",
+    ) -> None:
+        super().__init__(
+            coordinator,
+            meter_id=meter_id,
+            device_info=device_info,
+            entry=entry,
+            has_zones=has_zones,
+            serial=serial,
+        )
+        self._attr_name = f"Dotychczasowy Rachunek ({serial or meter_id})"
+        self._attr_unique_id = f"energa_{meter_id}_bill_current"
+        self._attr_icon = "mdi:cash-clock"
+
+    @property
+    def native_value(self):
+        from datetime import date as _date
+        from datetime import datetime, timezone
+
+        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+        if not mtd:
+            return None
+        imp_mtd, exp_mtd = self._mtd_parts()
+        imp_d, imp_n, exp_tot = self._mtd_zone_flows()
+        opts = self._entry.options
+        mid = self._meter_id
+        rce = self._rce()
+        today = _date.today()
+
+        fees = fees_from_options(opts, self._meter_tariff())
+        capacity_source = "manual (Options tariff_capacity)"
+        if CONF_TARIFF_CAPACITY not in (opts or {}):
+            annual = self._annual_import_estimate()
+            if annual is not None:
+                fees["capacity"] = capacity_for_annual_use(annual)
+                capacity_source = f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
+
+        old_system = self._is_old_system()
+        if old_system:
+            cover_d, cover_n = split_cover(
+                self._warehouse_cover(), imp_d, imp_n
+            )
+            deposit_mtd = 0.0
+        else:
+            cover_d, cover_n = 0.0, 0.0
+            deposit_mtd = None
+        try:
+            bill_mtd = compute_bill(
+                imp_d, imp_n, exp_tot, rce, fees,
+                cover_day=cover_d, cover_night=cover_n,
+                deposit_pln=deposit_mtd,
+            )
+        except (ValueError, TypeError):
+            bill_mtd = None
+
+        if bill_mtd is None:
+            return None
+
+        self._attr_extra_state_attributes = {
+            "period": f"{today.year}-{today.month:02d}",
+            "day_of_month": today.day,
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
+            "system": "stare net-metering (magazyn kWh)"
+            if old_system
+            else "nowe net-billing (depozyt PLN)",
+            "mtd_import_kwh": round(imp_mtd, 2),
+            "mtd_export_kwh": round(exp_mtd, 2),
+            "mtd_import_day_kwh": round(imp_d, 2),
+            "mtd_import_night_kwh": round(imp_n, 2),
+            "mtd_sale_total_pln": bill_mtd["sale_total"],
+            "mtd_distr_total_pln": bill_mtd["distr_total"],
+            "mtd_netto_pln": bill_mtd["netto"],
+            "mtd_vat_pln": bill_mtd["vat"],
+            "mtd_brutto_pln": bill_mtd["brutto"],
+            "mtd_deposit_pln": bill_mtd["deposit"],
+            "mtd_deposit_applied_pln": bill_mtd["deposit_applied"],
+            "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
+            "cover_day_kwh": cover_d,
+            "cover_night_kwh": cover_n,
+            "capacity_source": capacity_source,
+            "rce_price": rce,
+            "fee_table": tariff_family(self._meter_tariff()),
+            "unit_of_measurement": "PLN",
+        }
+        return bill_mtd["do_zaplaty"]
+
