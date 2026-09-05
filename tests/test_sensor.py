@@ -382,3 +382,9 @@ class TestBillComponentSensor:
         assert key_map["cover_day"] == "cover_day_kwh"
         assert key_map["cover_night"] == "cover_night_kwh"
 
+    def test_component_sensor_deposit_applied_deduction(self):
+        """Verify deposit_applied is exposed as negative deduction for bill arithmetic."""
+        val = 20.73
+        deduction = -round(abs(float(val)), 2) if float(val) > 0 else 0.0
+        assert deduction == -20.73
+

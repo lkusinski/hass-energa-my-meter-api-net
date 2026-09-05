@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.5 (2026-09-05) — Ujemne Odliczenie z Depozytu i Dashboard dla Bursztynowej (G11 Net-Billing)
+
+### 🚀 Nowe Możliwości & Usprawnienia UX
+- **Ujemny znak dla odzyskanego depozytu prosumenckiego (`deposit_applied`):**
+  - Sensor `sensor.energa_<meter>_mtd_deposit_applied` (nazwa przyjazna: `Odzyskano z Depozytu MTD`) zwraca teraz wartość ujemną (np. `-20.73 PLN`).
+  - Umożliwia to w 100% intuicyjną arytmetykę na kartach rozliczenia:
+    `Całkowity koszt brutto (118.90 zł) + Odzyskano z depozytu (-20.73 zł) = Dotychczas do zapłaty (98.17 zł)`.
+  - W atrybutach encji zachowano wartość dodatnią `deposit_applied_positive_pln` oraz znacznik `is_deduction: true`.
+- **Dedykowany panel rozliczeń i magazynu dla instalacji G11 Net-billing (Bursztynowa 7):**
+  - Skonfigurowano widok `/rachunek-dom` dla taryfy jednostrefowej G11 ze statystykami depozytu, ceną RCEm oraz rozliczeniem bieżącym i prognozowanym.
+
 ## v1.0.4 (2026-09-05) — Dedykowane Encje Składowe Rozliczenia i Magazynu
 
 ### 🚀 Nowe Możliwości
