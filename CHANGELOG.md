@@ -12,7 +12,7 @@
   - W `async_setup_entry` dodano bezobsługowy mechanizm migracji rejestru encji (`_ent_reg.async_update_entity`), który przy starcie HA natychmiastowo i bezpiecznie przemianowuje dotychczasowe encje na nowe, kanoniczne `entity_id`.
   - Pełna ochrona historii długoterminowej w HA Recorderze — unikalne identyfikatory (`_attr_unique_id`) pozostały w 100% niezmienne.
 
-## v1.0.5 (2026-09-05) — Ujemne Odliczenie z Depozytu i Dashboard dla Bursztynowej (G11 Net-Billing)
+## v1.0.5 (2026-09-05) — Ujemne Odliczenie z Depozytu i Dashboard dla G11 Net-Billing
 
 ### 🚀 Nowe Możliwości & Usprawnienia UX
 - **Ujemny znak dla odzyskanego depozytu prosumenckiego (`deposit_applied`):**
@@ -20,7 +20,7 @@
   - Umożliwia to w 100% intuicyjną arytmetykę na kartach rozliczenia:
     `Całkowity koszt brutto (118.90 zł) + Odzyskano z depozytu (-20.73 zł) = Dotychczas do zapłaty (98.17 zł)`.
   - W atrybutach encji zachowano wartość dodatnią `deposit_applied_positive_pln` oraz znacznik `is_deduction: true`.
-- **Dedykowany panel rozliczeń i magazynu dla instalacji G11 Net-billing (Bursztynowa 7):**
+- **Dedykowany panel rozliczeń i magazynu dla instalacji G11 z fotowoltaiką na nowych zasadach (Net-billing):**
   - Skonfigurowano widok `/rachunek-dom` dla taryfy jednostrefowej G11 ze statystykami depozytu, ceną RCEm oraz rozliczeniem bieżącym i prognozowanym.
 
 ## v1.0.4 (2026-09-05) — Dedykowane Encje Składowe Rozliczenia i Magazynu
@@ -37,7 +37,7 @@
     - Dla Net-metering:
       - `sensor.energa_<meter>_mtd_cover_day` — Pokrycie z magazynu w Strefie 1 MTD [kWh]
       - `sensor.energa_<meter>_mtd_cover_night` — Pokrycie z magazynu w Strefie 2 MTD [kWh]
-- **Dedykowany dashboard magazynu dla Net-meteringu (Wiśniowa):**
+- **Dedykowany dashboard magazynu dla Net-meteringu (G12w):**
   - Skonfigurowano widok `/rachunek-dom` prezentujący stan magazynu w kWh, stopień napełnienia, bilans prosumencki oraz pokrycie energii czynnej.
 
 ### 🚀 Nowe Możliwości

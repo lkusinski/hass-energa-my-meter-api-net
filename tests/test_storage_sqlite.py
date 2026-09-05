@@ -44,7 +44,7 @@ def file_storage():
 def test_ppe_crud(storage: CanonicalStorage):
     ppe = PPE(
         ppe_id="PL_123456789012345678",
-        customer_label="Dom Wiśniowa",
+        customer_label="Dom G12w Net-metering",
         settlement_type=SettlementType.NET_METERING,
         prosumer_coefficient=Decimal("0.8"),
         timezone="Europe/Warsaw",
@@ -55,7 +55,7 @@ def test_ppe_crud(storage: CanonicalStorage):
     fetched = storage.get_ppe("PL_123456789012345678")
     assert fetched is not None
     assert fetched.ppe_id == "PL_123456789012345678"
-    assert fetched.customer_label == "Dom Wiśniowa"
+    assert fetched.customer_label == "Dom G12w Net-metering"
     assert fetched.settlement_type == SettlementType.NET_METERING
     assert fetched.prosumer_coefficient == Decimal("0.8")
     assert fetched.effective_from == date(2022, 1, 1)
@@ -63,19 +63,19 @@ def test_ppe_crud(storage: CanonicalStorage):
     # Test update (upsert)
     updated_ppe = PPE(
         ppe_id="PL_123456789012345678",
-        customer_label="Dom Wiśniowa - Zaktualizowano",
+        customer_label="Dom G12w - Zaktualizowano",
         settlement_type=SettlementType.NET_BILLING_RCEM,
         prosumer_coefficient=Decimal("0.0"),
     )
     storage.upsert_ppe(updated_ppe)
     refetched = storage.get_ppe("PL_123456789012345678")
-    assert refetched.customer_label == "Dom Wiśniowa - Zaktualizowano"
+    assert refetched.customer_label == "Dom G12w - Zaktualizowano"
     assert refetched.settlement_type == SettlementType.NET_BILLING_RCEM
 
 
 def test_meter_replacement_lifecycle(storage: CanonicalStorage):
     """Test that two serials under one PPE record continuous lifecycle."""
-    ppe_id = "PL_AGRESTOWA_001"
+    ppe_id = "PL_TEST_PPE_G12W_NB"
     storage.upsert_ppe(PPE(ppe_id=ppe_id, settlement_type=SettlementType.NET_BILLING_RCEM))
 
     # Old meter (active until 2026-05-09)

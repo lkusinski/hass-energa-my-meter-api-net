@@ -18,12 +18,12 @@ def mock_meter_net_metering():
     return {
         "meter_point_id": "00069839",
         "meter_serial": "00069839",
-        "address": "87-100 Toruń, Wiśniowa 9",
+        "address": "Przykładowa 1",
         "tariff": "G12w",
         "zone_count": 2,
         "is_prosumer": True,
         "has_export": True,
-        "ppe": "590243891023106980",
+        "ppe": "590000000000000001",
         "total_plus": 46796.65,
     }
 
@@ -33,12 +33,12 @@ def mock_meter_net_billing():
     return {
         "meter_point_id": "11685328",
         "meter_serial": "11685328",
-        "address": "87-148 Łysomice, Agrestowa 4",
+        "address": "Przykładowa 2",
         "tariff": "G12w",
         "zone_count": 2,
         "is_prosumer": True,
         "has_export": True,
-        "ppe": "590243891022973835",
+        "ppe": "590000000000000002",
         "total_plus": 5202.755,
     }
 
@@ -48,19 +48,19 @@ def mock_meter_pure_consumer():
     return {
         "meter_point_id": "30910550",
         "meter_serial": "30910550",
-        "address": "87-148 Łysomice, Warzywna 2",
+        "address": "Przykładowa 3",
         "tariff": "G11",
         "zone_count": 1,
         "is_prosumer": False,
         "has_export": False,
-        "ppe": "590243891022987654",
+        "ppe": "590000000000000003",
         "total_plus": 1823.4,
     }
 
 
 def test_build_meter_view_net_metering(mock_meter_net_metering):
     view = build_meter_view(mock_meter_net_metering, coeff=0.8)
-    assert view["title"] == "Wiśniowa 9"
+    assert view["title"] == "G12w z magazynem energii (Net-metering)"
     assert view["path"] == "licznik-00069839"
     assert view["icon"] == "mdi:battery-charging-high"
 
@@ -87,7 +87,7 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
 
 def test_build_meter_view_net_billing(mock_meter_net_billing):
     view = build_meter_view(mock_meter_net_billing, coeff=0.0)
-    assert view["title"] == "Agrestowa 4"
+    assert view["title"] == "G12w z fotowoltaiką (Net-billing)"
     assert view["path"] == "licznik-11685328"
     assert view["icon"] == "mdi:home-lightning-bolt"
 
@@ -106,7 +106,7 @@ def test_build_meter_view_net_billing(mock_meter_net_billing):
 
 def test_build_meter_view_pure_consumer(mock_meter_pure_consumer):
     view = build_meter_view(mock_meter_pure_consumer, coeff=0.0)
-    assert view["title"] == "Warzywna 2"
+    assert view["title"] == "Taryfa G11"
     assert view["icon"] == "mdi:transmission-tower"
 
     badge_entities = [b["entity"] for b in view["badges"]]
@@ -116,6 +116,21 @@ def test_build_meter_view_pure_consumer(mock_meter_pure_consumer):
     # Should NOT have prosumer storage card
     assert not any("Wirtualny Magazyn" in t for t in card_titles)
     assert any("Rozliczenie Finansowe" in t for t in card_titles)
+
+
+def test_build_meter_view_net_billing_g11():
+    meter = {
+        "meter_point_id": "30910672",
+        "meter_serial": "30910672",
+        "tariff": "G11",
+        "zone_count": 1,
+        "is_prosumer": True,
+        "has_export": True,
+        "ppe": "590000000000000004",
+    }
+    view = build_meter_view(meter, coeff=0.0)
+    assert view["title"] == "G11 z fotowoltaiką na nowych zasadach (Net-billing)"
+    assert view["icon"] == "mdi:home-lightning-bolt"
 
 
 def test_build_energa_dashboard_multi_meter(mock_meter_net_metering, mock_meter_net_billing):
