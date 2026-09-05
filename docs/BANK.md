@@ -55,19 +55,25 @@ cards:
     name: Bank kWh
 
   - type: entities
-    title: 💰 Magazyn — G12W nowe zasady (RCE×1.23)
+    title: 💰 Rozliczenie Net-Billing — G12W (RCEm × 1.23)
     entities:
       - entity: sensor.bank_wirtualny_pln_<nr-licznika>
-        name: Depozyt PLN (ujemny = do zapłaty)
+        name: Depozyt prosumencki (aktywo PLN)
+        icon: mdi:cash-multiple
       - entity: sensor.energa_<nr-licznika>_rcem_auto_<nr-licznika>
         name: RCEm PLN/kWh (PSE auto)
+        icon: mdi:chart-line
+      - entity: sensor.energa_<nr-licznika>_cena_oddania
+        name: Cena odkupu (RCEm × 1.23)
+        icon: mdi:currency-usd
       - entity: sensor.prognoza_rachunku_<nr-licznika>
-        name: Prognoza dopłaty
+        name: Prognoza rachunku brutto (do zapłaty na koniec m-ca)
+        icon: mdi:invoice-text-outline
   - type: markdown
     content: >
-      RCE auto: `Options → rce_auto_fetch` lub ręcznie `bank_rce_price`.
-      Aktualizuj co miesiąc (PSE publikuje ~11. dnia). Formuła w atrybutach encji.
-      (Bilans Prosumencki jest diagnostyczny — to półprodukt do Banku.)
+      RCE auto: `Options → rce_auto_fetch` (pobierana automatycznie z PSE ~11. dnia miesiąca).
+      Depozyt pokrywa wyłącznie energię czynną (zgodnie z art. 4 ust. 11 ustawy o OZE).
+      Dystrybucja i opłaty stałe pozostają do uregulowania na fakturze.
 ```
 
 **Energy Dashboard — jak wpiąć (v0.3.0, bez ściemy):**
