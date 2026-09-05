@@ -49,7 +49,7 @@ data:
 ## 3. Wymiana Fizycznego Licznika (Meter Replacement)
 
 ### Problem historyczny:
-Gdy u użytkownika (np. przypadek Agrestowej z maja 2026 r.) dochodzi do legalizacyjnej wymiany licznika, nowy licznik startuje od stanu 0 kWh, podczas gdy historia gospodarstwa wynosi kilka tysięcy kWh. Identyfikacja po numerze seryjnym powodowała rozpad historii i zafałszowanie banku.
+Gdy u użytkownika (np. przypadek instalacji G12w z fotowoltaiką po wymianie legalizacyjnej licznika w maju 2026 r.) dochodzi do legalizacyjnej wymiany licznika, nowy licznik startuje od stanu 0 kWh, podczas gdy historia gospodarstwa wynosi kilka tysięcy kWh. Identyfikacja po numerze seryjnym powodowała rozpad historii i zafałszowanie banku.
 
 ### Procedura rozwiązania:
 1. **Nadrzędna tożsamość logiczna PPE:**

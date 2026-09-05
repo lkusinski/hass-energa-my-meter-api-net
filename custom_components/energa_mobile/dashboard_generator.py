@@ -34,16 +34,33 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     """Build a tailored Lovelace view for a specific Energa meter."""
     meter_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_id))
-    address = meter.get("address", f"Licznik {serial}")
-    tariff = meter.get("tariff", "G11")
+    tariff_raw = str(meter.get("tariff", "G11")).strip()
+    if tariff_raw.upper() == "G12W":
+        tariff = "G12w"
+    elif tariff_raw.upper() == "G12R":
+        tariff = "G12r"
+    else:
+        tariff = tariff_raw.upper()
     has_zones = meter.get("zone_count", 1) > 1
     is_prosumer = is_export_prosumer(meter)
     is_net_billing = is_prosumer and coeff < 0.7
     is_net_metering = is_prosumer and not is_net_billing
 
-    title = address.split(",")[1].strip() if "," in address else address
-    if not title:
-        title = f"Licznik {serial}"
+    if meter.get("customer_label"):
+        title = str(meter["customer_label"]).strip()
+    elif meter.get("custom_title"):
+        title = str(meter["custom_title"]).strip()
+    elif is_net_metering:
+        title = f"{tariff} z magazynem energii (Net-metering)"
+    elif is_net_billing:
+        if tariff.startswith("G11"):
+            title = f"{tariff} z fotowoltaiką na nowych zasadach (Net-billing)"
+        else:
+            title = f"{tariff} z fotowoltaiką (Net-billing)"
+    elif is_prosumer:
+        title = f"{tariff} z fotowoltaiką"
+    else:
+        title = f"Taryfa {tariff}"
 
     view_icon = (
         "mdi:battery-charging-high"

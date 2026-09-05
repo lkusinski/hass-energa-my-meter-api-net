@@ -29,7 +29,7 @@ def test_normalize_chart_payload_with_timestamps():
     obs, readings = normalize_chart_payload(
         raw_json_str=sample_payload,
         endpoint="/dp/chart/day",
-        ppe_id="PPE_WIŚNIOWA",
+        ppe_id="PL_TEST_PPE_G12W",
         meter_id="meter_123",
         register="import_total",
         resolution="1h",
@@ -43,7 +43,7 @@ def test_normalize_chart_payload_with_timestamps():
 
     # Readings verification
     assert len(readings) == 2
-    assert readings[0].ppe_id == "PPE_WIŚNIOWA"
+    assert readings[0].ppe_id == "PL_TEST_PPE_G12W"
     assert readings[0].meter_id == "meter_123"
     assert readings[0].register == "import_total"
     assert readings[0].import_kwh == Decimal("0.8520")
@@ -62,7 +62,7 @@ def test_normalize_chart_export_register():
     obs, readings = normalize_chart_payload(
         raw_json_str=sample_payload,
         endpoint="/dp/chart/day",
-        ppe_id="PPE_WIŚNIOWA",
+        ppe_id="PL_TEST_PPE_G12W",
         meter_id="meter_123",
         register="export_total",
     )
