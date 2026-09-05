@@ -83,6 +83,8 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
     storage_entities = [e["entity"] for e in storage_card["entities"]]
     assert "sensor.energa_00069839_pokrycie_z_magazynu_dzien_mtd" in storage_entities
     assert "sensor.energa_00069839_pokrycie_z_magazynu_noc_mtd" in storage_entities
+    assert not any("bank_ladowanie" in e for e in storage_entities)
+    assert not any("bank_rozladowanie" in e for e in storage_entities)
 
     # Card 4: Dedicated MTD volume sensors (no panel_energia_* entities)
     tariff_card = next(c for c in view["cards"] if "Taryfa G12w" in c["title"])

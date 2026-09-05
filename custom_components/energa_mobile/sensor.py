@@ -2091,33 +2091,13 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
 
     @property
     def native_value(self):
-        if not self._restored:
-            return None
-        nets = self._nets()
-        if nets is None:
-            return None
-        net_imp, net_exp = nets
-        opts = self._entry.options
-        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-        value: float | None = None
-        if coeff >= 0.7:  # old net-metering: follow Bilans movement
-            base = net_exp * coeff - net_imp
-            flows = self._flows.update(base)
-            value = flows[0] if self._direction == "charge" else flows[1]
-            mode = "bilans"
-        else:  # new net-billing: raw export/import growth
-            # Meter totals only grow, so growth lands on side [0].
-            base = net_exp if self._direction == "charge" else net_imp
-            value = self._flows.update(base)[0]
-            mode = "flows"
-        self._attr_extra_state_attributes = {
-            "settlement_mode": mode,
-            "coefficient": coeff,
-            "net_import_kwh": round(net_imp, 2),
-            "net_export_kwh": round(net_exp, 2),
-            "source": "natywna para do Baterii w Panelu Energia (zastępuje bank_energii.yaml)",
-        }
-        return round(value, 2) if value is not None else None
+        """Return None — flow statistics flow exclusively via async_import_statistics.
+
+        Prevents Home Assistant Core's recorder from calculating competing
+        statistics from states table deltas, which previously caused sum resets
+        and multi-megawatt spikes on the Energy Dashboard battery section.
+        """
+        return None
 
 
 class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):

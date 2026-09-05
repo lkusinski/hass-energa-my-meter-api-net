@@ -144,3 +144,28 @@ def test_bill_current_sensor_mtd_export_volumes():
         assert attrs["mtd_export_day_kwh"] == 30.0
         assert attrs["mtd_export_night_kwh"] == 20.0
 
+
+def test_bank_flow_sensor_native_value_is_none():
+    """Verify EnergaBankFlowSensor returns None for native_value.
+
+    Ensures HA recorder does not compile competing state-based statistics for battery flow sensors,
+    avoiding sum wipes and multi-MWh candles.
+    """
+    from custom_components.energa_mobile.sensor import EnergaBankFlowSensor
+
+    coordinator = MagicMock()
+    coordinator.data = []
+    device_info = MagicMock()
+    entry = MagicMock()
+    entry.options = {}
+
+    sensor = EnergaBankFlowSensor(
+        coordinator=coordinator,
+        meter_id="12345",
+        device_info=device_info,
+        entry=entry,
+        direction="charge",
+        serial="12345",
+    )
+    assert sensor.native_value is None
+
