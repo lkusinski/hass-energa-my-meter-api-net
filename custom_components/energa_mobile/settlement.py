@@ -23,8 +23,16 @@ Pure functions only (no Home Assistant imports) so they can be unit-tested.
 from __future__ import annotations
 
 import calendar
+import logging
 import re
 from datetime import date, datetime
+
+try:
+    from .const import MAX_HOURLY_KWH
+except (ImportError, ValueError):
+    MAX_HOURLY_KWH = 25.0
+
+_LOGGER = logging.getLogger(__name__)
 
 # Polish month names as used by PSE RCEm table
 PSE_MONTHS = {
@@ -525,7 +533,9 @@ class FlowAccumulator:
         if discharge is not None:
             self.discharge = round(float(discharge), 2)
 
-    def update(self, base: float | None) -> tuple[float, float]:
+    def update(
+        self, base: float | None, max_delta: float | None = None
+    ) -> tuple[float, float]:
         """Fold a new base reading into (charge, discharge) totals."""
         if base is None:
             return (self.charge, self.discharge)
@@ -535,6 +545,13 @@ class FlowAccumulator:
             return (self.charge, self.discharge)
         delta = base - self._last
         self._last = base
+        if max_delta is not None and abs(delta) > max_delta:
+            _LOGGER.warning(
+                "Spike guard in FlowAccumulator: ignoring anomalous delta %.2f kWh (> %.2f)",
+                delta,
+                max_delta,
+            )
+            return (self.charge, self.discharge)
         if delta > 0:
             self.charge = round(self.charge + delta, 2)
         elif delta < 0:

@@ -192,28 +192,28 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         tariff_entities.extend(
             [
                 {"entity": f"sensor.energa_{serial}_cena_poboru_strefa_1", "name": "Stawka poboru Strefa 1 (Dzień)"},
-                {"entity": f"sensor.energa_{serial}_panel_energia_strefa_1", "name": "Pobór energii Strefa 1 (MTD)"},
+                {"entity": f"sensor.energa_{serial}_pobor_energii_strefa_1_mtd", "name": "Pobór energii Strefa 1 (MTD)"},
                 {"entity": f"sensor.energa_{serial}_cena_poboru_strefa_2", "name": "Stawka poboru Strefa 2 (Noc)"},
-                {"entity": f"sensor.energa_{serial}_panel_energia_strefa_2", "name": "Pobór energii Strefa 2 (MTD)"},
+                {"entity": f"sensor.energa_{serial}_pobor_energii_strefa_2_mtd", "name": "Pobór energii Strefa 2 (MTD)"},
             ]
         )
         if is_prosumer:
             tariff_entities.extend(
                 [
-                    {"entity": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1", "name": "Oddanie energii Strefa 1 (MTD)"},
-                    {"entity": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2", "name": "Oddanie energii Strefa 2 (MTD)"},
+                    {"entity": f"sensor.energa_{serial}_oddanie_energii_strefa_1_mtd", "name": "Oddanie energii Strefa 1 (MTD)"},
+                    {"entity": f"sensor.energa_{serial}_oddanie_energii_strefa_2_mtd", "name": "Oddanie energii Strefa 2 (MTD)"},
                 ]
             )
     else:
         tariff_entities.extend(
             [
                 {"entity": f"sensor.energa_{serial}_cena_poboru", "name": "Stawka poboru G11"},
-                {"entity": f"sensor.energa_{serial}_panel_energia_zuzycie", "name": "Pobór energii G11 (MTD)"},
+                {"entity": f"sensor.energa_{serial}_pobor_energii_mtd", "name": "Pobór energii G11 (MTD)"},
             ]
         )
         if is_prosumer:
             tariff_entities.append(
-                {"entity": f"sensor.energa_{serial}_panel_energia_produkcja", "name": "Oddanie energii G11 (MTD)"}
+                {"entity": f"sensor.energa_{serial}_oddanie_energii_mtd", "name": "Oddanie energii G11 (MTD)"}
             )
 
     cards.append(

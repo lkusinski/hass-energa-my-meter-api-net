@@ -68,6 +68,12 @@ class EnergaDataUpdater:
 
         # Forward calculation - from last known sum or 0
         pre_fetched = self._pre_fetched_stats.get(entity_id)
+        if not pre_fetched:
+            suffix = entity_id.split(".")[-1]
+            for k, v in self._pre_fetched_stats.items():
+                if k.split(".")[-1] == suffix:
+                    pre_fetched = v
+                    break
 
         if pre_fetched and pre_fetched.get("sum") is not None:
             energy_stats = self._forward_calculation(
@@ -76,7 +82,7 @@ class EnergaDataUpdater:
         else:
             # First run or after stats clear - start from 0
             energy_stats = self._forward_calculation(
-                hourly_data, {"sum": 0, "start": None}, entity_id
+                hourly_data, {"sum": 0.0, "start": None}, entity_id
             )
 
         if not energy_stats:
@@ -116,7 +122,10 @@ class EnergaDataUpdater:
         Guarantees monotonically increasing sums, consistent with existing stats.
         Only writes NEW points (after last known stat).
         """
-        last_sum = pre_fetched.get("sum", 0)
+        try:
+            last_sum = float(pre_fetched.get("sum") or 0.0)
+        except (ValueError, TypeError):
+            last_sum = 0.0
         last_start = pre_fetched.get("start")
 
         # Sort oldest first
@@ -149,6 +158,15 @@ class EnergaDataUpdater:
                 continue
 
             running_sum += hourly_value
+
+            # Monotonic guard: running_sum must never drop below last_sum
+            if running_sum < last_sum:
+                _LOGGER.warning(
+                    "Monotonic guard: running_sum %.3f < last_sum %.3f for %s - clamping",
+                    running_sum, last_sum, entity_id,
+                )
+                running_sum = last_sum
+
             energy_stats.append(
                 {
                     "start": point["dt"],
