@@ -134,13 +134,13 @@ def g11_user_data():
                         {"obis": "1-0:1.8.0*255", "name": None},
                         {"obis": "1-0:2.8.0*255", "name": None},
                     ],
-                    "agreementPoints": [{"code": "590243835014852258"}],
+                    "agreementPoints": [{"code": "590243800000000001"}],
                 }
             ],
             "agreementPoints": [
                 {
-                    "code": "590243835014852258",
-                    "address": "83-330 Maśkowo, Pałacowa 98",
+                    "code": "590243800000000001",
+                    "address": "00-001 Warszawa, Testowa 1",
                 }
             ],
             "activationDate": "2025-06-11",
