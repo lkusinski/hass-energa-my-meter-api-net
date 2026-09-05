@@ -858,12 +858,26 @@ async def _import_meter_history(
                     energy_name = suffix_to_name.get(
                         entity_suffix, f"panel_{entity_suffix}"
                     )
-                    eid = f"sensor.energa_{meter_id}_{energy_name}"
-                    base = await _stat_sum_before(hass, eid, first_dt)
-                    if not entity_suffix.startswith("export"):
-                        cost_base = await _stat_sum_before(
-                            hass, f"{eid}_cost", first_dt
-                        )
+                    candidates = [f"sensor.energa_{meter_id}_{energy_name}"]
+                    if serial and str(serial) != str(meter_id):
+                        candidates.append(f"sensor.energa_{serial}_{energy_name}")
+                    for eid in candidates:
+                        b = await _stat_sum_before(hass, eid, first_dt)
+                        if b > 0:
+                            base = b
+                            if not entity_suffix.startswith("export"):
+                                cost_base = await _stat_sum_before(
+                                    hass, f"{eid}_cost", first_dt
+                                )
+                            break
+                    if base == 0.0 and not entity_suffix.startswith("export"):
+                        for eid in candidates:
+                            cb = await _stat_sum_before(
+                                hass, f"{eid}_cost", first_dt
+                            )
+                            if cb > 0:
+                                cost_base = cb
+                                break
             return build_statistics(points, entity_suffix, entry, base, cost_base)
 
         # Build and import statistics
@@ -884,8 +898,8 @@ async def _import_meter_history(
                 notification_id=f"energa_import_{meter_id}",
             )
         else:
-            count_import = build_statistics(import_points, "import", entry)
-            count_export = build_statistics(export_points, "export", entry)
+            count_import = await _build_anchored(import_points, "import")
+            count_export = await _build_anchored(export_points, "export")
             total_count = count_import + count_export
 
             persistent_notification.async_create(
@@ -939,15 +953,57 @@ async def _import_meter_history(
             from homeassistant.helpers import entity_registry as er
 
             _reg = er.async_get(hass)
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import get_last_statistics
+
             for _direction, _series in (("charge", _ch), ("discharge", _dis)):
                 _uid = f"energa_{meter_point_id}_bank_{_direction}"
                 _eid = _reg.async_get_entity_id("sensor", DOMAIN, _uid)
                 if not _eid:
                     _LOGGER.debug("Flow backfill: entity missing for %s", _uid)
                     continue
-                _base = await _stat_sum_before(hass, _eid, start_date)
-                _anchored = anchor_flow_series(_series, _base)
+
+                # Query last recorded statistic to avoid duplicate import and sum doubling
+                last_stat = await get_instance(hass).async_add_executor_job(
+                    get_last_statistics, hass, 1, _eid, True, {"sum", "start"}
+                )
+                last_stat_row = (
+                    last_stat.get(_eid, [{}])[0]
+                    if last_stat and last_stat.get(_eid)
+                    else None
+                )
+                last_start = last_stat_row.get("start") if last_stat_row else None
+                last_sum = last_stat_row.get("sum") if last_stat_row else None
+
                 _dts = [d for d, _ in _ordered]
+                if last_start is not None and last_sum is not None:
+                    last_dt = (
+                        dt_util.utc_from_timestamp(last_start)
+                        if isinstance(last_start, (int, float))
+                        else last_start
+                    )
+                    filtered_indices = [
+                        idx for idx, d in enumerate(_dts) if d > last_dt
+                    ]
+                    if not filtered_indices:
+                        _LOGGER.debug(
+                            "Flow backfill: %s up to date at %s (sum=%.3f), skipping",
+                            _eid,
+                            last_dt,
+                            last_sum,
+                        )
+                        continue
+                    _dts = [_dts[idx] for idx in filtered_indices]
+                    _sub_ordered = [_ordered[idx] for idx in filtered_indices]
+                    _sub_ch, _sub_dis = flow_history_series(
+                        [(v[0], v[1]) for _, v in _sub_ordered], _coeff, _coeff >= 0.7
+                    )
+                    _series_to_anchor = _sub_ch if _direction == "charge" else _sub_dis
+                    _anchored = anchor_flow_series(_series_to_anchor, float(last_sum))
+                else:
+                    _base = await _stat_sum_before(hass, _eid, start_date)
+                    _anchored = anchor_flow_series(_series, _base)
+
                 if len(_anchored) != len(_dts):
                     _LOGGER.debug("Flow backfill: length mismatch for %s", _eid)
                     continue

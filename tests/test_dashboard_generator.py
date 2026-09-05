@@ -84,6 +84,15 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
     assert "sensor.energa_00069839_pokrycie_z_magazynu_dzien_mtd" in storage_entities
     assert "sensor.energa_00069839_pokrycie_z_magazynu_noc_mtd" in storage_entities
 
+    # Card 4: Dedicated MTD volume sensors (no panel_energia_* entities)
+    tariff_card = next(c for c in view["cards"] if "Taryfa G12w" in c["title"])
+    tariff_entities = [e["entity"] for e in tariff_card["entities"]]
+    assert "sensor.energa_00069839_pobor_energii_strefa_1_mtd" in tariff_entities
+    assert "sensor.energa_00069839_pobor_energii_strefa_2_mtd" in tariff_entities
+    assert "sensor.energa_00069839_oddanie_energii_strefa_1_mtd" in tariff_entities
+    assert "sensor.energa_00069839_oddanie_energii_strefa_2_mtd" in tariff_entities
+    assert not any("panel_energia" in e for e in tariff_entities)
+
 
 def test_build_meter_view_net_billing(mock_meter_net_billing):
     view = build_meter_view(mock_meter_net_billing, coeff=0.0)
@@ -116,6 +125,11 @@ def test_build_meter_view_pure_consumer(mock_meter_pure_consumer):
     # Should NOT have prosumer storage card
     assert not any("Wirtualny Magazyn" in t for t in card_titles)
     assert any("Rozliczenie Finansowe" in t for t in card_titles)
+    tariff_card = next(c for c in view["cards"] if "Taryfa G11" in c["title"])
+    tariff_entities = [e["entity"] for e in tariff_card["entities"]]
+    assert "sensor.energa_30910550_pobor_energii_mtd" in tariff_entities
+    assert not any("panel_energia" in e for e in tariff_entities)
+
 
 
 def test_build_meter_view_net_billing_g11():

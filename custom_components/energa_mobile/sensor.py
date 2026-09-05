@@ -271,7 +271,7 @@ async def async_setup_entry(
                 name="Zużycie Dziś",
                 icon="mdi:flash",
                 device_info=device_info,
-                state_class_override=SensorStateClass.TOTAL,
+                state_class_override=SensorStateClass.TOTAL_INCREASING,
             )
         )
 
@@ -285,7 +285,7 @@ async def async_setup_entry(
                     name="Produkcja Dziś",
                     icon="mdi:solar-power",
                     device_info=device_info,
-                    state_class_override=SensorStateClass.TOTAL,
+                    state_class_override=SensorStateClass.TOTAL_INCREASING,
                 )
             )
 
@@ -560,6 +560,102 @@ async def async_setup_entry(
                     serial=serial,
                 )
             )
+
+            # MTD energy volume breakdown sensors (v1.0.8)
+            if has_zones:
+                sensors.append(
+                    EnergaBillComponentSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        component_key="energy_import_1",
+                        name="Pobór Energii Strefa 1 MTD",
+                        icon="mdi:transmission-tower",
+                        unit="kWh",
+                        device_class=SensorDeviceClass.ENERGY,
+                        has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
+                sensors.append(
+                    EnergaBillComponentSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        component_key="energy_import_2",
+                        name="Pobór Energii Strefa 2 MTD",
+                        icon="mdi:transmission-tower",
+                        unit="kWh",
+                        device_class=SensorDeviceClass.ENERGY,
+                        has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
+                if is_export_prosumer(meter):
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="energy_export_1",
+                            name="Oddanie Energii Strefa 1 MTD",
+                            icon="mdi:solar-power",
+                            unit="kWh",
+                            device_class=SensorDeviceClass.ENERGY,
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="energy_export_2",
+                            name="Oddanie Energii Strefa 2 MTD",
+                            icon="mdi:solar-power",
+                            unit="kWh",
+                            device_class=SensorDeviceClass.ENERGY,
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
+            else:
+                sensors.append(
+                    EnergaBillComponentSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        component_key="energy_import",
+                        name="Pobór Energii MTD",
+                        icon="mdi:transmission-tower",
+                        unit="kWh",
+                        device_class=SensorDeviceClass.ENERGY,
+                        has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
+                if is_export_prosumer(meter):
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="energy_export",
+                            name="Oddanie Energii MTD",
+                            icon="mdi:solar-power",
+                            unit="kWh",
+                            device_class=SensorDeviceClass.ENERGY,
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
             if is_export_prosumer(meter):
                 coeff = float(
                     entry.options.get(
@@ -765,6 +861,12 @@ async def async_setup_entry(
                 f"energa_{_mid}_mtd_deposit_applied": f"sensor.energa_{_serial}_odzyskano_z_depozytu_mtd",
                 f"energa_{_mid}_mtd_cover_day": f"sensor.energa_{_serial}_pokrycie_z_magazynu_dzien_mtd",
                 f"energa_{_mid}_mtd_cover_night": f"sensor.energa_{_serial}_pokrycie_z_magazynu_noc_mtd",
+                f"energa_{_mid}_mtd_energy_import": f"sensor.energa_{_serial}_pobor_energii_mtd",
+                f"energa_{_mid}_mtd_energy_export": f"sensor.energa_{_serial}_oddanie_energii_mtd",
+                f"energa_{_mid}_mtd_energy_import_1": f"sensor.energa_{_serial}_pobor_energii_strefa_1_mtd",
+                f"energa_{_mid}_mtd_energy_import_2": f"sensor.energa_{_serial}_pobor_energii_strefa_2_mtd",
+                f"energa_{_mid}_mtd_energy_export_1": f"sensor.energa_{_serial}_oddanie_energii_strefa_1_mtd",
+                f"energa_{_mid}_mtd_energy_export_2": f"sensor.energa_{_serial}_oddanie_energii_strefa_2_mtd",
             })
 
         for _ent in list(_ent_reg.entities.values()):
@@ -1108,6 +1210,15 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
         registry = er.async_get(self.hass)
 
+        suffix_to_name = {
+            "import": "panel_energia_zuzycie",
+            "import_1": "panel_energia_strefa_1",
+            "import_2": "panel_energia_strefa_2",
+            "export": "panel_energia_produkcja",
+            "export_1": "panel_energia_produkcja_strefa_1",
+            "export_2": "panel_energia_produkcja_strefa_2",
+        }
+
         # Determine which suffixes to check
         if has_zones:
             suffixes = ["import_1", "import_2", "export_1", "export_2"]
@@ -1117,34 +1228,42 @@ class EnergaCoordinator(DataUpdateCoordinator):
         for suffix in suffixes:
             unique_id = f"energa_{meter_id}_{suffix}_stats"
 
-            for entity in list(registry.entities.values()):
-                if entity.unique_id == unique_id and entity.platform == DOMAIN:
-                    entity_id = entity.entity_id
+            candidates = [
+                entity.entity_id
+                for entity in list(registry.entities.values())
+                if entity.unique_id == unique_id and entity.platform == DOMAIN
+            ]
+            if not candidates:
+                energy_name = suffix_to_name.get(suffix, f"panel_{suffix}")
+                candidates.append(f"sensor.energa_{meter_id}_{energy_name}")
+                for m in getattr(self.api, "_meters_data", []):
+                    if m.get("meter_point_id") == meter_id and m.get("meter_serial"):
+                        candidates.append(f"sensor.energa_{m['meter_serial']}_{energy_name}")
 
-                    try:
-                        last_stats = await get_instance(self.hass).async_add_executor_job(
-                            get_last_statistics,
-                            self.hass,
-                            1,
-                            entity_id,
-                            True,
-                            {"sum", "start"},
-                        )
+            for entity_id in set(candidates):
+                try:
+                    last_stats = await get_instance(self.hass).async_add_executor_job(
+                        get_last_statistics,
+                        self.hass,
+                        1,
+                        entity_id,
+                        True,
+                        {"sum", "start"},
+                    )
 
-                        if entity_id in last_stats and last_stats[entity_id]:
-                            self._pre_fetched_stats[entity_id] = last_stats[entity_id][
-                                0
-                            ]
-                            _LOGGER.debug(
-                                "Pre-fetched stats for %s: sum=%.3f",
-                                entity_id,
-                                last_stats[entity_id][0].get("sum", 0),
-                            )
-
-                    except Exception as err:
+                    if entity_id in last_stats and last_stats[entity_id]:
+                        self._pre_fetched_stats[entity_id] = last_stats[entity_id][0]
                         _LOGGER.debug(
-                            "Could not pre-fetch stats for %s: %s", entity_id, err
+                            "Pre-fetched stats for %s: sum=%.3f",
+                            entity_id,
+                            last_stats[entity_id][0].get("sum", 0),
                         )
+                        break
+
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Could not pre-fetch stats for %s: %s", entity_id, err
+                    )
 
     async def _async_compute_period_sums(self, start, end) -> dict:
         """Sum Panel Energia statistics per meter over [start, end] (v0.2.11).
@@ -1498,7 +1617,7 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Bank Wirtualny kWh"
         self._attr_unique_id = f"energa_{meter_id}_bank_kwh"
         self._attr_has_entity_name = True
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_state_class = None
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_icon = "mdi:battery-charging"
@@ -1667,7 +1786,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Bank Wirtualny PLN"
         self._attr_unique_id = f"energa_{meter_id}_bank_pln"
         self._attr_has_entity_name = True
-        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_state_class = None
         self._attr_native_unit_of_measurement = "PLN"
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_icon = "mdi:cash-check"
@@ -1887,6 +2006,7 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
             "mdi:battery-charging" if is_charge else "mdi:battery-discharging"
         )
         self._attr_device_info = device_info
+        self._restored = False
 
     async def async_added_to_hass(self) -> None:
         """Seed totals from statistics (history backfill) or HA state.
@@ -1932,11 +2052,13 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
                 candidates.append(float(last.state))
             except (ValueError, TypeError):
                 pass
-        if not candidates:
-            return
-        # Seed both sides; each mode reads only its own side.
-        value = max(candidates)
-        self._flows.restore(value, value)
+        if candidates:
+            value = max(candidates)
+            if self._direction == "charge":
+                self._flows.restore(charge=value, discharge=None)
+            else:
+                self._flows.restore(charge=None, discharge=value)
+        self._restored = True
 
     def _nets(self):
         """(net_import, net_export) from meter totals minus baselines."""
@@ -1969,6 +2091,8 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
 
     @property
     def native_value(self):
+        if not self._restored:
+            return None
         nets = self._nets()
         if nets is None:
             return None
@@ -2094,15 +2218,31 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         else:
             self._attr_icon = "mdi:solar-power"
 
+    async def async_added_to_hass(self) -> None:
+        """Seed last sum from recorder on startup."""
+        await super().async_added_to_hass()
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import get_last_statistics
+
+            last_stats = await get_instance(self.hass).async_add_executor_job(
+                get_last_statistics, self.hass, 1, self.entity_id, True, {"sum", "start"}
+            )
+            if self.entity_id in last_stats and last_stats[self.entity_id]:
+                self._last_sum = last_stats[self.entity_id][0].get("sum")
+                self.coordinator._pre_fetched_stats[self.entity_id] = last_stats[self.entity_id][0]
+                _LOGGER.debug("EnergaStatisticsSensor %s seeded sum=%.3f", self.entity_id, self._last_sum or 0.0)
+        except Exception as err:
+            _LOGGER.debug("Could not seed stats for %s: %s", self.entity_id, err)
+
     @property
     def native_value(self):
-        """Return cumulative sum so Energy Dashboard sees entity as valid."""
-        if self._last_sum is not None:
-            return round(self._last_sum, 3)
-        pre = (self.coordinator.get_pre_fetched_stats() or {}).get(self.entity_id)
-        if pre and pre.get("sum") is not None:
-            self._last_sum = pre.get("sum")
-            return round(self._last_sum, 3)
+        """Return None — energy statistics flow exclusively via async_import_statistics.
+
+        Prevents Home Assistant Core's recorder from calculating competing
+        statistics from states table deltas, which previously caused sum resets
+        and multi-megawatt spikes on the Energy Dashboard.
+        """
         return None
 
     @property
@@ -2855,6 +2995,8 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             return None, {}
         imp_mtd, exp_mtd = self._mtd_parts()
         imp_d, imp_n, exp_tot = self._mtd_zone_flows()
+        exp_d = float(mtd.get("export_1", 0)) if self._has_zones else 0.0
+        exp_n = float(mtd.get("export_2", 0)) if self._has_zones else 0.0
         opts = self._entry.options
         mid = self._meter_id
         rce = self._rce()
@@ -2900,6 +3042,8 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             "mtd_export_kwh": round(exp_mtd, 2),
             "mtd_import_day_kwh": round(imp_d, 2),
             "mtd_import_night_kwh": round(imp_n, 2),
+            "mtd_export_day_kwh": round(exp_d, 2),
+            "mtd_export_night_kwh": round(exp_n, 2),
             "mtd_sale_total_pln": bill_mtd["sale_total"],
             "mtd_distr_total_pln": bill_mtd["distr_total"],
             "mtd_netto_pln": bill_mtd["netto"],
@@ -2930,7 +3074,7 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
     """Dedicated breakdown sensor for MTD bill components (v1.0.4).
 
     Exposes individual metrics (gross cost, energy cost, distribution cost,
-    deposit generated, deposit applied, warehouse coverage) as native entities.
+    deposit generated, deposit applied, warehouse coverage, MTD energy volumes) as native entities.
     """
 
     def __init__(
@@ -2961,15 +3105,10 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
         self._attr_has_entity_name = True
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
-        if device_class == SensorDeviceClass.MONETARY:
-            self._attr_device_class = device_class
-            self._attr_state_class = SensorStateClass.TOTAL
-        elif device_class == SensorDeviceClass.ENERGY:
-            self._attr_device_class = device_class
-            self._attr_state_class = SensorStateClass.TOTAL
-        else:
-            self._attr_device_class = None
-            self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_class = device_class
+        # MTD components are period breakdown metrics, not accumulative meters.
+        # State class MUST be None to prevent HA recorder from logging false reset spikes.
+        self._attr_state_class = None
 
     @property
     def native_value(self):
@@ -3000,6 +3139,12 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             "deposit_applied": attrs.get("mtd_deposit_applied_pln"),
             "cover_day": attrs.get("cover_day_kwh"),
             "cover_night": attrs.get("cover_night_kwh"),
+            "energy_import": attrs.get("mtd_import_kwh"),
+            "energy_export": attrs.get("mtd_export_kwh"),
+            "energy_import_1": attrs.get("mtd_import_day_kwh"),
+            "energy_import_2": attrs.get("mtd_import_night_kwh"),
+            "energy_export_1": attrs.get("mtd_export_day_kwh"),
+            "energy_export_2": attrs.get("mtd_export_night_kwh"),
         }
         return key_map.get(self._component_key)
 
