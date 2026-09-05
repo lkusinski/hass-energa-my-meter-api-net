@@ -404,7 +404,7 @@ async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
             zones = meter.get("zone_count", 1) > 1
             suffix = "import_1" if zones else "import"
             uid = f"energa_{mid}_{suffix}_stats"
-            for entity in registry.entities.values():
+            for entity in list(registry.entities.values()):
                 if entity.unique_id == uid:
                     wanted.append(entity.entity_id)
                     break

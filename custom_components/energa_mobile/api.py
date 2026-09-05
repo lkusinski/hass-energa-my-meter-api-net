@@ -51,6 +51,7 @@ class EnergaAPI:
         self._hass = None  # Reference to HA instance for statistics queries
         self._api_warning = None  # Last non-null warning from API
         self._api_error = None  # Last non-null error from API
+        self._data_lock = asyncio.Lock()
 
     def set_hass(self, hass):
         """Set Home Assistant instance reference for database queries."""
@@ -114,58 +115,59 @@ class EnergaAPI:
             raise EnergaConnectionError from err
 
     async def async_get_data(self, force_refresh: bool = False) -> list[dict]:
-        if force_refresh:
-            self._meters_data = []
-        if not self._meters_data:
-            self._meters_data = await self._fetch_all_meters()
+        async with self._data_lock:
+            if force_refresh:
+                self._meters_data = []
+            if not self._meters_data:
+                self._meters_data = await self._fetch_all_meters()
 
-        tz = ZoneInfo("Europe/Warsaw")
-        # Construct midnight using datetime constructor (not .replace())
-        # to correctly resolve UTC offset on DST transition days (#26)
-        today = datetime.now(tz).date()
-        ts = int(
-            datetime(today.year, today.month, today.day, 0, 0, 0,
-                     tzinfo=tz).timestamp() * 1000
-        )
-
-        updated_meters = []
-        for meter in self._meters_data:
-            m_data = meter.copy()
-            if m_data.get("obis_plus"):
-                # Fetch total daily consumption (sum of all zones)
-                vals = await self._fetch_chart(
-                    m_data["meter_point_id"], m_data["obis_plus"], ts
-                )
-                m_data["daily_pobor"] = sum(vals)
-
-                # Fetch per-zone daily consumption for G12w
-                if m_data.get("zone_count", 1) > 1:
-                    vals_1 = await self._fetch_chart(
-                        m_data["meter_point_id"], m_data["obis_plus"], ts, zone_index=0
-                    )
-                    vals_2 = await self._fetch_chart(
-                        m_data["meter_point_id"], m_data["obis_plus"], ts, zone_index=1
-                    )
-                    m_data["daily_pobor_1"] = sum(vals_1)
-                    m_data["daily_pobor_2"] = sum(vals_2)
-
-            if m_data.get("obis_minus"):
-                vals = await self._fetch_chart(
-                    m_data["meter_point_id"], m_data["obis_minus"], ts
-                )
-                m_data["daily_produkcja"] = sum(vals)
-
-            _LOGGER.debug(
-                "Energa Meter [%s]: Total(+)=%s, Total(-)=%s, Daily(+)=%s, Daily(-)=%s",
-                m_data.get("meter_serial"),
-                m_data.get("total_plus"),
-                m_data.get("total_minus"),
-                m_data.get("daily_pobor"),
-                m_data.get("daily_produkcja"),
+            tz = ZoneInfo("Europe/Warsaw")
+            # Construct midnight using datetime constructor (not .replace())
+            # to correctly resolve UTC offset on DST transition days (#26)
+            today = datetime.now(tz).date()
+            ts = int(
+                datetime(today.year, today.month, today.day, 0, 0, 0,
+                         tzinfo=tz).timestamp() * 1000
             )
-            updated_meters.append(m_data)
-        self._meters_data = updated_meters
-        return updated_meters
+
+            updated_meters = []
+            for meter in self._meters_data:
+                m_data = meter.copy()
+                if m_data.get("obis_plus"):
+                    # Fetch total daily consumption (sum of all zones)
+                    vals = await self._fetch_chart(
+                        m_data["meter_point_id"], m_data["obis_plus"], ts
+                    )
+                    m_data["daily_pobor"] = sum(vals)
+
+                    # Fetch per-zone daily consumption for G12w
+                    if m_data.get("zone_count", 1) > 1:
+                        vals_1 = await self._fetch_chart(
+                            m_data["meter_point_id"], m_data["obis_plus"], ts, zone_index=0
+                        )
+                        vals_2 = await self._fetch_chart(
+                            m_data["meter_point_id"], m_data["obis_plus"], ts, zone_index=1
+                        )
+                        m_data["daily_pobor_1"] = sum(vals_1)
+                        m_data["daily_pobor_2"] = sum(vals_2)
+
+                if m_data.get("obis_minus"):
+                    vals = await self._fetch_chart(
+                        m_data["meter_point_id"], m_data["obis_minus"], ts
+                    )
+                    m_data["daily_produkcja"] = sum(vals)
+
+                _LOGGER.debug(
+                    "Energa Meter [%s]: Total(+)=%s, Total(-)=%s, Daily(+)=%s, Daily(-)=%s",
+                    m_data.get("meter_serial"),
+                    m_data.get("total_plus"),
+                    m_data.get("total_minus"),
+                    m_data.get("daily_pobor"),
+                    m_data.get("daily_produkcja"),
+                )
+                updated_meters.append(m_data)
+            self._meters_data = updated_meters
+            return updated_meters
 
     async def async_get_history_hourly(
         self, meter_point_id, date: datetime, include_timestamps: bool = False

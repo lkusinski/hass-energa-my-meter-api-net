@@ -646,7 +646,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             # Matched by entity_id substrings: panel_energia_zuzycie, panel_energia_produkcja, panel_energia_strefa
             statistic_ids = [
                 entity.entity_id
-                for entity in entity_registry.entities.values()
+                for entity in list(entity_registry.entities.values())
                 if entity.platform == DOMAIN
                 and (
                     "panel_energia_zuzycie" in entity.entity_id

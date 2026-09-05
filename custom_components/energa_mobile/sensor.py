@@ -1015,7 +1015,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
             else f"energa_{meter_id}_import_stats"
         )
 
-        for entity in registry.entities.values():
+        for entity in list(registry.entities.values()):
             if (
                 entity.unique_id == target_unique_id
                 and entity.platform == DOMAIN
@@ -1117,7 +1117,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         for suffix in suffixes:
             unique_id = f"energa_{meter_id}_{suffix}_stats"
 
-            for entity in registry.entities.values():
+            for entity in list(registry.entities.values()):
                 if entity.unique_id == unique_id and entity.platform == DOMAIN:
                     entity_id = entity.entity_id
 
@@ -1174,7 +1174,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     "import", "export",
                 ):
                     uid = f"energa_{mid}_{suffix}_stats"
-                    for entity in registry.entities.values():
+                    for entity in list(registry.entities.values()):
                         if entity.unique_id == uid and entity.platform == DOMAIN:
                             wanted[entity.entity_id] = (str(mid), suffix)
                             break
