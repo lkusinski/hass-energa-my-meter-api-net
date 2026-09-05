@@ -8,16 +8,17 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-237_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-256_passed-brightgreen)
 
 > [!NOTE]
-> Zaawansowana integracja dla klientów **Energa Operator** w Home Assistant, łącząca się bezpośrednio z **natywnym REST API** portalu *Mój Licznik* (bez scrapingu www). Posiada natywne wsparcie dla taryf **G11, G12, G12w, G12r**, pełną obsługę obu systemów prosumenckich (**Stary: Net-metering 0.8/0.7 z wirtualnym magazynem FIFO 12 miesięcy** oraz **Nowy: Net-billing z depozytem PLN i automatycznym cennikiem RCEm z PSE**), autonomiczną prognozę faktury brutto oraz bezbłędną integrację ze statystykami **Panelu Energia (Energy Dashboard)**.
+> Zaawansowana integracja dla klientów **Energa Operator** w Home Assistant, łącząca się bezpośrednio z **natywnym REST API** portalu *Mój Licznik* (bez scrapingu www). Posiada natywne wsparcie dla taryf **G11, G12, G12w, G12r**, pełną obsługę obu systemów prosumenckich (**Stary: Net-metering 0.8/0.7 z wirtualnym magazynem FIFO 12 miesięcy** oraz **Nowy: Net-billing z depozytem PLN i automatycznym cennikiem RCEm z PSE**), autonomiczną prognozę faktury brutto, 1-klikowy generator dedykowanych pulpitów rozliczeń oraz bezbłędną integrację ze statystykami **Panelu Energia (Energy Dashboard)**.
 
 ---
 
 ## ✨ Główne Możliwości (Architektura V1.0)
 
 * 📡 **Natywne API REST:** Bezpośrednia, stabilna komunikacja JSON z platformą Energa Mój Licznik.
+* 🚀 **1-Click Generator Pulpitów Lovelace:** Natywny przycisk urządzenia *„Utwórz Pulpit Rozliczeń”* (`button`) oraz serwis `energa_mobile.generate_dashboard` budujący kompletny pulpit `/energa-rachunek` zintegrowany z bocznym paskiem HA (bez restartu).
 * 📊 **Pełna Integracja z Panelem Energia:** Dedykowane sensory statystyk godzinowych (`Panel Energia`) bez fałszywych skoków i resetów.
 * 🔋 **Wirtualny Magazyn Energii (Stary System — Net-Metering):**
   * Rachunkowość FIFO z 12-miesięcznym okresem ważności energii (zgodnie z art. 4 ust. 11 ustawy o OZE).
@@ -119,9 +120,17 @@ W nowym systemie energia oddana do sieci jest wyceniana według rynkowej ceny en
 
 ---
 
-## 🎛️ Gotowa Karta Lovelace
+## 🎛️ Pulpity Rozliczeń i Karty Lovelace
+ 
+### Opcja 1: Automatyczny Generator (Zalecana — 1 kliknięcie)
+Każdy licznik posiada natywną encję przycisku:
+`button.energa_<numer_licznika>_utworz_pulpit_rozliczen` (**„Utwórz Pulpit Rozliczeń”**).
+Kliknięcie przycisku na kafelku urządzenia automatycznie utworzy dedykowany pulpit `/energa-rachunek` zintegrowany z bocznym paskiem nawigacji Home Assistant. Pulpit dobiera karty i odznaki indywidualnie dla każdego licznika (magazyn kWh FIFO dla Net-meteringu, depozyt PLN i ceny RCEm dla Net-billingu, czysty widok zużycia dla zwykłego konsumenta).
 
-Wklej poniższy kod do swojego pulpitu (**Pulpity** → **Edytuj** → **+ Dodaj kartę** → **Ręcznie / YAML**):
+Możesz też wywołać tę akcję za pomocą usługi `energa_mobile.generate_dashboard`.
+
+### Opcja 2: Samodzielna Karta YAML (Ręczna konfiguracja)
+Jeśli wolisz zbudować widok samodzielnie, wklej poniższy kod do wybranego pulpitu (**Pulpity** → **Edytuj** → **+ Dodaj kartę** → **Ręcznie / YAML**):
 
 ```yaml
 type: vertical-stack

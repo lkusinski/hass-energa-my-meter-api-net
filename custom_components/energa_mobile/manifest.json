@@ -5,13 +5,13 @@
     "recorder"
   ],
   "codeowners": [
-    "@ergo5"
+    "@lkusinski"
   ],
   "config_flow": true,
-  "documentation": "https://github.com/ergo5/hass-energa-my-meter-api",
+  "documentation": "https://github.com/lkusinski/hass-energa-my-meter-api-net",
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/ergo5/hass-energa-my-meter-api/issues",
+  "issue_tracker": "https://github.com/lkusinski/hass-energa-my-meter-api-net/issues",
   "requirements": [],
   "version": "1.0.7"
 }
