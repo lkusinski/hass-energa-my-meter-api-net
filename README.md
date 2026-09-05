@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-231_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-237_passed-brightgreen)
 
 > [!NOTE]
 > Zaawansowana integracja dla klientów **Energa Operator** w Home Assistant, łącząca się bezpośrednio z **natywnym REST API** portalu *Mój Licznik* (bez scrapingu www). Posiada natywne wsparcie dla taryf **G11, G12, G12w, G12r**, pełną obsługę obu systemów prosumenckich (**Stary: Net-metering 0.8/0.7 z wirtualnym magazynem FIFO 12 miesięcy** oraz **Nowy: Net-billing z depozytem PLN i automatycznym cennikiem RCEm z PSE**), autonomiczną prognozę faktury brutto oraz bezbłędną integrację ze statystykami **Panelu Energia (Energy Dashboard)**.

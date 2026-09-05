@@ -341,4 +341,44 @@ class TestBillCurrentSensor:
         assert round(bill_default["do_zaplaty"], 2) == 115.35
 
 
+class TestBillComponentSensor:
+    """Tests for EnergaBillComponentSensor (v1.0.4)."""
+
+    def test_bill_components_breakdown(self):
+        """Verify individual MTD bill components match compute_bill output."""
+        from custom_components.energa_mobile.tariff import compute_bill, G12W_DEFAULT_FEES
+
+        imp_d = 51.74
+        imp_n = 9.70
+        exp_tot = 41.58
+        rce = 0.26288
+        fees = dict(G12W_DEFAULT_FEES)
+        fees["capacity"] = 16.01
+
+        bill = compute_bill(imp_d, imp_n, exp_tot, rce, fees)
+        assert bill is not None
+        assert round(bill["brutto"], 2) == 118.90
+        assert round(bill["sale_total"], 2) == 35.47
+        assert round(bill["distr_total"], 2) == 61.20
+        assert round(bill["deposit"], 2) == 13.44
+        assert round(bill["deposit_applied"], 2) == 13.44
+
+    def test_component_sensor_breakdown_keys(self):
+        """Verify component key mapping for MTD breakdown."""
+        key_map = {
+            "brutto": "mtd_brutto_pln",
+            "sale_total": "mtd_sale_total_pln",
+            "distr_total": "mtd_distr_total_pln",
+            "deposit": "mtd_deposit_pln",
+            "deposit_applied": "mtd_deposit_applied_pln",
+            "cover_day": "cover_day_kwh",
+            "cover_night": "cover_night_kwh",
+        }
+        assert key_map["brutto"] == "mtd_brutto_pln"
+        assert key_map["sale_total"] == "mtd_sale_total_pln"
+        assert key_map["distr_total"] == "mtd_distr_total_pln"
+        assert key_map["deposit"] == "mtd_deposit_pln"
+        assert key_map["deposit_applied"] == "mtd_deposit_applied_pln"
+        assert key_map["cover_day"] == "cover_day_kwh"
+        assert key_map["cover_night"] == "cover_night_kwh"
 

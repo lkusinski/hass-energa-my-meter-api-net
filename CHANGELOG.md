@@ -1,6 +1,21 @@
 # Changelog
 
-## v1.0.3 (2026-09-05) — Dotychczasowy Rachunek MTD & Magazyn Finansowy
+## v1.0.4 (2026-09-05) — Dedykowane Encje Składowe Rozliczenia i Magazynu
+
+### 🚀 Nowe Możliwości
+- **Promocja składowych rozliczenia MTD do natywnych sensorów (`EnergaBillComponentSensor`):**
+  - Wszystkie kluczowe wartości rozliczeniowe i magazynowe są teraz osobnymi, natywnymi encjami Home Assistant (dostępnymi out-of-the-box bez konieczności parsowania atrybutów):
+    - `sensor.energa_<meter>_mtd_brutto` — Całkowity koszt energii i dystrybucji brutto MTD [PLN]
+    - `sensor.energa_<meter>_mtd_sale_total` — Koszt zakupu energii czynnej MTD [PLN]
+    - `sensor.energa_<meter>_mtd_distr_total` — Koszt dystrybucji i opłat stałych MTD [PLN]
+    - Dla Net-billing:
+      - `sensor.energa_<meter>_mtd_deposit` — Wartość doładowania depozytu z PV MTD [PLN]
+      - `sensor.energa_<meter>_mtd_deposit_applied` — Wartość potrącenia z depozytu na energię MTD [PLN]
+    - Dla Net-metering:
+      - `sensor.energa_<meter>_mtd_cover_day` — Pokrycie z magazynu w Strefie 1 MTD [kWh]
+      - `sensor.energa_<meter>_mtd_cover_night` — Pokrycie z magazynu w Strefie 2 MTD [kWh]
+- **Dedykowany dashboard magazynu dla Net-meteringu (Wiśniowa):**
+  - Skonfigurowano widok `/rachunek-dom` prezentujący stan magazynu w kWh, stopień napełnienia, bilans prosumencki oraz pokrycie energii czynnej.
 
 ### 🚀 Nowe Możliwości
 - **Encja dotychczasowego rachunku (`EnergaBillCurrentSensor`):**
