@@ -95,19 +95,24 @@ def repair_db(db_path="/config/home-assistant_v2.db", dry_run=True):
 
         to_delete_ids = []
         prev_sum = None
+        prev_start_ts = None
 
         for idx, (row_id, start_ts, state, s) in enumerate(rows):
             is_bogus = False
             dt = datetime.datetime.fromtimestamp(start_ts, tz=datetime.timezone.utc)
+            hours = max(1.0, (start_ts - prev_start_ts) / 3600.0) if prev_start_ts else 1.0
 
             # Check for bogus state (cumulative sensor value leaked into hourly state)
-            if state is not None and (state > 25.0 or state < -0.01):
+            state_limit = 50.0 if "cost" in sid else 25.0
+            if state is not None and (state > state_limit or state < -0.01) and ("stan_licznika" not in sid):
                 print(f"    [!] BOGUS STATE in {sid} at {dt.isoformat()}: state={state} (id={row_id})")
                 is_bogus = True
             elif prev_sum is not None and s is not None:
                 diff = s - prev_sum
-                if diff < -0.05 or diff > 25.0:
-                    print(f"    [!] BOGUS DELTA in {sid} at {dt.isoformat()}: prev_sum={prev_sum:.3f} -> sum={s:.3f} (diff={diff:.3f}) (id={row_id})")
+                hourly_rate = diff / hours
+                rate_limit = 50.0 if "cost" in sid else 25.0
+                if diff < -0.05 or hourly_rate > rate_limit:
+                    print(f"    [!] BOGUS DELTA in {sid} at {dt.isoformat()}: prev_sum={prev_sum:.3f} -> sum={s:.3f} (diff={diff:.3f}, rate={hourly_rate:.3f}/h) (id={row_id})")
                     is_bogus = True
 
             if is_bogus:
@@ -115,6 +120,7 @@ def repair_db(db_path="/config/home-assistant_v2.db", dry_run=True):
             else:
                 if s is not None:
                     prev_sum = s
+                    prev_start_ts = start_ts
 
         if to_delete_ids:
             print(f"    -> Deleting {len(to_delete_ids)} bogus rows for {sid}")

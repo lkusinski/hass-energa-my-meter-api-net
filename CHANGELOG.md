@@ -3,19 +3,18 @@
 ## v1.0.8 (2026-09-05) — Całkowita Eliminacja Świec (Spikes) na Panelu Energia & Ochrona Bazy Statystyk
 
 ### 🛡️ Eliminacja Świec i Zapaści Liczników w Panelu Energia (Energy Dashboard)
-- **Wyciszenie `native_value` w sensorach statystyk (`EnergaStatisticsSensor`, `EnergaCostStatisticsSensor`):**
-  - Wycofano zwracanie wartości stanu bieżącego w sensorach statystyk panelu (`native_value` zwraca `None`).
-  - Rozwiązano problem podwójnego zliczania: silnik kompilatora statystyk Home Assistant Core Recorder zliczał przyrosty ze stanów tabeli `states`, które kolidowały z 2-letnimi historycznymi danymi wstrzykiwanymi przez `async_import_statistics`. Przy nocnych resetach stany zerowały się lub zaczynały od zera, co przy kolejnym imporcie tworzyło wielomegowatowe świece (9–13 MWh) lub ujemne załamania sumy.
-  - Dane do Panelu Energia płyną teraz w 100% czysto i wyłącznie przez precyzyjny silnik importu statystyk godzinowych.
+- **Wyciszenie `native_value` w sensorach statystyk (`EnergaStatisticsSensor`, `EnergaCostStatisticsSensor`, `EnergaBankFlowSensor`):**
+  - Wycofano zwracanie wartości stanu bieżącego w sensorach statystyk panelu oraz baterii (`native_value` zwraca `None`).
+  - Rozwiązano problem podwójnego zliczania: silnik kompilatora statystyk Home Assistant Core Recorder zliczał przyrosty ze stanów tabeli `states`, które kolidowały z danymi wstrzykiwanymi przez `async_import_statistics`. Przy nocnych resetach stany zerowały się lub zaczynały od zera, co przy kolejnym imporcie tworzyło wielomegowatowe świece (9–13 MWh) lub ujemne załamania sumy.
+  - Dane do Panelu Energia oraz sekcji Baterii płyną teraz w 100% czysto i wyłącznie przez precyzyjny silnik importu statystyk godzinowych.
 - **Korekta klas stanów (`state_class = None`) dla wskaźników okresowych i poziomów magazynu:**
   - Wskaźniki okresowe MTD (`EnergaBillComponentSensor`: koszty, potrącenia, pokrycia) oraz poziomy depozytu/magazynu (`EnergaProsumerBankSensor`, `EnergaProsumerBankPlnSensor`) nie są sumującymi się licznikami energii — posiadają teraz `state_class = None`. Zapobiega to rejestrowaniu ich przez HA Recorder jako akumulatorów całkujących i fałszywym ujemnym spadkom na przełomie miesięcy.
   - Dodano dedykowane sensory wolumenu energii MTD (`pobor_energii_*_mtd`, `oddanie_energii_*_mtd`) do zasilania kart podsumowujących.
 - **Ochrona monotoniczności i deduplikacja importu historii:**
   - W `gather_stats_for_sensor` dodano bezwzględny strażnik monotoniczności (`running_sum >= last_sum`), uniemożliwiający cofnięcie się sumy statystyk.
   - W `_import_meter_history` dla sensorów `bank_ladowanie` i `bank_rozladowanie` wprowadzono sprawdzanie `get_last_statistics`, deduplikację punktów i kotwiczenie tylko nowych interwałów na `last_sum`, co zapobiega dublowaniu sumy przy ponownym pobraniu historii.
-  - Dodano zabezpieczenie `_restored = False` w `EnergaBankFlowSensor`, uniemożliwiające rejestrację delty przed odtworzeniem stanu początkowego.
 - **Narzędzia audytu i automatycznej naprawy bazy SQLite:**
-  - `scripts/check_spikes.py`: skanuje bazę statystyk HA pod kątem zapaści sumy, nienaturalnych skoków godzinowych (>25 kWh) i anomalii stanów.
+  - `scripts/check_spikes.py`: skanuje bazę statystyk HA z uwzględnieniem przerw czasowych (time-gap aware), wykrywając realne zapaści sumy, nienaturalne skoki godzinowe (>25 kWh/h) i anomalie stanów.
   - `scripts/repair_spikes.py`: bezpiecznie usuwa przekłamane wiersze statystyk, wskaźniki MTD z tabeli recorder oraz odtwarza spójność sum bez utraty prawidłowej historii.
 
 ## v1.0.7 (2026-09-05) — Generator Dashboardów na Żądanie & Anonimizacja Danych

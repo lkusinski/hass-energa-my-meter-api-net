@@ -122,7 +122,6 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         storage_entities = [
             {"entity": f"sensor.energa_{serial}_magazyn_poziom", "name": "Poziom napełnienia magazynu"},
             {"entity": f"sensor.energa_{serial}_bank_wirtualny_kwh", "name": "Dostępne saldo w magazynie"},
-            {"entity": f"sensor.energa_{serial}_bank_ladowanie", "name": "Zasilenie magazynu w tym miesiącu"},
         ]
         if has_zones:
             storage_entities.append(
@@ -131,9 +130,6 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
             storage_entities.append(
                 {"entity": f"sensor.energa_{serial}_pokrycie_z_magazynu_noc_mtd", "name": "Pobranie z magazynu (Noc T2)"}
             )
-        storage_entities.append(
-            {"entity": f"sensor.energa_{serial}_bank_rozladowanie", "name": "Łączne odebranie z magazynu (MTD)"}
-        )
         storage_entities.append(
             {"entity": f"sensor.energa_{serial}_wspolczynnik_prosumencki", "name": "Współczynnik opustu"}
         )
