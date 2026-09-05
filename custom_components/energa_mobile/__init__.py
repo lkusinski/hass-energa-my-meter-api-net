@@ -43,8 +43,15 @@ from .const import (
     get_price_for_key,
 )
 
+from .dashboard_generator import (
+    DEFAULT_ICON,
+    DEFAULT_TITLE,
+    DEFAULT_URL_PATH,
+    async_provision_dashboard,
+)
+
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 TIMEZONE = ZoneInfo("Europe/Warsaw")
 
 # Blind auto-backfill window (v0.3.0): the Energa API holds ~2 years.
@@ -197,6 +204,61 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             {
                 vol.Required("start_date"): str,
                 vol.Optional("days", default=30): int,
+            }
+        ),
+    )
+
+    async def generate_dashboard_service(call: ServiceCall) -> None:
+        """Service to generate or refresh the Energa Lovelace dashboard."""
+        url_path = call.data.get("url_path", DEFAULT_URL_PATH)
+        title = call.data.get("title", DEFAULT_TITLE)
+        icon = call.data.get("icon", DEFAULT_ICON)
+        coeff = float(
+            entry.options.get(
+                CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+            )
+        )
+
+        try:
+            meters_list = await api.async_get_data(force_refresh=False)
+        except Exception as err:
+            _LOGGER.error("Failed to fetch meters for dashboard generation: %s", err)
+            meters_list = []
+
+        active_meters = [
+            m
+            for m in meters_list
+            if m.get("total_plus") and float(m.get("total_plus", 0)) > 0
+        ]
+
+        meter_id = call.data.get("meter_id")
+        if meter_id:
+            active_meters = [
+                m
+                for m in active_meters
+                if str(m.get("meter_serial")) == str(meter_id)
+                or str(m.get("meter_point_id")) == str(meter_id)
+            ]
+
+        await async_provision_dashboard(
+            hass,
+            active_meters,
+            url_path=url_path,
+            title=title,
+            icon=icon,
+            coeff=coeff,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "generate_dashboard",
+        generate_dashboard_service,
+        schema=vol.Schema(
+            {
+                vol.Optional("url_path", default=DEFAULT_URL_PATH): str,
+                vol.Optional("title", default=DEFAULT_TITLE): str,
+                vol.Optional("icon", default=DEFAULT_ICON): str,
+                vol.Optional("meter_id"): str,
             }
         ),
     )

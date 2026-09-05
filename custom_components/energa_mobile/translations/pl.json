@@ -110,6 +110,35 @@
           "description": "Ile dni pobrać (domyślnie 30)."
         }
       }
+    },
+    "generate_dashboard": {
+      "name": "Generuj pulpit",
+      "description": "Generuje lub odświeża dedykowany pulpit Lovelace dla liczników Energa.",
+      "fields": {
+        "url_path": {
+          "name": "Ścieżka URL",
+          "description": "Ścieżka URL dla pulpitu (np. energa-rachunek)."
+        },
+        "title": {
+          "name": "Tytuł",
+          "description": "Tytuł pulpitu w menu bocznym."
+        },
+        "icon": {
+          "name": "Ikona",
+          "description": "Ikona w menu bocznym (np. mdi:currency-pln)."
+        },
+        "meter_id": {
+          "name": "Numer licznika",
+          "description": "Opcjonalny numer seryjny/ID licznika, aby wygenerować widok tylko dla niego."
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "create_dashboard": {
+        "name": "Utwórz Pulpit Rozliczeń"
+      }
     }
   }
 }
