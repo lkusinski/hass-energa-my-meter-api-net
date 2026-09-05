@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.3 (2026-09-05) — Dotychczasowy Rachunek MTD & Magazyn Finansowy
+
+### 🚀 Nowe Możliwości
+- **Encja dotychczasowego rachunku (`EnergaBillCurrentSensor`):**
+  - Dodano nową dedykowaną encję `sensor.energa_<meter_id>_dotychczasowy_rachunek` (np. `Dotychczasowy Rachunek (11685328)`).
+  - Raportuje dokładną kwotę do zapłaty **od 1. dnia miesiąca do chwili obecnej (MTD)** na podstawie faktycznego poboru, stawek taryfy i potrącenia depozytu prosumenckiego.
+  - Eliminuje niepewność użytkownika dotyczącą ekstrapolacji: użytkownik widzi jednocześnie faktyczny koszt do dziś (np. 105 zł) oraz prognozę na koniec miesiąca (np. 465 zł).
+- **Zgodność z Python 3.9+ (`const.py`):**
+  - Dodano `from __future__ import annotations` w `const.py`, zapobiegając błędom typowania unii `|` w starszych środowiskach.
+
 ## v1.0.2 (2026-09-05) — Stabilizacja Net-Billingu & Odporność Sieciowa
 
 ### 🐛 Bug Fixes & Usprawnienia
