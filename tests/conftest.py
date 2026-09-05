@@ -19,6 +19,8 @@ _HA_MODULES = [
     "homeassistant.helpers.entity",
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.frame",
+    "homeassistant.helpers.restore_state",
+    "homeassistant.loader",
     "homeassistant.components",
     "homeassistant.components.sensor",
     "homeassistant.components.recorder",
@@ -52,6 +54,19 @@ sensor_mod = sys.modules["homeassistant.components.sensor"]
 sensor_mod.SensorDeviceClass = MagicMock()
 sensor_mod.SensorStateClass = MagicMock()
 sensor_mod.SensorEntity = type("SensorEntity", (), {})
+
+coord_mod = sys.modules["homeassistant.helpers.update_coordinator"]
+class _CoordinatorEntity:
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+coord_mod.CoordinatorEntity = _CoordinatorEntity
+coord_mod.DataUpdateCoordinator = MagicMock()
+coord_mod.UpdateFailed = Exception
+
+restore_mod = sys.modules["homeassistant.helpers.restore_state"]
+class _RestoreEntity:
+    pass
+restore_mod.RestoreEntity = _RestoreEntity
 
 # Now safe to import
 from unittest.mock import AsyncMock

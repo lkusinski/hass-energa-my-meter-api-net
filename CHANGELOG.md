@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.6 (2026-09-05) — Standaryzacja Nazewnictwa Encji do Standardu Home Assistant (Opcja A)
+
+### 🚀 Standaryzacja Nazw & Pełna Zgodność z HA Core
+- **Spójne, kanoniczne nazewnictwo encji (`has_entity_name = True`):**
+  - Wszystkie sensory integracji posiadają teraz czyste, profesjonalne nazwy w języku polskim w `_attr_name` (np. `Bank Wirtualny kWh`, `Prognoza Rachunku`, `Dotychczasowy Rachunek`, `Koszt Brutto MTD`, `Magazyn Poziom`) bez ręcznie doklejanych numerów seryjnych `({serial})`.
+  - Przypisano brakujące `self._attr_device_info = device_info` w klasach sensorów bankowych i rozliczeniowych (`EnergaBankKwhSensor`, `EnergaBankPlnSensor`, `EnergaFirstDataDateSensor`, `EnergaBillForecastSensor`).
+  - Home Assistant automatycznie i spójnie generuje identyfikatory encji w przestrzeni urządzenia: `sensor.energa_<serial>_<slug>` (np. `sensor.energa_00069839_bank_wirtualny_kwh`, `sensor.energa_11685328_bank_wirtualny_pln`, `sensor.energa_11685328_prognoza_rachunku`).
+  - Wyeliminowano podwójne numery liczników w nazwach (np. `sensor.energa_00069839_magazyn_poziom_00069839` -> `sensor.energa_00069839_magazyn_poziom`).
+- **Automatyczna migracja Entity Registry na starcie integracji:**
+  - W `async_setup_entry` dodano bezobsługowy mechanizm migracji rejestru encji (`_ent_reg.async_update_entity`), który przy starcie HA natychmiastowo i bezpiecznie przemianowuje dotychczasowe encje na nowe, kanoniczne `entity_id`.
+  - Pełna ochrona historii długoterminowej w HA Recorderze — unikalne identyfikatory (`_attr_unique_id`) pozostały w 100% niezmienne.
+
 ## v1.0.5 (2026-09-05) — Ujemne Odliczenie z Depozytu i Dashboard dla Bursztynowej (G11 Net-Billing)
 
 ### 🚀 Nowe Możliwości & Usprawnienia UX

@@ -89,8 +89,8 @@ W starym systemie nadwyżka energii nie jest sprzedawana za pieniądze, lecz mag
      * Rekompensata: **Nie śledź kosztów** (energia trafia do magazynu kWh, a nie do wypłaty).
 3. **Magazyny energii (Baterie wirtualne):**
    * Kliknij **Dodaj system baterii**:
-     * Energia wpływająca do baterii: `sensor.energa_<numer>_bank_ladowanie_<numer>`
-     * Energia wypływająca z baterii: `sensor.energa_<numer>_bank_rozladowanie_<numer>`
+     * Energia wpływająca do baterii: `sensor.energa_<numer>_bank_ladowanie`
+     * Energia wypływająca z baterii: `sensor.energa_<numer>_bank_rozladowanie`
 4. **Panele słoneczne (Fotowoltaika):**
    * ⚠️ **Ważne:** Do sekcji paneli słonecznych dodawaj **wyłącznie encje z Twojego falownika** (np. SolarEdge, Huawei, Fronius, Deye, GoodWe). **Nigdy nie dodawaj eksportu z licznika Energi jako produkcji PV!** Licznik widzi jedynie nadwyżkę po autokonsumpcji, a nie całkowitą produkcję.
 
@@ -130,12 +130,15 @@ cards:
   - type: entities
     title: 🔋 Magazyn Energii (Net-Metering 0.8)
     entities:
-      - entity: sensor.bank_wirtualny_kwh_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_bank_wirtualny_kwh
         name: Dostępna energia w magazynie
         icon: mdi:battery-charging-80
-      - entity: sensor.energa_<numer_licznika>_magazyn_poziom_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_magazyn_poziom
         name: Poziom zapełnienia magazynu
-      - entity: sensor.prognoza_rachunku_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_dotychczasowy_rachunek
+        name: Dotychczas do zapłaty (MTD)
+        icon: mdi:cash-clock
+      - entity: sensor.energa_<numer_licznika>_prognoza_rachunku
         name: Prognoza rachunku brutto (koniec miesiąca)
         icon: mdi:invoice-text-outline
       - entity: sensor.energa_<numer_licznika>_zuzycie_dzis
@@ -147,13 +150,16 @@ cards:
   - type: entities
     title: 💰 Rozliczenie Net-Billing (PLN)
     entities:
-      - entity: sensor.bank_wirtualny_pln_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_bank_wirtualny_pln
         name: Saldo depozytu netto
         icon: mdi:cash-multiple
-      - entity: sensor.energa_<numer_licznika>_rcem_auto_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_rcem_auto
         name: Bieżąca cena RCEm (PSE)
         icon: mdi:chart-line
-      - entity: sensor.prognoza_rachunku_<numer_licznika>
+      - entity: sensor.energa_<numer_licznika>_dotychczasowy_rachunek
+        name: Dotychczas do zapłaty (MTD)
+        icon: mdi:cash-clock
+      - entity: sensor.energa_<numer_licznika>_prognoza_rachunku
         name: Prognoza rachunku brutto
         icon: mdi:invoice-text-outline
 ```
@@ -164,18 +170,19 @@ cards:
 
 | Nazwa encji | Klasa / Jednostka | Opis |
 |---|---|---|
-| `sensor.energa_*_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (posiada stan liczbowy ostatniej sumy, pełna zgodność z walidacją `energy/validate`). |
-| `sensor.energa_*_panel_energia_*_cost` | `monetary` / `PLN` | Skumulowany koszt zużycia energii w danej strefie dla Panelu Energia. |
-| `sensor.bank_wirtualny_kwh_*` | `energy` / `kWh` | Dostępny zapas energii w magazynie wirtualnym (FIFO 12 miesięcy, tylko Net-metering). |
-| `sensor.bank_wirtualny_pln_*` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (wartość nieujemna). |
-| `sensor.energa_*_magazyn_poziom_*` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (tylko Net-metering). |
-| `sensor.prognoza_rachunku_*` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec bieżącego miesiąca z wygładzaniem wczesnomiesięcznym. |
-| `sensor.energa_*_rcem_auto_*` | `PLN/kWh` | Oficjalna rynkowa cena RCEm z tabeli PSE. |
-| `sensor.energa_*_bank_ladowanie_*` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla sekcji Bateria w Net-metering). |
-| `sensor.energa_*_bank_rozladowanie_*` | `energy` / `kWh` | Skumulowana energia pobrana z magazynu (dla sekcji Bateria w Net-metering). |
-| `sensor.energa_*_zuzycie_dzis` | `energy` / `kWh` | Dzisiejsze zużycie energii. |
-| `sensor.energa_*_produkcja_dzis` | `energy` / `kWh` | Dzisiejsza produkcja oddana do sieci. |
-| `sensor.energa_*_stan_licznika_*` | `energy` / `kWh` | Oficjalne stany liczydła (import / eksport / strefy L1 i L2). |
+| `sensor.energa_<numer>_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (posiada stan liczbowy ostatniej sumy, pełna zgodność z walidacją `energy/validate`). |
+| `sensor.energa_<numer>_panel_energia_*_cost` | `monetary` / `PLN` | Skumulowany koszt zużycia energii w danej strefie dla Panelu Energia. |
+| `sensor.energa_<numer>_bank_wirtualny_kwh` | `energy` / `kWh` | Dostępny zapas energii w magazynie wirtualnym (FIFO 12 miesięcy, tylko Net-metering). |
+| `sensor.energa_<numer>_bank_wirtualny_pln` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (wartość nieujemna). |
+| `sensor.energa_<numer>_magazyn_poziom` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (tylko Net-metering). |
+| `sensor.energa_<numer>_dotychczasowy_rachunek` | `PLN` | Kwota rachunku MTD od początku miesiąca do chwili obecnej. |
+| `sensor.energa_<numer>_prognoza_rachunku` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec bieżącego miesiąca z wygładzaniem wczesnomiesięcznym. |
+| `sensor.energa_<numer>_rcem_auto` | `PLN/kWh` | Oficjalna rynkowa cena RCEm z tabeli PSE. |
+| `sensor.energa_<numer>_bank_ladowanie` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla sekcji Bateria w Net-metering). |
+| `sensor.energa_<numer>_bank_rozladowanie` | `energy` / `kWh` | Skumulowana energia pobrana z magazynu (dla sekcji Bateria w Net-metering). |
+| `sensor.energa_<numer>_zuzycie_dzis` | `energy` / `kWh` | Dzisiejsze zużycie energii. |
+| `sensor.energa_<numer>_produkcja_dzis` | `energy` / `kWh` | Dzisiejsza produkcja oddana do sieci. |
+| `sensor.energa_<numer>_stan_licznika_*` | `energy` / `kWh` | Oficjalne stany liczydła (import / eksport / strefy L1 i L2). |
 
 ---
 

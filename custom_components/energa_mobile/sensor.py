@@ -734,6 +734,59 @@ async def async_setup_entry(
     except Exception as err:
         _LOGGER.debug("Consumer leftover cleanup skipped: %s", err)
 
+    # === ENTITY REGISTRY MIGRATION (v1.0.6: Option A Standard Canonical Names) ===
+    # Smoothly migrate legacy entity IDs from earlier versions to the official
+    # device-scoped canonical entity IDs (sensor.energa_{serial}_{slug})
+    # preserving recorder history, statistics, and automations.
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        _ent_reg = er.async_get(hass)
+        _canon_map = {}
+        for _m in meters_to_process:
+            _mid = str(_m["meter_point_id"])
+            _serial = str(_m.get("meter_serial", _mid))
+
+            _canon_map.update({
+                f"energa_{_mid}_prosumer_balance": f"sensor.energa_{_serial}_bilans_prosumencki",
+                f"energa_{_mid}_bank_kwh": f"sensor.energa_{_serial}_bank_wirtualny_kwh",
+                f"energa_{_mid}_bank_pln": f"sensor.energa_{_serial}_bank_wirtualny_pln",
+                f"energa_{_mid}_bank_level": f"sensor.energa_{_serial}_magazyn_poziom",
+                f"energa_{_mid}_bank_charge": f"sensor.energa_{_serial}_bank_ladowanie",
+                f"energa_{_mid}_bank_discharge": f"sensor.energa_{_serial}_bank_rozladowanie",
+                f"energa_{_mid}_first_data_date": f"sensor.energa_{_serial}_data_pierwszego_odczytu",
+                f"energa_{_mid}_rcem_auto": f"sensor.energa_{_serial}_rcem_auto",
+                f"energa_{_mid}_bill_forecast": f"sensor.energa_{_serial}_prognoza_rachunku",
+                f"energa_{_mid}_bill_current": f"sensor.energa_{_serial}_dotychczasowy_rachunek",
+                f"energa_{_mid}_mtd_brutto": f"sensor.energa_{_serial}_koszt_brutto_mtd",
+                f"energa_{_mid}_mtd_sale_total": f"sensor.energa_{_serial}_koszt_energii_czynnej_mtd",
+                f"energa_{_mid}_mtd_distr_total": f"sensor.energa_{_serial}_koszt_dystrybucji_mtd",
+                f"energa_{_mid}_mtd_deposit": f"sensor.energa_{_serial}_depozyt_wygenerowany_mtd",
+                f"energa_{_mid}_mtd_deposit_applied": f"sensor.energa_{_serial}_odzyskano_z_depozytu_mtd",
+                f"energa_{_mid}_mtd_cover_day": f"sensor.energa_{_serial}_pokrycie_z_magazynu_dzien_mtd",
+                f"energa_{_mid}_mtd_cover_night": f"sensor.energa_{_serial}_pokrycie_z_magazynu_noc_mtd",
+            })
+
+        for _ent in list(_ent_reg.entities.values()):
+            if _ent.platform == DOMAIN and _ent.config_entry_id == entry.entry_id:
+                if _ent.unique_id in _canon_map:
+                    _target = _canon_map[_ent.unique_id]
+                    if _ent.entity_id != _target:
+                        _existing_target = _ent_reg.async_get(_target)
+                        if _existing_target and _existing_target.unique_id != _ent.unique_id:
+                            _LOGGER.warning(
+                                "Cannot migrate %s to %s: target entity_id already occupied by %s",
+                                _ent.entity_id, _target, _existing_target.unique_id
+                            )
+                        else:
+                            _LOGGER.info(
+                                "Migrating entity %s -> %s (uid=%s)",
+                                _ent.entity_id, _target, _ent.unique_id
+                            )
+                            _ent_reg.async_update_entity(_ent.entity_id, new_entity_id=_target)
+    except Exception as err:
+        _LOGGER.debug("Entity registry canonical migration skipped: %s", err)
+
     _LOGGER.info("Created %d Energa sensors", len(sensors))
     _LOGGER.debug(
         "Energa: Sensor list: %s",
@@ -1317,8 +1370,8 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
 
-        # Entity attributes (serial in name: several accounts/meters coexist)
-        self._attr_name = f"Bilans Prosumencki ({serial or meter_id})"
+        # Entity attributes (canonical clean Polish name, device-scoped)
+        self._attr_name = "Bilans Prosumencki"
         self._attr_unique_id = f"energa_{meter_id}_prosumer_balance"
         self._attr_has_entity_name = True
         # Diagnostic: internal math detail, not a user-facing reading.
@@ -1442,13 +1495,14 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = f"Bank Wirtualny kWh ({serial or meter_id})"
+        self._attr_name = "Bank Wirtualny kWh"
         self._attr_unique_id = f"energa_{meter_id}_bank_kwh"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_icon = "mdi:battery-charging"
+        self._attr_device_info = device_info
 
     @property
     def native_value(self):
@@ -1610,13 +1664,14 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = f"Bank Wirtualny PLN ({serial or meter_id})"
+        self._attr_name = "Bank Wirtualny PLN"
         self._attr_unique_id = f"energa_{meter_id}_bank_pln"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_native_unit_of_measurement = "PLN"
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_icon = "mdi:cash-check"
+        self._attr_device_info = device_info
 
     @property
     def native_value(self):
@@ -1756,7 +1811,7 @@ class EnergaBankLevelSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
-        self._attr_name = f"Magazyn Poziom ({serial or meter_id})"
+        self._attr_name = "Magazyn Poziom"
         self._attr_unique_id = f"energa_{meter_id}_bank_level"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -1821,7 +1876,7 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         is_charge = direction == "charge"
         label = serial or meter_id
         self._attr_name = (
-            f"Bank Ładowanie ({label})" if is_charge else f"Bank Rozładowanie ({label})"
+            "Bank Ładowanie" if is_charge else "Bank Rozładowanie"
         )
         self._attr_unique_id = f"energa_{meter_id}_bank_{direction}"
         self._attr_has_entity_name = True
@@ -1953,11 +2008,12 @@ class EnergaFirstDataDateSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._meter_id = meter_id
         self._entry = entry
-        self._attr_name = f"Data pierwszego odczytu ({serial or meter_id})"
+        self._attr_name = "Data Pierwszego Odczytu"
         self._attr_unique_id = f"energa_{meter_id}_first_data_date"
         self._attr_has_entity_name = True
         self._attr_device_class = SensorDeviceClass.DATE
         self._attr_icon = "mdi:calendar-start"
+        self._attr_device_info = device_info
         self._attr_entity_category = None
 
     @property
@@ -2399,7 +2455,7 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
         self._api = api
-        self._attr_name = f"RCEm auto ({serial or meter_id})"
+        self._attr_name = "RCEm Auto"
         self._attr_unique_id = f"energa_{meter_id}_rcem_auto"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -2472,7 +2528,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._entry = entry
         self._has_zones = has_zones
-        self._attr_name = f"Prognoza Rachunku ({serial or meter_id})"
+        self._attr_name = "Prognoza Rachunku"
         self._attr_unique_id = f"energa_{meter_id}_bill_forecast"
         self._attr_has_entity_name = True
         self._attr_state_class = SensorStateClass.MEASUREMENT
@@ -2480,6 +2536,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         # NOTE: no monetary device_class (monetary+measurement rejected
         # by HA, v0.2.12 fix); forecast is a projection, not a meter total.
         self._attr_icon = "mdi:calendar-clock"
+        self._attr_device_info = device_info
 
     def _mtd_parts(self):
         """(import_kwh, export_kwh) month-to-date from coordinator cache."""
@@ -2785,7 +2842,7 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             has_zones=has_zones,
             serial=serial,
         )
-        self._attr_name = f"Dotychczasowy Rachunek ({serial or meter_id})"
+        self._attr_name = "Dotychczasowy Rachunek"
         self._attr_unique_id = f"energa_{meter_id}_bill_current"
         self._attr_icon = "mdi:cash-clock"
 
@@ -2899,8 +2956,9 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             serial=serial,
         )
         self._component_key = component_key
-        self._attr_name = f"{name} ({serial or meter_id})"
+        self._attr_name = name
         self._attr_unique_id = f"energa_{meter_id}_mtd_{component_key}"
+        self._attr_has_entity_name = True
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
         if device_class == SensorDeviceClass.MONETARY:
