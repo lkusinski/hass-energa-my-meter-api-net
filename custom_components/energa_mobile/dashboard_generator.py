@@ -51,16 +51,13 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     elif meter.get("custom_title"):
         title = str(meter["custom_title"]).strip()
     elif is_net_metering:
-        title = f"{tariff} z magazynem energii (Net-metering)"
+        title = f"{tariff} — Wirtualny Magazyn (Net-metering)"
     elif is_net_billing:
-        if tariff.startswith("G11"):
-            title = f"{tariff} z fotowoltaiką na nowych zasadach (Net-billing)"
-        else:
-            title = f"{tariff} z fotowoltaiką (Net-billing)"
+        title = f"{tariff} — Depozyt Prosumencki (Net-billing)"
     elif is_prosumer:
-        title = f"{tariff} z fotowoltaiką"
+        title = f"{tariff} — Fotowoltaika"
     else:
-        title = f"Taryfa {tariff}"
+        title = f"{tariff} — Profil Konsumencki"
 
     view_icon = (
         "mdi:battery-charging-high"
