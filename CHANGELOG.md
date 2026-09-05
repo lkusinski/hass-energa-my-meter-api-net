@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.1 (2026-09-06) — Eliminacja Błędnego Kodowania Tytułu Pulpitu Lovelace (Auto-Purge PrzeglÄ d)
+
+### 🎨 Standaryzacja Interfejsu i Poprawka Kodowania (i18n)
+- **Automatyczne oczyszczanie nadpisania domyślnego pulpitu Lovelace:**
+  - Wycofano i zablokowano rejestrację wpisów o identyfikatorze `lovelace` w `.storage/lovelace_dashboards`. Wbudowany w Home Assistant Core pulpit `/lovelace` zarządza własnym tytułem w oparciu o silnik lokalizacyjny (`title: None`), co wyświetla natywny polski tytuł **"Przegląd"** w pasku bocznym.
+  - Dodano automatyczne wykrywanie i usuwanie błędnych wpisów ze zniekształconym kodowaniem UTF-8 (`PrzeglÃ„Â…d` / `PrzeglÄ d`) podczas startu integracji i generowania dashboardów.
+
 ## v1.1.0 (2026-09-05) — Wdrożenie Etapu 3 Architektury Docelowej V1.0 (Ceny, Faktury, Rekonsyliacja Audytowa i Storage V2)
 
 ### 📊 Architektura Docelowa V1.0 (Implementation Brief V1.0)
