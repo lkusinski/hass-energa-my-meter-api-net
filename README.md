@@ -164,15 +164,15 @@ cards:
 
 | Nazwa encji | Klasa / Jednostka | Opis |
 |---|---|---|
-| `sensor.energa_*_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (`native_value: None` zapobiega konfliktom kompilatora HA). |
+| `sensor.energa_*_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (posiada stan liczbowy ostatniej sumy, pełna zgodność z walidacją `energy/validate`). |
 | `sensor.energa_*_panel_energia_*_cost` | `monetary` / `PLN` | Skumulowany koszt zużycia energii w danej strefie dla Panelu Energia. |
-| `sensor.bank_wirtualny_kwh_*` | `energy` / `kWh` | Dostępny zapas energii w magazynie wirtualnym (FIFO 12 miesięcy). |
-| `sensor.bank_wirtualny_pln_*` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie. |
-| `sensor.energa_*_magazyn_poziom_*` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii. |
-| `sensor.prognoza_rachunku_*` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec bieżącego miesiąca. |
+| `sensor.bank_wirtualny_kwh_*` | `energy` / `kWh` | Dostępny zapas energii w magazynie wirtualnym (FIFO 12 miesięcy, tylko Net-metering). |
+| `sensor.bank_wirtualny_pln_*` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (wartość nieujemna). |
+| `sensor.energa_*_magazyn_poziom_*` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (tylko Net-metering). |
+| `sensor.prognoza_rachunku_*` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec bieżącego miesiąca z wygładzaniem wczesnomiesięcznym. |
 | `sensor.energa_*_rcem_auto_*` | `PLN/kWh` | Oficjalna rynkowa cena RCEm z tabeli PSE. |
-| `sensor.energa_*_bank_ladowanie_*` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla sekcji Bateria). |
-| `sensor.energa_*_bank_rozladowanie_*` | `energy` / `kWh` | Skumulowana energia pobrana z magazynu (dla sekcji Bateria). |
+| `sensor.energa_*_bank_ladowanie_*` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla sekcji Bateria w Net-metering). |
+| `sensor.energa_*_bank_rozladowanie_*` | `energy` / `kWh` | Skumulowana energia pobrana z magazynu (dla sekcji Bateria w Net-metering). |
 | `sensor.energa_*_zuzycie_dzis` | `energy` / `kWh` | Dzisiejsze zużycie energii. |
 | `sensor.energa_*_produkcja_dzis` | `energy` / `kWh` | Dzisiejsza produkcja oddana do sieci. |
 | `sensor.energa_*_stan_licznika_*` | `energy` / `kWh` | Oficjalne stany liczydła (import / eksport / strefy L1 i L2). |
@@ -181,8 +181,11 @@ cards:
 
 ## ❓ Najczęstsze Pytania (FAQ)
 
-### Dlaczego encje `Panel Energia` mają stan `Nieznany` (unknown) na liście encji?
-Jest to **zamierzone i w 100% prawidłowe rozwiązanie architektoniczne**. W Home Assistant encje z wartością liczbową podlegają 5-minutowemu mechanizmowi `compile_statistics`. Ponieważ dane z serwerów Energi spływają z opóźnieniem 1–2 dni w paczkach godzinowych, nadanie encji wartości bieżącej powodowałoby powstawanie kolizji w bazie SQLite i gigantycznych skoków (spike'ów) na wykresach. Statystyki są importowane bezpośrednio do tabeli statystyk długoterminowych (`async_import_statistics`) i bezbłędnie wyświetlają się na wykresach Panelu Energia.
+### Dlaczego w Net-billingu nie ma encji wirtualnego magazynu ani baterii?
+W systemie Net-billing (instalacje od 1 kwietnia 2022 r.) prosument nie rozlicza się bezgotówkowo w kilowatogodzinach (kWh) w stosunku 0.8/0.7, lecz wartościowo w PLN. Wartość energii oddanej do sieci zasila depozyt prosumencki (`sensor.bank_wirtualny_pln_*`). Tworzenie sztucznej „baterii wirtualnej” w Panelu Energia fałszowałoby bilans energetyczny domu. Bateria wirtualna jest aktywna wyłącznie dla starego systemu (Net-metering).
+
+### Jak działa wygładzanie wczesnomiesięczne prognozy rachunku?
+W pierwszych dniach miesiąca kilka godzin poboru mogłoby prowadzić do nierealistycznie zawyżonej prognozy na koniec miesiąca. Algorytm `smoothed_blend_7d` przez pierwsze 7 dni miesiąca płynnie łączy bieżące zużycie MTD ze średnią dobową kroczącą z ostatnich 30 dni (lub 365 dni), zapewniając stabilne i wiarygodne szacunki od 1. dnia miesiąca.
 
 ### Kiedy aktualizowana jest cena RCEm?
 PSE publikuje oficjalną stawkę RCEm około 11. dnia każdego miesiąca za miesiąc poprzedni. Integracja pobiera ją automatycznie raz na dobę bezpośrednio z oficjalnej tabeli PSE i aktualizuje kalkulacje.

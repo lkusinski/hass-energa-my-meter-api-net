@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.2 (2026-09-05) — Stabilizacja Net-Billingu & Odporność Sieciowa
+
+### 🐛 Bug Fixes & Usprawnienia
+- **Stabilizacja depozytu prosumenckiego Net-billing (`sensor.bank_wirtualny_pln_*`):**
+  - Poprawiono `native_value` z `gross_deposit - deposit_applied` na `max(0.0, gross_deposit - deposit_applied)`. Depozyt w portalu Energa Obrót jest aktywem klienta i nie może przyjmować wartości ujemnych.
+  - Dodano precyzyjne atrybuty analityczne: `gross_deposit_pln`, `deposit_applied_pln`, `deposit_remaining_pln` oraz `net_financial_balance_pln`.
+- **Ścisłe wygaszenie wirtualnej baterii w Net-billingu:**
+  - Encje `EnergaProsumerBalanceSensor`, `EnergaBankKwhSensor`, `EnergaBankLevelSensor` oraz `EnergaBankFlowSensor` (`bank_ladowanie` / `bank_rozladowanie`) są ściśle ograniczone do instalacji ze starym Net-meteringiem (`prosumer_coefficient >= 0.7`).
+  - Na instalacjach Net-billingowych (`prosumer_coefficient < 0.7`) wirtualny akumulator kWh nie jest tworzony, a stare osierocone encje są automatycznie usuwane z rejestru.
+- **Wygładzanie wczesnomiesięczne prognozy faktury (`EnergaBillForecastSensor`):**
+  - Dodano algorytm `smoothed_blend_7d`: w pierwszych 7 dniach miesiąca (przy dostępnej historii >= 14 dni) prognoza łączy bieżącą stawkę dobową MTD ze średnią dobową kroczącą (30d/365d), eliminując nierealistyczne prognozy (np. 8000 PLN) na początku miesiąca.
+  - Zoptymalizowano `_annual_import_estimate` dla progu opłaty mocowej — ufa danym rejestratora przy pokryciu >= 30 dni.
+- **Odporność na chwilowe błędy sieciowe (transient network retry):**
+  - W `_api_get` dodano automatyczne ponowienie zapytania przy pierwszej próbie z 2-sekundowym backoffem w przypadku `aiohttp.ClientError`, `asyncio.TimeoutError`, `TimeoutError` lub `RuntimeError`.
+- **Sensory Panelu Energia ze stanem liczbowym (`EnergaStatisticsSensor`):**
+  - Zainicjalizowano `_last_sum` oraz zwracanie ostatniej zaimportowanej sumy w `native_value`. Eliminuje to stan `unknown` na liście encji i zapewnia 100% czystą walidację w `energy/validate` (zero błędów i zero ostrzeżeń).
+
 ## v1.0.1 (2026-09-04) — Szybki Start & Odporność Onboardingu
 
 ### 🐛 Bug Fixes
