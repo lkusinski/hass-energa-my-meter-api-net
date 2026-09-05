@@ -520,6 +520,113 @@ async def async_setup_entry(
                     serial=serial,
                 )
             )
+            # Dedicated breakdown sensors (v1.0.4)
+            sensors.append(
+                EnergaBillComponentSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    component_key="brutto",
+                    name="Koszt Brutto MTD",
+                    icon="mdi:receipt-text-outline",
+                    has_zones=has_zones,
+                    serial=serial,
+                )
+            )
+            sensors.append(
+                EnergaBillComponentSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    component_key="sale_total",
+                    name="Koszt Energii Czynnej MTD",
+                    icon="mdi:flash-outline",
+                    has_zones=has_zones,
+                    serial=serial,
+                )
+            )
+            sensors.append(
+                EnergaBillComponentSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    component_key="distr_total",
+                    name="Koszt Dystrybucji MTD",
+                    icon="mdi:transmission-tower",
+                    has_zones=has_zones,
+                    serial=serial,
+                )
+            )
+            if is_export_prosumer(meter):
+                coeff = float(
+                    entry.options.get(
+                        CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                    )
+                )
+                if coeff < 0.7:
+                    # Net-billing: deposit generated & applied in PLN
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="deposit",
+                            name="Depozyt Wygenerowany MTD",
+                            icon="mdi:solar-power-variant",
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="deposit_applied",
+                            name="Depozyt Wykorzystany MTD",
+                            icon="mdi:battery-minus",
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
+                else:
+                    # Net-metering: warehouse coverage in kWh
+                    sensors.append(
+                        EnergaBillComponentSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            component_key="cover_day",
+                            name="Pokrycie z Magazynu Dzień MTD",
+                            icon="mdi:weather-sunny",
+                            unit="kWh",
+                            device_class=SensorDeviceClass.ENERGY,
+                            has_zones=has_zones,
+                            serial=serial,
+                        )
+                    )
+                    if has_zones:
+                        sensors.append(
+                            EnergaBillComponentSensor(
+                                coordinator=coordinator,
+                                meter_id=meter_id,
+                                device_info=device_info,
+                                entry=entry,
+                                component_key="cover_night",
+                                name="Pokrycie z Magazynu Noc MTD",
+                                icon="mdi:weather-night",
+                                unit="kWh",
+                                device_class=SensorDeviceClass.ENERGY,
+                                has_zones=has_zones,
+                                serial=serial,
+                            )
+                        )
 
         # === PRICE SENSORS (F1: v4.14) ===
 
@@ -2682,14 +2789,13 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
         self._attr_unique_id = f"energa_{meter_id}_bill_current"
         self._attr_icon = "mdi:cash-clock"
 
-    @property
-    def native_value(self):
+    def _calculate_bill_mtd(self):
         from datetime import date as _date
         from datetime import datetime, timezone
 
         mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
         if not mtd:
-            return None
+            return None, {}
         imp_mtd, exp_mtd = self._mtd_parts()
         imp_d, imp_n, exp_tot = self._mtd_zone_flows()
         opts = self._entry.options
@@ -2724,9 +2830,9 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             bill_mtd = None
 
         if bill_mtd is None:
-            return None
+            return None, {}
 
-        self._attr_extra_state_attributes = {
+        attrs = {
             "period": f"{today.year}-{today.month:02d}",
             "day_of_month": today.day,
             "calculated_at": datetime.now(timezone.utc).isoformat(),
@@ -2752,5 +2858,80 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             "fee_table": tariff_family(self._meter_tariff()),
             "unit_of_measurement": "PLN",
         }
+        return bill_mtd, attrs
+
+    @property
+    def native_value(self):
+        bill_mtd, attrs = self._calculate_bill_mtd()
+        if bill_mtd is None:
+            return None
+        self._attr_extra_state_attributes = attrs
         return bill_mtd["do_zaplaty"]
+
+
+class EnergaBillComponentSensor(EnergaBillCurrentSensor):
+    """Dedicated breakdown sensor for MTD bill components (v1.0.4).
+
+    Exposes individual metrics (gross cost, energy cost, distribution cost,
+    deposit generated, deposit applied, warehouse coverage) as native entities.
+    """
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        component_key: str,
+        name: str,
+        icon: str,
+        unit: str = "PLN",
+        device_class: SensorDeviceClass | None = SensorDeviceClass.MONETARY,
+        has_zones: bool = False,
+        serial: str = "",
+    ) -> None:
+        super().__init__(
+            coordinator,
+            meter_id=meter_id,
+            device_info=device_info,
+            entry=entry,
+            has_zones=has_zones,
+            serial=serial,
+        )
+        self._component_key = component_key
+        self._attr_name = f"{name} ({serial or meter_id})"
+        self._attr_unique_id = f"energa_{meter_id}_mtd_{component_key}"
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        if device_class == SensorDeviceClass.MONETARY:
+            self._attr_device_class = device_class
+            self._attr_state_class = SensorStateClass.TOTAL
+        elif device_class == SensorDeviceClass.ENERGY:
+            self._attr_device_class = device_class
+            self._attr_state_class = SensorStateClass.TOTAL
+        else:
+            self._attr_device_class = None
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        bill_mtd, attrs = self._calculate_bill_mtd()
+        if bill_mtd is None:
+            return None
+        self._attr_extra_state_attributes = {
+            "period": attrs.get("period"),
+            "calculated_at": attrs.get("calculated_at"),
+            "system": attrs.get("system"),
+        }
+        key_map = {
+            "brutto": attrs.get("mtd_brutto_pln"),
+            "sale_total": attrs.get("mtd_sale_total_pln"),
+            "distr_total": attrs.get("mtd_distr_total_pln"),
+            "deposit": attrs.get("mtd_deposit_pln"),
+            "deposit_applied": attrs.get("mtd_deposit_applied_pln"),
+            "cover_day": attrs.get("cover_day_kwh"),
+            "cover_night": attrs.get("cover_night_kwh"),
+        }
+        return key_map.get(self._component_key)
+
 

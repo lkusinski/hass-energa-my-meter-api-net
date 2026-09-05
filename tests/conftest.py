@@ -14,6 +14,7 @@ _HA_MODULES = [
     "homeassistant.helpers.aiohttp_client",
     "homeassistant.helpers.selector",
     "homeassistant.helpers.entity_registry",
+    "homeassistant.helpers.device_registry",
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.entity",
     "homeassistant.helpers.entity_platform",
