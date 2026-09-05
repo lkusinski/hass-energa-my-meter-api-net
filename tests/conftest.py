@@ -76,7 +76,10 @@ class _CoordinatorEntity:
     def __init__(self, coordinator):
         self.coordinator = coordinator
 coord_mod.CoordinatorEntity = _CoordinatorEntity
-coord_mod.DataUpdateCoordinator = MagicMock()
+class _DataUpdateCoordinator:
+    def __init__(self, *args, **kwargs):
+        pass
+coord_mod.DataUpdateCoordinator = _DataUpdateCoordinator
 coord_mod.UpdateFailed = Exception
 
 restore_mod = sys.modules["homeassistant.helpers.restore_state"]
