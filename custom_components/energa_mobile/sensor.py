@@ -904,9 +904,13 @@ async def async_setup_entry(
         CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
     ):
         async def _async_delayed_settlement_calibration():
-            await asyncio.sleep(10)
-            _LOGGER.debug("Energa: running delayed settlement calibration after startup")
-            await coordinator.async_request_refresh()
+            for delay in (2, 8, 20):
+                await asyncio.sleep(delay)
+                _LOGGER.debug(
+                    "Energa: running delayed settlement calibration (%ds after startup)",
+                    delay,
+                )
+                await coordinator.async_refresh_settlement(notify=True)
 
         entry.async_create_background_task(
             hass,
@@ -1042,31 +1046,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
 
             # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===
-            try:
-                from datetime import datetime as _dt2
-                _opts = self.entry.options
-                if _opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
-                    _now = _dt2.now(TIMEZONE)
-                    if _opts.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D):
-                        _rolling = await self._async_compute_period_sums(
-                            _now - timedelta(days=365), _now
-                        )
-                        if _rolling:
-                            self._rolling_365 = _rolling
-                    _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                    _mtd = await self._async_compute_period_sums(_month_start, _now)
-                    if _mtd:
-                        self._mtd = _mtd
-                    try:
-                        _coeff_now = float(_opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-                    except (ValueError, TypeError):
-                        _coeff_now = DEFAULT_PROSUMER_COEFFICIENT
-                    if _coeff_now >= 0.7:
-                        _monthly = await self._async_compute_monthly_sums(_now)
-                        if _monthly:
-                            self._monthly = _monthly
-            except Exception as cal_err:
-                _LOGGER.debug("Settlement calibration skipped: %s", cal_err)
+            await self.async_refresh_settlement(notify=False)
 
             return active_meters
 
@@ -1265,14 +1245,109 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         "Could not pre-fetch stats for %s: %s", entity_id, err
                     )
 
+    async def async_refresh_settlement(self, notify: bool = True) -> None:
+        """Recompute settlement calibration (rolling 365d + MTD sums) locally without hitting API."""
+        try:
+            from datetime import datetime as _dt2
+
+            _opts = self.entry.options
+            if _opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+                _now = _dt2.now(TIMEZONE)
+                if _opts.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D):
+                    _rolling = await self._async_compute_period_sums(
+                        _now - timedelta(days=365), _now
+                    )
+                    if _rolling:
+                        self._rolling_365 = _rolling
+                _month_start = _now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                _mtd = await self._async_compute_period_sums(_month_start, _now)
+                if _mtd:
+                    self._mtd = _mtd
+                try:
+                    _coeff_now = float(
+                        _opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
+                    )
+                except (ValueError, TypeError):
+                    _coeff_now = DEFAULT_PROSUMER_COEFFICIENT
+                if _coeff_now >= 0.7:
+                    _monthly = await self._async_compute_monthly_sums(_now)
+                    if _monthly:
+                        self._monthly = _monthly
+                if notify:
+                    self.async_update_listeners()
+        except Exception as cal_err:
+            _LOGGER.debug("Settlement refresh skipped: %s", cal_err)
+
+    def _compute_period_sums_from_memory(self, start, end) -> dict:
+        """Fallback: compute period sums directly from coordinator._hourly_stats in memory."""
+        out: dict = {}
+        tz = TIMEZONE
+        start_dt = start if start.tzinfo is not None else start.replace(tzinfo=tz)
+        end_dt = end if end.tzinfo is not None else end.replace(tzinfo=tz)
+
+        for mid, series in getattr(self, "_hourly_stats", {}).items():
+            if not isinstance(series, dict):
+                continue
+            mid_str = str(mid)
+            meter_sums = {}
+            for suffix, points in series.items():
+                if not isinstance(points, list):
+                    continue
+                kwh_total = 0.0
+                has_any = False
+                for p in points:
+                    if not isinstance(p, dict):
+                        continue
+                    p_start = p.get("start")
+                    if not p_start:
+                        continue
+                    if isinstance(p_start, str):
+                        try:
+                            from datetime import datetime as _dt
+                            p_start = _dt.fromisoformat(p_start)
+                        except Exception:
+                            continue
+                    if p_start.tzinfo is None:
+                        p_start = p_start.replace(tzinfo=tz)
+                    if start_dt <= p_start <= end_dt:
+                        try:
+                            val = float(p.get("state", 0.0) or 0.0)
+                            if val >= 0:
+                                kwh_total += val
+                                has_any = True
+                        except (ValueError, TypeError):
+                            continue
+                if has_any:
+                    meter_sums[suffix] = round(kwh_total, 3)
+
+            if "import_1" in meter_sums or "import_2" in meter_sums:
+                if "import" not in meter_sums:
+                    meter_sums["import"] = round(
+                        meter_sums.get("import_1", 0.0) + meter_sums.get("import_2", 0.0), 3
+                    )
+            if "export_1" in meter_sums or "export_2" in meter_sums:
+                if "export" not in meter_sums:
+                    meter_sums["export"] = round(
+                        meter_sums.get("export_1", 0.0) + meter_sums.get("export_2", 0.0), 3
+                    )
+
+            if meter_sums:
+                try:
+                    span_days = max(1, (end_dt.date() - start_dt.date()).days)
+                except Exception:
+                    span_days = 1
+                meter_sums["_coverage_days"] = span_days
+                out[mid_str] = meter_sums
+        return out
+
     async def _async_compute_period_sums(self, start, end) -> dict:
         """Sum Panel Energia statistics per meter over [start, end] (v0.2.11).
 
         Returns {meter_id: {suffix: delta_kwh, "_coverage_days": n}} where
         delta is last.sum - first.sum of daily statistics in the window.
-        Returns {} when recorder data is unavailable (fully defensive —
-        settlement calibration must never break the coordinator update).
+        Falls back to in-memory hourly stats if recorder data is unavailable.
         """
+        out: dict = {}
         try:
             import functools
 
@@ -1281,10 +1356,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 statistics_during_period,
             )
             from homeassistant.helpers import entity_registry as er
-        except Exception as err:
-            _LOGGER.debug("Period sums unavailable (imports): %s", err)
-            return {}
-        try:
+
             registry = er.async_get(self.hass)
             wanted: dict = {}  # entity_id -> (meter_id, suffix)
             for mid in list(self._meter_totals.keys()):
@@ -1297,35 +1369,53 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         if entity.unique_id == uid and entity.platform == DOMAIN:
                             wanted[entity.entity_id] = (str(mid), suffix)
                             break
-            if not wanted:
-                return {}
-            stats = await get_instance(self.hass).async_add_executor_job(
-                functools.partial(
-                    statistics_during_period,
-                    self.hass, start, end, list(wanted.keys()), "day", None, {"sum"},
+            if wanted:
+                stats = await get_instance(self.hass).async_add_executor_job(
+                    functools.partial(
+                        statistics_during_period,
+                        self.hass, start, end, list(wanted.keys()), "day", None, {"sum"},
+                    )
                 )
-            )
-            out: dict = {}
-            for stat_id, points in (stats or {}).items():
-                if not points:
-                    continue
-                sums = [p.get("sum") for p in points if p.get("sum") is not None]
-                if len(sums) < 2:
-                    continue
-                mid, suffix = wanted[stat_id]
-                # v0.3.5: reset-aware delta — a statistics reimport that
-                # restarts a series at 0 inside the window must not nuke
-                # the whole month (seen live: August read -5509 kWh).
-                out.setdefault(str(mid), {})[suffix] = reset_aware_delta(sums)
-                span = self._stat_span_days(points)
-                prev = out[str(mid)].get("_coverage_days")
-                out[str(mid)]["_coverage_days"] = (
-                    span if prev is None else min(prev, span)
-                )
-            return out
+                for stat_id, points in (stats or {}).items():
+                    if not points:
+                        continue
+                    sums = [p.get("sum") for p in points if p.get("sum") is not None]
+                    if not sums:
+                        continue
+                    mid, suffix = wanted[stat_id]
+                    if len(sums) >= 2:
+                        delta = reset_aware_delta(sums)
+                    else:
+                        # Single daily point available (e.g. 1st day of month or fresh start)
+                        pt = points[0]
+                        delta = pt.get("change") or pt.get("state") or 0.0
+                        try:
+                            delta = max(0.0, float(delta))
+                        except (ValueError, TypeError):
+                            delta = 0.0
+                    out.setdefault(str(mid), {})[suffix] = delta
+                    span = self._stat_span_days(points)
+                    prev = out[str(mid)].get("_coverage_days")
+                    out[str(mid)]["_coverage_days"] = (
+                        span if prev is None else min(prev, span)
+                    )
         except Exception as err:
-            _LOGGER.debug("Period sums failed: %s", err)
-            return {}
+            _LOGGER.debug("Period sums from recorder failed: %s", err)
+
+        # Fallback to in-memory hourly stats if recorder had no data for any meter
+        try:
+            mem_sums = self._compute_period_sums_from_memory(start, end)
+            for mid_str, series in mem_sums.items():
+                if mid_str not in out or not out[mid_str]:
+                    out[mid_str] = series
+                else:
+                    for suffix, val in series.items():
+                        if suffix not in out[mid_str]:
+                            out[mid_str][suffix] = val
+        except Exception as mem_err:
+            _LOGGER.debug("In-memory period sums fallback failed: %s", mem_err)
+
+        return out
 
     async def _async_compute_monthly_sums(self, end, months: int = 14) -> dict:
         """Per-month Panel Energia sums per meter for the FIFO bank (v0.2.20).

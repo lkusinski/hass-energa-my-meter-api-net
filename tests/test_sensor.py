@@ -388,3 +388,79 @@ class TestBillComponentSensor:
         deduction = -round(abs(float(val)), 2) if float(val) > 0 else 0.0
         assert deduction == -20.73
 
+
+class TestPeriodSumsFallback:
+    """Tests for in-memory period sums calculation and fallback."""
+
+    def test_compute_period_sums_from_memory(self):
+        """Verify that coordinator calculates period sums correctly from hourly stats."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from custom_components.energa_mobile.sensor import EnergaCoordinator
+
+        tz = ZoneInfo("Europe/Warsaw")
+        start = datetime(2026, 9, 1, 0, 0, tzinfo=tz)
+        end = datetime(2026, 9, 5, 23, 59, tzinfo=tz)
+
+        # Mock coordinator
+        class MockCoordinator:
+            _hourly_stats = {
+                "12345": {
+                    "import_1": [
+                        {"start": datetime(2026, 9, 2, 10, 0, tzinfo=tz), "state": 1.25},
+                        {"start": datetime(2026, 9, 3, 14, 0, tzinfo=tz), "state": 2.75},
+                        # Point outside window (August)
+                        {"start": datetime(2026, 8, 31, 23, 0, tzinfo=tz), "state": 10.0},
+                    ],
+                    "import_2": [
+                        {"start": datetime(2026, 9, 2, 23, 0, tzinfo=tz), "state": 0.50},
+                    ],
+                    "export_1": [
+                        {"start": datetime(2026, 9, 2, 12, 0, tzinfo=tz), "state": 3.00},
+                    ],
+                }
+            }
+
+        out = EnergaCoordinator._compute_period_sums_from_memory(
+            MockCoordinator(), start, end
+        )
+        assert "12345" in out
+        sums = out["12345"]
+        assert sums["import_1"] == 4.0
+        assert sums["import_2"] == 0.5
+        assert sums["import"] == 4.5  # sum of import_1 + import_2
+        assert sums["export_1"] == 3.0
+        assert sums["export"] == 3.0
+        assert sums["_coverage_days"] == 4
+
+    def test_compute_period_sums_iso_string_and_single_zone(self):
+        """Verify handling of ISO timestamp strings and single-zone meter."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from custom_components.energa_mobile.sensor import EnergaCoordinator
+
+        tz = ZoneInfo("Europe/Warsaw")
+        start = datetime(2026, 9, 1, 0, 0, tzinfo=tz)
+        end = datetime(2026, 9, 5, 23, 59, tzinfo=tz)
+
+        class MockSingleZoneCoordinator:
+            _hourly_stats = {
+                "99999": {
+                    "import": [
+                        {"start": "2026-09-02T10:00:00+02:00", "state": 5.5},
+                    ],
+                    "export": [
+                        {"start": "2026-09-02T12:00:00+02:00", "state": 8.0},
+                    ],
+                }
+            }
+
+        out = EnergaCoordinator._compute_period_sums_from_memory(
+            MockSingleZoneCoordinator(), start, end
+        )
+        assert "99999" in out
+        assert out["99999"]["import"] == 5.5
+        assert out["99999"]["export"] == 8.0
+
+
+

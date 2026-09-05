@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.9 (2026-09-05) — Natychmiastowa Dostępność Rachunku MTD po Nowej Instalacji (Fresh Start Fix)
+
+### ⚡ Eliminacja Stanu `unavailable` na Sensorach Rachunku MTD i Prognozy
+- **Fallback na Pamięć Podręczną Koordynatora (`_compute_period_sums_from_memory`):**
+  - Przy pierwszej instalacji lub restarcie, zanim silnik HA Recorder zarejestruje encje i zaimportuje statystyki do SQLite, koordynator natychmiast wylicza sumy MTD z pobranych z API danych godzinowych (`_hourly_stats`).
+  - Kafelki `Dotychczasowy Rachunek`, `Prognoza Rachunku` oraz sensory składowe MTD są aktywne w kilka sekund po instalacji, bez oczekiwania na kolejny godzinny cykl koordynatora.
+- **Dedykowane Lokalne Odświeżanie Rozliczenia (`async_refresh_settlement`):**
+  - Koordynator przelicza MTD, 365-dniową historię oraz sumy miesięczne lokalnie z bazy danych HA i powiadamia encje **bez** ponownego odpytywania zewnętrznego API Energi (ochrona przed rate-limit i opóźnieniami sieciowymi).
+  - Wdrożono wielostopniową kalibrację startową w interwałach (2s, 8s, 20s), gwarantującą płynne przełączenie na pełne statystyki bazy SQLite zaraz po zakończeniu importu.
+- **Obsługa Pojedynczego Punktu Statystyki:**
+  - W `_async_compute_period_sums`, gdy w oknie zapytania dostępny jest 1 punkt statystyki (np. 1. dzień miesiąca lub świeża instalacja), delta wyliczana jest bezpośrednio z wartości punktu (`change`/`state`), zamiast pomijania licznika.
+
 ## v1.0.8 (2026-09-05) — Całkowita Eliminacja Świec (Spikes) na Panelu Energia & Ochrona Bazy Statystyk
 
 ### 🛡️ Eliminacja Świec i Zapaści Liczników w Panelu Energia (Energy Dashboard)
