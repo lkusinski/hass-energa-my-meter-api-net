@@ -50,3 +50,66 @@ generate_dashboard:
       selector:
         text:
 
+reconcile_invoice:
+  name: Reconcile invoice
+  description: Performs per-line audit reconciliation comparing seller invoice against canonical calculation.
+  fields:
+    invoice_number:
+      name: Invoice Number
+      description: Unique identifier of the seller invoice (e.g. 1200222768/FES/00017).
+      required: true
+      selector:
+        text:
+    period_start:
+      name: Period start
+      description: Billing period start date (YYYY-MM-DD).
+      required: true
+      selector:
+        text:
+    period_end:
+      name: Period end
+      description: Billing period end date (YYYY-MM-DD).
+      required: true
+      selector:
+        text:
+    tariff:
+      name: Tariff code
+      description: Tariff plan (G11 or G12w).
+      required: false
+      default: "G11"
+      selector:
+        text:
+    consumption_kwh:
+      name: Consumption (kWh)
+      description: Total billed kWh for G11.
+      required: false
+      default: 0.0
+      selector:
+        number:
+          min: 0
+          step: 0.01
+    months:
+      name: Number of months
+      description: Billing duration in months (e.g. 2.0).
+      required: false
+      default: 1.0
+      selector:
+        number:
+          min: 0.1
+          step: 0.1
+    invoiced_gross:
+      name: Invoiced gross (PLN)
+      description: Total gross amount printed on the invoice header.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.01
+    ppe_id:
+      name: PPE ID
+      description: Optional PPE point code.
+      required: false
+      selector:
+        text:
+
+

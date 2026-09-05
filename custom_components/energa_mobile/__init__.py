@@ -10,6 +10,7 @@ import asyncio
 import logging
 import secrets
 from datetime import datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -259,6 +260,96 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 vol.Optional("title", default=DEFAULT_TITLE): str,
                 vol.Optional("icon", default=DEFAULT_ICON): str,
                 vol.Optional("meter_id"): str,
+            }
+        ),
+    )
+
+    async def reconcile_invoice_service(call: ServiceCall) -> None:
+        """Service to reconcile seller invoice lines and audit variances."""
+        inv_number = str(call.data["invoice_number"])
+        period_start_s = str(call.data["period_start"])
+        period_end_s = str(call.data["period_end"])
+        tariff_code = str(call.data.get("tariff", "G11")).upper()
+        consumption_kwh = Decimal(str(call.data.get("consumption_kwh", "0.0")))
+        months = Decimal(str(call.data.get("months", "1.0")))
+        invoiced_gross = (
+            Decimal(str(call.data["invoiced_gross"]))
+            if "invoiced_gross" in call.data
+            else None
+        )
+        invoiced_lines = call.data.get("invoiced_lines") or []
+        ppe_id = str(call.data.get("ppe_id", ""))
+
+        d_start = datetime.strptime(period_start_s, "%Y-%m-%d").date()
+        d_end = datetime.strptime(period_end_s, "%Y-%m-%d").date()
+
+        from .core.tariffs.effective_tariffs import (
+            calculate_g11_invoice_lines,
+            calculate_g12w_invoice_lines,
+            reconcile_invoice,
+        )
+
+        if "12" in tariff_code:
+            day_kwh = Decimal(str(call.data.get("day_kwh", consumption_kwh / 2)))
+            night_kwh = Decimal(str(call.data.get("night_kwh", consumption_kwh / 2)))
+            comp_lines = calculate_g12w_invoice_lines(
+                day_kwh, night_kwh, months=months, effective_date=d_start
+            )
+        else:
+            comp_lines = calculate_g11_invoice_lines(
+                consumption_kwh, months=months, effective_date=d_start
+            )
+
+        report = reconcile_invoice(
+            invoice_number=inv_number,
+            period_start=d_start,
+            period_end=d_end,
+            computed_lines=comp_lines,
+            invoiced_lines=invoiced_lines,
+            header_invoiced_gross=invoiced_gross,
+        )
+
+        # Save to canonical storage
+        storage_inst = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("storage")
+        if storage_inst:
+            await hass.async_add_executor_job(
+                storage_inst.save_invoice_reconciliation, report, ppe_id
+            )
+
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "notification_id": f"energa_recon_{inv_number.replace('/', '_')}",
+                "title": f"Rekonsyliacja faktury {inv_number}: {report.status}",
+                "message": (
+                    f"**Faktura:** {inv_number}\n"
+                    f"**Status:** {report.status}\n"
+                    f"**Wyliczona kwota:** {report.computed_gross} PLN\n"
+                    f"**Kwota z faktury:** {report.invoiced_gross} PLN\n"
+                    f"**Różnica:** {report.variance_gross} PLN ({report.variance_percent}%)\n\n"
+                    f"Szczegóły zapisane w kanonicznym storage audytowym."
+                ),
+            },
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "reconcile_invoice",
+        reconcile_invoice_service,
+        schema=vol.Schema(
+            {
+                vol.Required("invoice_number"): str,
+                vol.Required("period_start"): str,
+                vol.Required("period_end"): str,
+                vol.Optional("tariff", default="G11"): str,
+                vol.Optional("consumption_kwh", default=0.0): vol.Coerce(float),
+                vol.Optional("day_kwh", default=0.0): vol.Coerce(float),
+                vol.Optional("night_kwh", default=0.0): vol.Coerce(float),
+                vol.Optional("months", default=1.0): vol.Coerce(float),
+                vol.Optional("invoiced_gross"): vol.Coerce(float),
+                vol.Optional("invoiced_lines", default=[]): list,
+                vol.Optional("ppe_id", default=""): str,
             }
         ),
     )

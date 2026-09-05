@@ -52,6 +52,12 @@ def run_fifo_net_billing(
     as_of = today or date.today()
     summary = SettlementSummary(unit="PLN")
 
+    for lot in deposit_lots:
+        if lot.unit != "PLN":
+            raise ValueError(
+                f"Ledger invariant violation: Net-billing deposit lots must be in 'PLN', got '{lot.unit}' in lot {lot.lot_id}"
+            )
+
     # Sort deposit lots by assigned_at ascending (FIFO order)
     sorted_lots = sorted(deposit_lots, key=lambda l: (l.assigned_at, l.lot_id))
     allocations: list[LotAllocation] = []

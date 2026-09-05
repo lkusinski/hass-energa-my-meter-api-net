@@ -28,6 +28,12 @@ class SettlementLot:
     rule_version: str = "v1"
     provenance: str = ""
 
+    def __post_init__(self) -> None:
+        if self.unit not in ("kWh", "PLN"):
+            raise ValueError(
+                f"Ledger invariant violation: Invalid unit '{self.unit}', expected 'kWh' or 'PLN'"
+            )
+
     @property
     def is_exhausted(self) -> bool:
         return self.remaining_amount <= Decimal("0.0")
@@ -61,3 +67,10 @@ class SettlementSummary:
     total_uncovered: Decimal = Decimal("0.0")
     active_lots: list[SettlementLot] = field(default_factory=list)
     allocations: list[LotAllocation] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.unit not in ("kWh", "PLN"):
+            raise ValueError(
+                f"Ledger invariant violation: Invalid summary unit '{self.unit}', expected 'kWh' or 'PLN'"
+            )
+

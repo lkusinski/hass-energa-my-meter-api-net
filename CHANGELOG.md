@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.0 (2026-09-05) — Wdrożenie Etapu 3 Architektury Docelowej V1.0 (Ceny, Faktury, Rekonsyliacja Audytowa i Storage V2)
+
+### 📊 Architektura Docelowa V1.0 (Implementation Brief V1.0)
+- **Rozszerzenie Kanonicznego Storage SQLite WAL do Schema V2:**
+  - Dodano tabelę `market_price` z wersjonowaniem rewizji cen PSE (RCEm / RCE), jawną datą publikacji, rozdzielczością i źródłem (*provenance*).
+  - Dodano tabele `settlement_lot` oraz `settlement_allocation` dla trwałego śledzenia lotów FIFO (`kWh` w net-meteringu, `PLN` w net-billingu) oraz alokacji z terminami ważności (*expires_at*).
+  - Dodano tabele `invoice_reconciliation` oraz `invoice_reconciliation_line` do przechowywania audytowalnych raportów rekonsyliacji faktur wraz ze stanem zatwierdzenia użytkownika (*approval state*).
+  - Automatyczna migracja `schema_version` z V1 do V2 z zachowaniem wszystkich dotychczasowych odczytów i checkpointów.
+- **Audytowalna Rekonsyliacja Faktur i Golden Test:**
+  - Wdrożono silnik rekonsyliacji per-line porównujący pozycje taryfowe z fakturami sprzedawcy (energia czynna, opłata handlowa, składnik zmienny, opłata jakościowa, OZE, kogeneracyjna, opłaty stałe, opłata mocowa, VAT 23% i depozyt).
+  - Dodano test *golden fixture* w oparciu o fakturę `FAK_1200222768_FES_00017.pdf` (Warzywna 13, G11, 2159 kWh, 2 794,24 zł brutto) wykazujący zgodność co do grosza (`MATCH`, 0,00 zł wariancji).
+- **Niezmienniki Księgi (Ledger Units Invariant):**
+  - Zagwarantowano ścisłą izolację księgi fizycznej energii (`kWh`) i księgi monetarnej (`PLN`) — zabezpieczono silniki FIFO i modele przed mieszaniem niespójnych jednostek.
+- **Usługa Home Assistant `energa_mobile.reconcile_invoice`:**
+  - Zarejestrowano usługę w HA umożliwiającą automatyczne audytowanie faktur z powiadomieniem `persistent_notification` i trwałym zapisem w bazie integracji.
+
 ## v1.0.9 (2026-09-05) — Natychmiastowa Dostępność Rachunku MTD po Nowej Instalacji (Fresh Start Fix)
 
 ### ⚡ Eliminacja Stanu `unavailable` na Sensorach Rachunku MTD i Prognozy

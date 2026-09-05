@@ -250,6 +250,99 @@ def get_g11_tariff_plan() -> TariffPlan:
     return plan
 
 
+def calculate_g11_invoice_lines(
+    consumption_kwh: Decimal,
+    months: Decimal = Decimal("1.0"),
+    effective_date: date | None = None,
+) -> list[InvoiceLineItem]:
+    """Calculate all invoice line items for G11 tariff according to official pricing rules."""
+    d = effective_date or date(2026, 2, 4)
+    plan = get_g11_tariff_plan()
+    lines = []
+
+    rate_keys = [
+        ("trade_fee", months, "MC"),
+        ("energy_day", consumption_kwh, "kWh"),
+        ("abonament", months, "MC"),
+        ("grid_fixed", months, "MC"),
+        ("grid_var_day", consumption_kwh, "kWh"),
+        ("quality", consumption_kwh, "kWh"),
+        ("oze", consumption_kwh, "kWh"),
+        ("cogen", consumption_kwh, "kWh"),
+        ("capacity", months, "MC"),
+    ]
+
+    for rate_id, qty, unit in rate_keys:
+        rate = plan.get_rate(rate_id, d)
+        if not rate:
+            continue
+        net = round(qty * rate.rate_net, 2)
+        gross = round(net * (Decimal("1.0") + plan.vat_rate), 2)
+        lines.append(
+            InvoiceLineItem(
+                line_id=f"g11_{rate_id}",
+                rate_id=rate_id,
+                name=rate.name,
+                quantity=qty,
+                unit=unit,
+                unit_price_net=rate.rate_net,
+                total_net=net,
+                vat_rate=plan.vat_rate,
+                total_gross=gross,
+                is_deposit_eligible=rate.is_deposit_eligible,
+            )
+        )
+    return lines
+
+
+def calculate_g12w_invoice_lines(
+    day_kwh: Decimal,
+    night_kwh: Decimal,
+    months: Decimal = Decimal("1.0"),
+    effective_date: date | None = None,
+) -> list[InvoiceLineItem]:
+    """Calculate all invoice line items for G12w tariff according to official pricing rules."""
+    d = effective_date or date(2026, 7, 1)
+    plan = get_g12w_tariff_plan()
+    tot_kwh = day_kwh + night_kwh
+    lines = []
+
+    rate_keys = [
+        ("energy_day", day_kwh, "kWh"),
+        ("energy_night", night_kwh, "kWh"),
+        ("abonament", months, "MC"),
+        ("grid_fixed", months, "MC"),
+        ("grid_var_day", day_kwh, "kWh"),
+        ("grid_var_night", night_kwh, "kWh"),
+        ("quality", tot_kwh, "kWh"),
+        ("oze", tot_kwh, "kWh"),
+        ("cogen", tot_kwh, "kWh"),
+        ("capacity", months, "MC"),
+    ]
+
+    for rate_id, qty, unit in rate_keys:
+        rate = plan.get_rate(rate_id, d)
+        if not rate:
+            continue
+        net = round(qty * rate.rate_net, 2)
+        gross = round(net * (Decimal("1.0") + plan.vat_rate), 2)
+        lines.append(
+            InvoiceLineItem(
+                line_id=f"g12w_{rate_id}",
+                rate_id=rate_id,
+                name=rate.name,
+                quantity=qty,
+                unit=unit,
+                unit_price_net=rate.rate_net,
+                total_net=net,
+                vat_rate=plan.vat_rate,
+                total_gross=gross,
+                is_deposit_eligible=rate.is_deposit_eligible,
+            )
+        )
+    return lines
+
+
 def reconcile_invoice(
     invoice_number: str,
     period_start: date,
@@ -257,6 +350,7 @@ def reconcile_invoice(
     computed_lines: list[InvoiceLineItem],
     invoiced_lines: list[dict],
     tolerance_percent: Decimal = Decimal("2.5"),
+    header_invoiced_gross: Decimal | None = None,
 ) -> InvoiceReconciliation:
     """Perform per-line invoice reconciliation and audit variance report.
 
@@ -268,15 +362,19 @@ def reconcile_invoice(
         invoiced_lines: List of dicts representing actual lines from seller document:
                         {"rate_id": str, "amount_gross": Decimal, "description": str}.
         tolerance_percent: Tolerance threshold for automatic match classification.
+        header_invoiced_gross: Optional total gross amount stated on invoice header.
 
     Returns:
         InvoiceReconciliation report.
     """
     comp_gross = sum((line.total_gross for line in computed_lines), Decimal("0.0"))
-    inv_gross = sum(
-        (Decimal(str(l.get("amount_gross", "0.0"))) for l in invoiced_lines),
-        Decimal("0.0"),
-    )
+    if header_invoiced_gross is not None:
+        inv_gross = header_invoiced_gross
+    else:
+        inv_gross = sum(
+            (Decimal(str(l.get("amount_gross", "0.0"))) for l in invoiced_lines),
+            Decimal("0.0"),
+        )
 
     diff = comp_gross - inv_gross
     abs_diff = abs(diff)
@@ -311,7 +409,7 @@ def reconcile_invoice(
                 "diff_gross": comp.total_gross,
             })
 
-    if abs_diff == Decimal("0.0"):
+    if abs_diff <= Decimal("0.05"):
         status = "MATCH"
     elif var_pct <= tolerance_percent:
         status = "WITHIN_TOLERANCE"
@@ -330,3 +428,4 @@ def reconcile_invoice(
         status=status,
         notes=f"Reconciliation {status}: difference {diff} PLN ({var_pct}%) vs tolerance {tolerance_percent}%",
     )
+

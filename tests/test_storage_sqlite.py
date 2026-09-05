@@ -232,3 +232,174 @@ def test_job_checkpoint(storage: CanonicalStorage):
     assert cp_done["cursor"] == "2026-09-04"
     assert cp_done["status"] == "completed"
     assert cp_done["last_success_utc"] is not None
+
+
+def test_schema_v1_to_v2_migration():
+    """Verify that an existing Schema V1 database safely migrates to Schema V2 without data loss."""
+    import sqlite3
+    from custom_components.energa_mobile.storage.sqlite.database import SCHEMA_V1_SQL
+
+    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+        # Create explicit V1 database
+        conn = sqlite3.connect(tmp.name)
+        conn.executescript(SCHEMA_V1_SQL)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-09-01T00:00:00');"
+        )
+        conn.execute(
+            "INSERT INTO ppe (ppe_id, settlement_type, prosumer_coefficient, timezone) "
+            "VALUES ('PL_MIGRATE_TEST', 'net_billing_rcem', '0.0', 'Europe/Warsaw');"
+        )
+        conn.commit()
+        conn.close()
+
+        # Open with CanonicalStorage (triggers V1 -> V2 migration)
+        storage = CanonicalStorage(tmp.name)
+
+        ppe = storage.get_ppe("PL_MIGRATE_TEST")
+        assert ppe is not None
+        assert ppe.ppe_id == "PL_MIGRATE_TEST"
+
+        # Verify Schema version is now 2
+        with storage._connection() as c:
+            cur = c.execute("SELECT MAX(version) FROM schema_version;")
+            assert cur.fetchone()[0] == 2
+
+            # Verify V2 tables exist
+            cur2 = c.execute("SELECT count(*) FROM market_price;")
+            assert cur2.fetchone()[0] == 0
+
+
+def test_market_prices_crud_and_effective_lookup(storage: CanonicalStorage):
+    from custom_components.energa_mobile.adapters.pse.models import MarketPriceRecord
+
+    # Revision 1 published on 11.08.2026
+    p_v1 = MarketPriceRecord(
+        price_type="RCEM",
+        applicable_year=2026,
+        applicable_month=7,
+        publication_date=date(2026, 8, 11),
+        revision=1,
+        price_mwh=Decimal("262.88"),
+        price_kwh=Decimal("0.26288"),
+    )
+    # Late correction revision 2 published on 25.08.2026
+    p_v2 = MarketPriceRecord(
+        price_type="RCEM",
+        applicable_year=2026,
+        applicable_month=7,
+        publication_date=date(2026, 8, 25),
+        revision=2,
+        price_mwh=Decimal("265.10"),
+        price_kwh=Decimal("0.26510"),
+        is_correction=True,
+    )
+
+    storage.save_market_prices([p_v1, p_v2])
+
+    # Fetch all prices for 2026-07
+    all_prices = storage.get_market_prices("RCEM", year=2026, month=7)
+    assert len(all_prices) == 2
+
+    # As of 15.08.2026 (before correction) -> should return v1
+    eff_early = storage.get_effective_market_price("RCEM", 2026, 7, as_of=date(2026, 8, 15))
+    assert eff_early is not None
+    assert eff_early.revision == 1
+    assert eff_early.price_kwh == Decimal("0.26288")
+
+    # As of 30.08.2026 (after correction) -> should return v2
+    eff_late = storage.get_effective_market_price("RCEM", 2026, 7, as_of=date(2026, 8, 30))
+    assert eff_late is not None
+    assert eff_late.revision == 2
+    assert eff_late.price_kwh == Decimal("0.26510")
+
+
+def test_settlement_lots_and_allocations(storage: CanonicalStorage):
+    from custom_components.energa_mobile.core.settlement.models import LotAllocation, SettlementLot
+
+    ppe_id = "PL_SETTLEMENT_TEST"
+    storage.upsert_ppe(PPE(ppe_id=ppe_id, settlement_type=SettlementType.NET_BILLING_RCEM))
+
+    lot = SettlementLot(
+        lot_id="lot_pln_2026_06",
+        ppe_id=ppe_id,
+        unit="PLN",
+        zone="total",
+        original_amount=Decimal("150.00"),
+        remaining_amount=Decimal("150.00"),
+        created_at_utc=datetime(2026, 7, 1, 0, 0),
+        assigned_at=date(2026, 7, 1),
+        expires_at=date(2027, 7, 31),
+    )
+    storage.save_settlement_lots([lot])
+
+    lots = storage.get_settlement_lots(ppe_id, unit="PLN", active_only=True)
+    assert len(lots) == 1
+    assert lots[0].remaining_amount == Decimal("150.00")
+
+    # Record an allocation consuming 50 PLN
+    alloc = LotAllocation(
+        allocation_id="alloc_1",
+        lot_id="lot_pln_2026_06",
+        consumption_target_id="inv_2026_07_energy",
+        allocated_amount=Decimal("50.00"),
+        allocated_at_utc=datetime(2026, 8, 1, 10, 0),
+    )
+    storage.save_lot_allocations([alloc])
+
+    # Update lot remaining amount
+    lot.remaining_amount = Decimal("100.00")
+    storage.save_settlement_lots([lot])
+
+    lots_updated = storage.get_settlement_lots(ppe_id, unit="PLN")
+    assert lots_updated[0].remaining_amount == Decimal("100.00")
+
+    allocs = storage.get_lot_allocations("lot_pln_2026_06")
+    assert len(allocs) == 1
+    assert allocs[0].allocated_amount == Decimal("50.00")
+
+
+def test_invoice_reconciliation_storage_and_approval(storage: CanonicalStorage):
+    from custom_components.energa_mobile.core.tariffs.models import InvoiceReconciliation
+
+    recon = InvoiceReconciliation(
+        invoice_number="1200222768/FES/00017",
+        period_start=date(2026, 2, 4),
+        period_end=date(2026, 4, 5),
+        computed_gross=Decimal("2794.24"),
+        invoiced_gross=Decimal("2794.24"),
+        variance_gross=Decimal("0.00"),
+        variance_percent=Decimal("0.00"),
+        line_variances=[
+            {
+                "rate_id": "energy_day",
+                "name": "Energia czynna całodobowa",
+                "computed_gross": Decimal("1623.61"),
+                "invoiced_gross": Decimal("1623.61"),
+                "diff_gross": Decimal("0.00"),
+            },
+            {
+                "rate_id": "grid_var_day",
+                "name": "Składnik zmienny",
+                "computed_gross": Decimal("925.46"),
+                "invoiced_gross": Decimal("925.46"),
+                "diff_gross": Decimal("0.00"),
+            },
+        ],
+        status="MATCH",
+        notes="Faktura sprawdzona",
+    )
+
+    storage.save_invoice_reconciliation(recon, ppe_id="590243891043576725")
+
+    saved = storage.get_invoice_reconciliation("1200222768/FES/00017")
+    assert saved is not None
+    assert saved.invoice_number == "1200222768/FES/00017"
+    assert saved.status == "MATCH"
+    assert len(saved.line_variances) == 2
+    assert saved.variance_gross == Decimal("0.00")
+
+    # Test user approval workflow
+    ok = storage.set_reconciliation_approval("1200222768/FES/00017", approved=True, approved_by="admin")
+    assert ok is True
+
