@@ -58,7 +58,7 @@ class TestFetchAllMeters:
 
         meters = await api._fetch_all_meters()
 
-        assert meters[0]["ppe"] == "590243835014852258"
+        assert meters[0]["ppe"] == "590243800000000001"
 
     @pytest.mark.asyncio
     async def test_empty_response_raises(self, api, mock_session):
