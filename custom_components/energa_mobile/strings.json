@@ -110,6 +110,35 @@
           "description": "How many days to fetch (default 30)."
         }
       }
+    },
+    "generate_dashboard": {
+      "name": "Generate dashboard",
+      "description": "Generates or refreshes a dedicated Lovelace dashboard for Energa meters.",
+      "fields": {
+        "url_path": {
+          "name": "URL Path",
+          "description": "URL slug for the dashboard (e.g. energa-rachunek)."
+        },
+        "title": {
+          "name": "Title",
+          "description": "Title of the dashboard in sidebar."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Icon in sidebar (e.g. mdi:currency-pln)."
+        },
+        "meter_id": {
+          "name": "Meter ID",
+          "description": "Optional meter serial/ID to generate only for a single meter."
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "create_dashboard": {
+        "name": "Utwórz Pulpit Rozliczeń"
+      }
     }
   }
 }

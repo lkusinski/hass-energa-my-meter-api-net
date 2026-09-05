@@ -20,9 +20,13 @@ _HA_MODULES = [
     "homeassistant.helpers.entity_platform",
     "homeassistant.helpers.frame",
     "homeassistant.helpers.restore_state",
+    "homeassistant.helpers.storage",
     "homeassistant.loader",
     "homeassistant.components",
     "homeassistant.components.sensor",
+    "homeassistant.components.button",
+    "homeassistant.components.frontend",
+    "homeassistant.components.lovelace",
     "homeassistant.components.recorder",
     "homeassistant.components.recorder.models",
     "homeassistant.components.recorder.models.statistics",
@@ -54,6 +58,18 @@ sensor_mod = sys.modules["homeassistant.components.sensor"]
 sensor_mod.SensorDeviceClass = MagicMock()
 sensor_mod.SensorStateClass = MagicMock()
 sensor_mod.SensorEntity = type("SensorEntity", (), {})
+
+# Provide ButtonEntity as mock class
+button_mod = sys.modules["homeassistant.components.button"]
+button_mod.ButtonEntity = type("ButtonEntity", (), {})
+
+comp_mod = sys.modules["homeassistant.components"]
+comp_mod.sensor = sensor_mod
+comp_mod.button = button_mod
+comp_mod.frontend = sys.modules["homeassistant.components.frontend"]
+comp_mod.lovelace = sys.modules["homeassistant.components.lovelace"]
+comp_mod.recorder = sys.modules["homeassistant.components.recorder"]
+comp_mod.persistent_notification = sys.modules["homeassistant.components.persistent_notification"]
 
 coord_mod = sys.modules["homeassistant.helpers.update_coordinator"]
 class _CoordinatorEntity:

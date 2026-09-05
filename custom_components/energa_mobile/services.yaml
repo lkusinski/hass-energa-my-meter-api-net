@@ -17,3 +17,36 @@ fetch_history:
         number:
           min: 1
           max: 365
+
+generate_dashboard:
+  name: Generate dashboard
+  description: Generates or refreshes a dedicated Lovelace dashboard for Energa meters.
+  fields:
+    url_path:
+      name: URL Path
+      description: URL slug for the dashboard (e.g. energa-rachunek).
+      required: false
+      default: "energa-rachunek"
+      selector:
+        text:
+    title:
+      name: Title
+      description: Title of the dashboard in sidebar.
+      required: false
+      default: "Energa Rozliczenia"
+      selector:
+        text:
+    icon:
+      name: Icon
+      description: Icon in sidebar (e.g. mdi:currency-pln).
+      required: false
+      default: "mdi:currency-pln"
+      selector:
+        icon:
+    meter_id:
+      name: Meter ID / Serial
+      description: Optional serial or ID to generate only for a single meter.
+      required: false
+      selector:
+        text:
+
