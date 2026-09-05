@@ -11,7 +11,7 @@ Enforces:
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import logging
 from pathlib import Path
@@ -20,10 +20,13 @@ from typing import Generator
 
 from ...core.identity.models import PPE, MeterLifecycle, SettlementType
 from ...core.readings.models import IntervalReading, ReadingRevision, SourceObservation
+from ...adapters.pse.models import MarketPriceRecord
+from ...core.settlement.models import LotAllocation, SettlementLot
+from ...core.tariffs.models import InvoiceReconciliation
 
 _LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 SCHEMA_V1_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -105,6 +108,85 @@ CREATE TABLE IF NOT EXISTS job_checkpoint (
 );
 """
 
+SCHEMA_V2_SQL = """
+CREATE TABLE IF NOT EXISTS market_price (
+    price_id TEXT PRIMARY KEY,
+    price_type TEXT NOT NULL,
+    applicable_year INTEGER NOT NULL,
+    applicable_month INTEGER NOT NULL,
+    interval_start_utc TEXT,
+    resolution TEXT NOT NULL,
+    publication_date TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    price_mwh TEXT NOT NULL,
+    price_kwh TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    is_correction INTEGER NOT NULL,
+    raw_snippet TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_market_price_lookup 
+ON market_price (price_type, applicable_year, applicable_month, revision);
+
+CREATE TABLE IF NOT EXISTS settlement_lot (
+    lot_id TEXT PRIMARY KEY,
+    ppe_id TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    zone TEXT NOT NULL,
+    original_amount TEXT NOT NULL,
+    remaining_amount TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    assigned_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    provenance TEXT,
+    FOREIGN KEY (ppe_id) REFERENCES ppe (ppe_id)
+);
+CREATE INDEX IF NOT EXISTS idx_settlement_lot_query 
+ON settlement_lot (ppe_id, unit, expires_at);
+
+CREATE TABLE IF NOT EXISTS settlement_allocation (
+    allocation_id TEXT PRIMARY KEY,
+    lot_id TEXT NOT NULL,
+    consumption_target_id TEXT NOT NULL,
+    allocated_amount TEXT NOT NULL,
+    allocated_at_utc TEXT NOT NULL,
+    is_reversal INTEGER NOT NULL,
+    notes TEXT,
+    FOREIGN KEY (lot_id) REFERENCES settlement_lot (lot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_settlement_alloc_lot 
+ON settlement_allocation (lot_id);
+
+CREATE TABLE IF NOT EXISTS invoice_reconciliation (
+    invoice_number TEXT PRIMARY KEY,
+    ppe_id TEXT,
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    computed_gross TEXT NOT NULL,
+    invoiced_gross TEXT NOT NULL,
+    variance_gross TEXT NOT NULL,
+    variance_percent TEXT NOT NULL,
+    status TEXT NOT NULL,
+    approved INTEGER NOT NULL DEFAULT 0,
+    approved_by TEXT,
+    approved_at_utc TEXT,
+    notes TEXT,
+    created_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS invoice_reconciliation_line (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number TEXT NOT NULL,
+    rate_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    computed_gross TEXT NOT NULL,
+    invoiced_gross TEXT,
+    diff_gross TEXT NOT NULL,
+    FOREIGN KEY (invoice_number) REFERENCES invoice_reconciliation (invoice_number)
+);
+CREATE INDEX IF NOT EXISTS idx_recon_lines ON invoice_reconciliation_line (invoice_number);
+"""
+
 
 class CanonicalStorage:
     """SQLite-backed canonical storage for energy readings and settlements."""
@@ -171,6 +253,15 @@ class CanonicalStorage:
                     "INSERT INTO schema_version (version, applied_at) VALUES (?, ?);",
                     (1, datetime.now(timezone.utc).isoformat()),
                 )
+                current_v = 1
+
+            if current_v < 2:
+                conn.executescript(SCHEMA_V2_SQL)
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?);",
+                    (2, datetime.now(timezone.utc).isoformat()),
+                )
+                current_v = 2
 
     # -------------------------------------------------------------------------
     # Identity: PPE & Meter Lifecycle
@@ -450,3 +541,378 @@ class CanonicalStorage:
             if not row:
                 return None
             return dict(row)
+
+    # -------------------------------------------------------------------------
+    # Market Prices (PSE RCEm & RCE)
+    # -------------------------------------------------------------------------
+
+    def save_market_prices(self, prices: list[MarketPriceRecord]) -> int:
+        """Save market prices idempotently with revisions."""
+        if not prices:
+            return 0
+        sql = """
+        INSERT INTO market_price (
+            price_id, price_type, applicable_year, applicable_month,
+            interval_start_utc, resolution, publication_date, revision,
+            price_mwh, price_kwh, source_url, is_correction, raw_snippet
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(price_id) DO UPDATE SET
+            price_mwh = excluded.price_mwh,
+            price_kwh = excluded.price_kwh,
+            publication_date = excluded.publication_date,
+            is_correction = excluded.is_correction,
+            source_url = excluded.source_url,
+            raw_snippet = excluded.raw_snippet;
+        """
+        params = []
+        for p in prices:
+            pid = f"{p.price_type}_{p.applicable_year}_{p.applicable_month:02d}_rev{p.revision}"
+            params.append((
+                pid,
+                p.price_type,
+                p.applicable_year,
+                p.applicable_month,
+                None,
+                "1M",
+                p.publication_date.isoformat(),
+                p.revision,
+                str(p.price_mwh),
+                str(p.price_kwh),
+                p.source_url,
+                1 if p.is_correction else 0,
+                p.raw_snippet,
+            ))
+        with self._connection() as conn:
+            cur = conn.executemany(sql, params)
+            return cur.rowcount
+
+    def get_market_prices(
+        self,
+        price_type: str,
+        year: int | None = None,
+        month: int | None = None,
+    ) -> list[MarketPriceRecord]:
+        """Fetch market prices matching criteria."""
+        conditions = ["price_type = ?"]
+        params: list[str | int] = [price_type]
+        if year is not None:
+            conditions.append("applicable_year = ?")
+            params.append(year)
+        if month is not None:
+            conditions.append("applicable_month = ?")
+            params.append(month)
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+        SELECT * FROM market_price
+        WHERE {where_clause}
+        ORDER BY applicable_year ASC, applicable_month ASC, revision ASC;
+        """
+        with self._connection() as conn:
+            cur = conn.execute(sql, params)
+            out = []
+            for row in cur.fetchall():
+                out.append(
+                    MarketPriceRecord(
+                        price_type=row["price_type"],
+                        applicable_year=row["applicable_year"],
+                        applicable_month=row["applicable_month"],
+                        publication_date=date.fromisoformat(row["publication_date"]),
+                        revision=row["revision"],
+                        price_mwh=Decimal(row["price_mwh"]),
+                        price_kwh=Decimal(row["price_kwh"]),
+                        source_url=row["source_url"],
+                        is_correction=bool(row["is_correction"]),
+                        raw_snippet=row["raw_snippet"] or "",
+                    )
+                )
+            return out
+
+    def get_effective_market_price(
+        self,
+        price_type: str,
+        year: int,
+        month: int,
+        as_of: date | None = None,
+    ) -> MarketPriceRecord | None:
+        """Fetch the latest published revision of a price for a given month as of date."""
+        cutoff = (as_of or date.today()).isoformat()
+        sql = """
+        SELECT * FROM market_price
+        WHERE price_type = ?
+          AND applicable_year = ?
+          AND applicable_month = ?
+          AND publication_date <= ?
+        ORDER BY publication_date DESC, revision DESC
+        LIMIT 1;
+        """
+        with self._connection() as conn:
+            cur = conn.execute(sql, (price_type, year, month, cutoff))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return MarketPriceRecord(
+                price_type=row["price_type"],
+                applicable_year=row["applicable_year"],
+                applicable_month=row["applicable_month"],
+                publication_date=date.fromisoformat(row["publication_date"]),
+                revision=row["revision"],
+                price_mwh=Decimal(row["price_mwh"]),
+                price_kwh=Decimal(row["price_kwh"]),
+                source_url=row["source_url"],
+                is_correction=bool(row["is_correction"]),
+                raw_snippet=row["raw_snippet"] or "",
+            )
+
+    # -------------------------------------------------------------------------
+    # Settlement Lots & Allocations (Physical kWh & Monetary PLN Ledgers)
+    # -------------------------------------------------------------------------
+
+    def save_settlement_lots(self, lots: list[SettlementLot]) -> int:
+        """Save settlement lots idempotently."""
+        if not lots:
+            return 0
+        sql = """
+        INSERT INTO settlement_lot (
+            lot_id, ppe_id, unit, zone, original_amount, remaining_amount,
+            created_at_utc, assigned_at, expires_at, rule_version, provenance
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(lot_id) DO UPDATE SET
+            remaining_amount = excluded.remaining_amount,
+            rule_version = excluded.rule_version,
+            provenance = excluded.provenance;
+        """
+        params = [
+            (
+                l.lot_id,
+                l.ppe_id,
+                l.unit,
+                l.zone,
+                str(l.original_amount),
+                str(l.remaining_amount),
+                l.created_at_utc.isoformat(),
+                l.assigned_at.isoformat(),
+                l.expires_at.isoformat(),
+                l.rule_version,
+                l.provenance,
+            )
+            for l in lots
+        ]
+        with self._connection() as conn:
+            cur = conn.executemany(sql, params)
+            return cur.rowcount
+
+    def get_settlement_lots(
+        self,
+        ppe_id: str,
+        unit: str | None = None,
+        active_only: bool = False,
+    ) -> list[SettlementLot]:
+        """Fetch settlement lots for a PPE."""
+        conditions = ["ppe_id = ?"]
+        params: list[str] = [ppe_id]
+        if unit:
+            conditions.append("unit = ?")
+            params.append(unit)
+        if active_only:
+            conditions.append("CAST(remaining_amount AS NUMERIC) > 0")
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+        SELECT * FROM settlement_lot
+        WHERE {where_clause}
+        ORDER BY assigned_at ASC, lot_id ASC;
+        """
+        with self._connection() as conn:
+            cur = conn.execute(sql, params)
+            out = []
+            for row in cur.fetchall():
+                out.append(
+                    SettlementLot(
+                        lot_id=row["lot_id"],
+                        ppe_id=row["ppe_id"],
+                        unit=row["unit"],
+                        zone=row["zone"],
+                        original_amount=Decimal(row["original_amount"]),
+                        remaining_amount=Decimal(row["remaining_amount"]),
+                        created_at_utc=datetime.fromisoformat(row["created_at_utc"]),
+                        assigned_at=date.fromisoformat(row["assigned_at"]),
+                        expires_at=date.fromisoformat(row["expires_at"]),
+                        rule_version=row["rule_version"],
+                        provenance=row["provenance"] or "",
+                    )
+                )
+            return out
+
+    def save_lot_allocations(self, allocations: list[LotAllocation]) -> int:
+        """Save lot allocations."""
+        if not allocations:
+            return 0
+        sql = """
+        INSERT INTO settlement_allocation (
+            allocation_id, lot_id, consumption_target_id,
+            allocated_amount, allocated_at_utc, is_reversal, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(allocation_id) DO NOTHING;
+        """
+        params = [
+            (
+                a.allocation_id,
+                a.lot_id,
+                a.consumption_target_id,
+                str(a.allocated_amount),
+                a.allocated_at_utc.isoformat(),
+                1 if a.is_reversal else 0,
+                a.notes,
+            )
+            for a in allocations
+        ]
+        with self._connection() as conn:
+            cur = conn.executemany(sql, params)
+            return cur.rowcount
+
+    def get_lot_allocations(self, lot_id: str) -> list[LotAllocation]:
+        """Fetch all allocations for a given lot."""
+        sql = "SELECT * FROM settlement_allocation WHERE lot_id = ? ORDER BY allocated_at_utc ASC;"
+        with self._connection() as conn:
+            cur = conn.execute(sql, (lot_id,))
+            out = []
+            for row in cur.fetchall():
+                out.append(
+                    LotAllocation(
+                        allocation_id=row["allocation_id"],
+                        lot_id=row["lot_id"],
+                        consumption_target_id=row["consumption_target_id"],
+                        allocated_amount=Decimal(row["allocated_amount"]),
+                        allocated_at_utc=datetime.fromisoformat(row["allocated_at_utc"]),
+                        is_reversal=bool(row["is_reversal"]),
+                        notes=row["notes"] or "",
+                    )
+                )
+            return out
+
+    # -------------------------------------------------------------------------
+    # Invoice Reconciliation & Audit Line Variances
+    # -------------------------------------------------------------------------
+
+    def save_invoice_reconciliation(
+        self,
+        recon: InvoiceReconciliation,
+        ppe_id: str = "",
+    ) -> None:
+        """Save invoice reconciliation report and line variances."""
+        sql_head = """
+        INSERT INTO invoice_reconciliation (
+            invoice_number, ppe_id, period_start, period_end,
+            computed_gross, invoiced_gross, variance_gross, variance_percent,
+            status, notes, created_at_utc
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(invoice_number) DO UPDATE SET
+            ppe_id = excluded.ppe_id,
+            period_start = excluded.period_start,
+            period_end = excluded.period_end,
+            computed_gross = excluded.computed_gross,
+            invoiced_gross = excluded.invoiced_gross,
+            variance_gross = excluded.variance_gross,
+            variance_percent = excluded.variance_percent,
+            status = excluded.status,
+            notes = excluded.notes;
+        """
+        now_str = datetime.now(timezone.utc).isoformat()
+        with self._connection() as conn:
+            conn.execute(
+                sql_head,
+                (
+                    recon.invoice_number,
+                    ppe_id,
+                    recon.period_start.isoformat(),
+                    recon.period_end.isoformat(),
+                    str(recon.computed_gross),
+                    str(recon.invoiced_gross),
+                    str(recon.variance_gross),
+                    str(recon.variance_percent),
+                    recon.status,
+                    recon.notes,
+                    now_str,
+                ),
+            )
+            # Delete old line details and reinsert
+            conn.execute(
+                "DELETE FROM invoice_reconciliation_line WHERE invoice_number = ?;",
+                (recon.invoice_number,),
+            )
+            sql_line = """
+            INSERT INTO invoice_reconciliation_line (
+                invoice_number, rate_id, name, computed_gross, invoiced_gross, diff_gross
+            ) VALUES (?, ?, ?, ?, ?, ?);
+            """
+            line_params = [
+                (
+                    recon.invoice_number,
+                    lv["rate_id"],
+                    lv.get("name", lv["rate_id"]),
+                    str(lv["computed_gross"]),
+                    str(lv["invoiced_gross"]) if lv["invoiced_gross"] is not None else None,
+                    str(lv["diff_gross"]),
+                )
+                for lv in recon.line_variances
+            ]
+            conn.executemany(sql_line, line_params)
+
+    def get_invoice_reconciliation(
+        self,
+        invoice_number: str,
+    ) -> InvoiceReconciliation | None:
+        """Retrieve an invoice reconciliation and its per-line variances."""
+        sql_head = "SELECT * FROM invoice_reconciliation WHERE invoice_number = ?;"
+        sql_lines = "SELECT * FROM invoice_reconciliation_line WHERE invoice_number = ? ORDER BY id ASC;"
+        with self._connection() as conn:
+            cur = conn.execute(sql_head, (invoice_number,))
+            row = cur.fetchone()
+            if not row:
+                return None
+
+            cur_lines = conn.execute(sql_lines, (invoice_number,))
+            line_variances = []
+            for lr in cur_lines.fetchall():
+                line_variances.append({
+                    "rate_id": lr["rate_id"],
+                    "name": lr["name"],
+                    "computed_gross": Decimal(lr["computed_gross"]),
+                    "invoiced_gross": Decimal(lr["invoiced_gross"]) if lr["invoiced_gross"] is not None else None,
+                    "diff_gross": Decimal(lr["diff_gross"]),
+                })
+
+            return InvoiceReconciliation(
+                invoice_number=row["invoice_number"],
+                period_start=date.fromisoformat(row["period_start"]),
+                period_end=date.fromisoformat(row["period_end"]),
+                computed_gross=Decimal(row["computed_gross"]),
+                invoiced_gross=Decimal(row["invoiced_gross"]),
+                variance_gross=Decimal(row["variance_gross"]),
+                variance_percent=Decimal(row["variance_percent"]),
+                line_variances=line_variances,
+                status=row["status"],
+                notes=row["notes"] or "",
+            )
+
+    def set_reconciliation_approval(
+        self,
+        invoice_number: str,
+        approved: bool,
+        approved_by: str = "user",
+    ) -> bool:
+        """Set approval status on an invoice reconciliation."""
+        now_str = datetime.now(timezone.utc).isoformat() if approved else None
+        sql = """
+        UPDATE invoice_reconciliation
+        SET approved = ?, approved_by = ?, approved_at_utc = ?
+        WHERE invoice_number = ?;
+        """
+        with self._connection() as conn:
+            cur = conn.execute(
+                sql,
+                (1 if approved else 0, approved_by if approved else None, now_str, invoice_number),
+            )
+            return cur.rowcount > 0
+
