@@ -588,8 +588,8 @@ async def async_setup_entry(
                             device_info=device_info,
                             entry=entry,
                             component_key="deposit_applied",
-                            name="Depozyt Wykorzystany MTD",
-                            icon="mdi:battery-minus",
+                            name="Odzyskano z Depozytu MTD",
+                            icon="mdi:cash-minus",
                             has_zones=has_zones,
                             serial=serial,
                         )
@@ -2923,6 +2923,17 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             "calculated_at": attrs.get("calculated_at"),
             "system": attrs.get("system"),
         }
+        if self._component_key == "deposit_applied":
+            val = attrs.get("mtd_deposit_applied_pln")
+            if val is not None:
+                try:
+                    num = float(val)
+                    self._attr_extra_state_attributes["deposit_applied_positive_pln"] = round(num, 2)
+                    self._attr_extra_state_attributes["is_deduction"] = True
+                    return -round(abs(num), 2) if num > 0 else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+            return None
         key_map = {
             "brutto": attrs.get("mtd_brutto_pln"),
             "sale_total": attrs.get("mtd_sale_total_pln"),
