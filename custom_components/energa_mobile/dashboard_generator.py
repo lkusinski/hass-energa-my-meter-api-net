@@ -291,6 +291,17 @@ async def async_provision_dashboard(
         dash_data = await store_dashboards.async_load() or {"items": []}
         items = dash_data.get("items", [])
 
+        # Auto-clean: remove any corrupted or bogus overrides of the built-in default 'lovelace' dashboard
+        clean_items = [
+            it for it in items
+            if it.get("url_path") != "lovelace" and it.get("id") != "lovelace"
+        ]
+        if len(clean_items) != len(items):
+            items = clean_items
+            dash_data["items"] = items
+            await store_dashboards.async_save(dash_data)
+            _LOGGER.info("Purged bogus default lovelace dashboard override from lovelace_dashboards")
+
         existing_item = next((it for it in items if it.get("url_path") == clean_url), None)
         if not existing_item:
             items.append(
