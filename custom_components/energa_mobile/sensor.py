@@ -2383,32 +2383,37 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             super()._handle_coordinator_update()
             return
 
-        # === IMPORT ENERGY STATISTICS ===
-        energy_metadata = StatisticMetaData(
-            source="recorder",
-            statistic_id=self.entity_id,
-            name=self._attr_name,
-            unit_of_measurement=self._attr_native_unit_of_measurement,
-            has_mean=False,
-            has_sum=True,
-            mean_type=StatisticMeanType.NONE,
-            unit_class="energy",
+        # === IMPORT ENERGY STATISTICS VIA RECORDER ADAPTER ===
+        adapter = (
+            self.hass.data.get(DOMAIN, {})
+            .get(self._entry.entry_id, {})
+            .get("recorder_adapter")
         )
+        if adapter:
+            adapter.import_energy_statistics(
+                statistic_id=self.entity_id,
+                statistics=energy_stats,
+                name=self._attr_name,
+                unit=self._attr_native_unit_of_measurement,
+                last_known_sum=float(self._last_sum or 0.0),
+            )
+        else:
+            energy_metadata = StatisticMetaData(
+                source="recorder",
+                statistic_id=self.entity_id,
+                name=self._attr_name,
+                unit_of_measurement=self._attr_native_unit_of_measurement,
+                has_mean=False,
+                has_sum=True,
+                mean_type=StatisticMeanType.NONE,
+                unit_class="energy",
+            )
+            async_import_statistics(self.hass, energy_metadata, energy_stats)
 
-        _LOGGER.info(
-            "Importing %d energy statistics for %s",
-            len(energy_stats),
-            self.entity_id,
-        )
-        async_import_statistics(self.hass, energy_metadata, energy_stats)
         if energy_stats and "sum" in energy_stats[-1]:
             self._last_sum = energy_stats[-1]["sum"]
 
         # === IMPORT COST STATISTICS (v0.3.0: import only) ===
-        # Export has no static cost: in old net-metering it feeds the kWh
-        # warehouse (no sale), in new net-billing it is paid at the live
-        # monthly RCEm×1.23 — wire the RCEm/Cena Oddania price entity in
-        # the Energy panel instead of a frozen 0.95 compensation stat.
         if cost_stats and not self._data_key.startswith("export"):
             cost_entity_id = f"{self.entity_id}_cost"
             if self._data_key == "import_1":
@@ -2420,26 +2425,32 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             else:
                 cost_name = f"{self._attr_name} Rekompensata"
 
-            cost_metadata = StatisticMetaData(
-                source="recorder",
-                statistic_id=cost_entity_id,
-                name=cost_name,
-                unit_of_measurement="PLN",
-                has_mean=False,
-                has_sum=True,
-                mean_type=StatisticMeanType.NONE,
-                unit_class=None,
-            )
-
             price = self._get_price()
-
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Importing %d cost statistics for %s (price: %.4f PLN/kWh)",
                 len(cost_stats),
                 cost_entity_id,
                 price,
             )
-            async_import_statistics(self.hass, cost_metadata, cost_stats)
+            if adapter:
+                adapter.import_cost_statistics(
+                    statistic_id=cost_entity_id,
+                    statistics=cost_stats,
+                    name=cost_name,
+                    unit="PLN",
+                )
+            else:
+                cost_metadata = StatisticMetaData(
+                    source="recorder",
+                    statistic_id=cost_entity_id,
+                    name=cost_name,
+                    unit_of_measurement="PLN",
+                    has_mean=False,
+                    has_sum=True,
+                    mean_type=StatisticMeanType.NONE,
+                    unit_class=None,
+                )
+                async_import_statistics(self.hass, cost_metadata, cost_stats)
 
         super()._handle_coordinator_update()
 

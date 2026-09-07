@@ -53,3 +53,14 @@ class MeterLifecycle:
     valid_to: datetime | None = None
     offset_kwh: Decimal = Decimal("0.0")   # Offset across meter replacement
     source: str = "energa"
+
+
+@dataclass(frozen=True)
+class MeterReadingOffset:
+    """Offset record applied to meter readings across physical meter replacements."""
+
+    ppe_id: str
+    meter_serial: str
+    register: str
+    offset_kwh: Decimal = Decimal("0.0")
+
