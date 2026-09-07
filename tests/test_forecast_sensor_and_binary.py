@@ -17,6 +17,7 @@ from custom_components.energa_mobile.projections.arbitrage import (
     ArbitrageEngine,
 )
 from custom_components.energa_mobile.sensor import (
+    EnergaBillComponentSensor,
     EnergaBillForecastSensor,
     PseRceArbitrageSpreadSensor,
     PseRceDynamicPriceSensor,
@@ -203,7 +204,10 @@ def test_dynamic_rce_and_spread_sensors(mock_entry):
         meter_point_id="1340026",
         meter_serial="00069839",
     )
-    assert price_sensor.native_value == 0.450
+    # Native value is brutto (with VAT 23% for prosumer deposit valuation)
+    assert price_sensor.native_value == 0.5535
+    assert price_sensor.extra_state_attributes["price_netto_pln_kwh"] == 0.450
+    assert price_sensor.extra_state_attributes["price_brutto_pln_kwh"] == 0.5535
     assert price_sensor.extra_state_attributes["resolution"] == "15M"
 
     # Arbitrage spread sensor
@@ -222,5 +226,103 @@ def test_dynamic_rce_and_spread_sensors(mock_entry):
         meter_point_id="1340026",
         meter_serial="00069839",
     )
-    assert spread_sensor.native_value == 0.352
+    # Native value is brutto (with VAT 23%)
+    assert spread_sensor.native_value == round(0.352 * 1.23, 5)
+    assert spread_sensor.extra_state_attributes["effective_spread_netto_pln_kwh"] == 0.352
     assert spread_sensor.extra_state_attributes["is_spread_profitable"] is True
+
+
+def test_bill_component_sensors_return_brutto_and_sum_to_total(mock_entry, mock_device_info):
+    """Verify that MTD component sensors return BRUTTO amounts that sum to total gross."""
+    from unittest.mock import patch
+
+    coord = MagicMock()
+    coord.data = [{"meter_point_id": 1340026, "meter_serial": "00069839"}]
+    coord._mtd = {"1340026": {"import_1": 100.0, "import_2": 50.0}}
+
+    sensor_sale = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id="1340026",
+        device_info=mock_device_info,
+        entry=mock_entry,
+        component_key="sale_total",
+        name="Koszt Energii Czynnej MTD",
+        icon="mdi:flash-outline",
+        serial="00069839",
+    )
+    sensor_distr = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id="1340026",
+        device_info=mock_device_info,
+        entry=mock_entry,
+        component_key="distr_total",
+        name="Koszt Dystrybucji MTD",
+        icon="mdi:transmission-tower",
+        serial="00069839",
+    )
+    sensor_brutto = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id="1340026",
+        device_info=mock_device_info,
+        entry=mock_entry,
+        component_key="brutto",
+        name="Koszt Brutto MTD",
+        icon="mdi:receipt-text-outline",
+        serial="00069839",
+    )
+
+    mock_bill = {
+        "sale_total": 100.00,       # 100 zł netto
+        "sale_gross": 123.00,       # 123 zł brutto
+        "distr_total": 50.00,       # 50 zł netto
+        "distr_gross": 61.50,       # 61.50 zł brutto
+        "netto": 150.00,
+        "vat": 34.50,
+        "brutto": 184.50,           # 123.00 + 61.50 = 184.50
+        "deposit": 0.0,
+        "deposit_applied": 0.0,
+        "do_zaplaty": 184.50,
+    }
+
+    with patch.object(sensor_sale, "_calculate_bill_mtd", return_value=(mock_bill, {
+        "mtd_sale_gross_pln": 123.00,
+        "mtd_distr_gross_pln": 61.50,
+        "mtd_sale_total_pln": 100.00,
+        "mtd_distr_total_pln": 50.00,
+        "mtd_brutto_pln": 184.50,
+        "mtd_netto_pln": 150.00,
+        "mtd_vat_pln": 34.50,
+    })):
+        assert sensor_sale.native_value == 123.00
+        assert sensor_sale.extra_state_attributes["netto_pln"] == 100.00
+        assert sensor_sale.extra_state_attributes["gross_pln"] == 123.00
+        assert sensor_sale.extra_state_attributes["vat_rate"] == "23%"
+
+    with patch.object(sensor_distr, "_calculate_bill_mtd", return_value=(mock_bill, {
+        "mtd_sale_gross_pln": 123.00,
+        "mtd_distr_gross_pln": 61.50,
+        "mtd_sale_total_pln": 100.00,
+        "mtd_distr_total_pln": 50.00,
+        "mtd_brutto_pln": 184.50,
+        "mtd_netto_pln": 150.00,
+        "mtd_vat_pln": 34.50,
+    })):
+        assert sensor_distr.native_value == 61.50
+        assert sensor_distr.extra_state_attributes["netto_pln"] == 50.00
+        assert sensor_distr.extra_state_attributes["gross_pln"] == 61.50
+        assert sensor_distr.extra_state_attributes["vat_rate"] == "23%"
+
+    with patch.object(sensor_brutto, "_calculate_bill_mtd", return_value=(mock_bill, {
+        "mtd_sale_gross_pln": 123.00,
+        "mtd_distr_gross_pln": 61.50,
+        "mtd_sale_total_pln": 100.00,
+        "mtd_distr_total_pln": 50.00,
+        "mtd_brutto_pln": 184.50,
+        "mtd_netto_pln": 150.00,
+        "mtd_vat_pln": 34.50,
+    })):
+        assert sensor_brutto.native_value == 184.50
+
+    # Exact equality: Sale Gross + Distr Gross == Total Gross
+    assert round(sensor_sale.native_value + sensor_distr.native_value, 2) == sensor_brutto.native_value
+
