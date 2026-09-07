@@ -1,6 +1,49 @@
 # Changelog
 
+## v1.3.0 (2026-09-07) — Wdrożenie Etapu 5 Architektury Docelowej V1.0 (Zaawansowane Prognozowanie WAL, Ceny Dynamiczne PSE RCE i Arbitraż BESS)
+
+### 📈 Zaawansowane Prognozowanie Godzinowe (Hourly Profile Forecaster)
+- **Przejście z prostej ekstrapolacji MTD na model profilu godzinowego (`projections/forecast.py`):**
+  - Wykorzystanie do 730 dni kanonicznych danych godzinowych z bazy SQLite WAL (`CanonicalStorage`).
+  - Rozbicie poboru i oddania energii na profile typów dni:
+    - **Profil dnia roboczego ($P_{\text{work}}$):** dekompozycja 24-godzinna dla dni roboczych (Pn–Pt) z porannym i popołudniowym szczytem.
+    - **Profil weekendowy/świąteczny ($P_{\text{weekend}}$):** wypłaszczony profil dla sobót, niedziel oraz świąt.
+  - **Pełna obsługa polskiego kalendarza dni wolnych od pracy:**
+    - Stałe święta państwowe i kościelne (1.01, 6.01, 1.05, 3.05, 15.08, 1.11, 11.11, 25-26.12).
+    - Ruchome święta wielkanocne wyliczane z algorytmu Meeusa (Wielkanoc, Poniedziałek Wielkanocny, Boże Ciało).
+  - **Dekompozycja strefowa dla taryf G11, G12 oraz G12w:**
+    - Automatyczne mapowanie godzin przyszłych na strefy szczytowe (T1) i pozaszczytowe (T2).
+    - Uwzględnienie specyfiki G12w: 100% godzin w weekendy i polskie święta przypisywane do strefy taniej (T2).
+  - **Adaptacyjny wskaźnik trendu ($k$):**
+    - Skalowanie profilu na podstawie rzeczywistej intensywności poboru zrealizowanego w bieżącym miesiącu (kompensacja sezonowa pomp ciepła i klimatyzacji).
+  - **Bezpieczny fallback:**
+    - Przy bazie <7 dni automatyczny i płynny fallback do wygładzonej ekstrapolacji MTD.
+  - **Rozszerzone atrybuty w `sensor.energa_[meter_id]_bill_forecast`:**
+    - `forecast_method: hourly_profile_wal`, `profile_confidence`, `profile_history_days`, `profile_trend_factor`, `forecast_import_t1_kwh`, `forecast_import_t2_kwh`, `forecast_export_t1_kwh`, `forecast_export_t2_kwh`.
+
+### ⚡ Dynamiczne Ceny PSE RCE i Silnik Arbitrażu BESS (`projections/arbitrage.py`, `adapters/pse/rce_client.py`)
+- **Klient API PSE OIRE dla cen dynamicznych:**
+  - Asynchroniczne pobieranie cen RCE (interwały 15-minutowe i 1-godzinne) dla bieżącej doby oraz publikacji D-1 na dobę kolejną (dostępnej po godz. 14:00).
+  - Idempotentny zapis interwałowych cen RCE w bazie SQLite WAL (`market_price`).
+- **Silnik Arbitrażu Cenowego i Optymalizacji Magazynu Energii (BESS):**
+  - Wykrywanie optymalnych, najtańszych okien ładowania (`charge_windows`) dla baterii, pomp ciepła, buforów CWU i pojazdów elektrycznych.
+  - Wykrywanie szczytowych okien rozładowania (`discharge_windows`) w godzinach wieczornych.
+  - **Weryfikacja sprawności cyklu (Round-Trip Efficiency $\eta = 88\%$):** automatyczne blokowanie zbędnego cyklowania baterii, gdy spread cenowy nie pokrywa strat energii.
+  - **Ochrona przed cenami ujemnymi (Negative Price Alert):** natychmiastowe wykrywanie interwałów z $RCE < 0$ PLN/kWh dla ochrony depozytu prosumenckiego przed stratami eksportu.
+
+### 🏠 Nowa Platforma `binary_sensor` oraz Nowe Sensory Telemetryczne Home Assistant
+- **Nowa platforma `binary_sensor.py`:**
+  - `binary_sensor.energa_[meter_id]_bess_charge_window` (aktywne okno ładowania BESS)
+  - `binary_sensor.energa_[meter_id]_bess_discharge_window` (aktywne okno szczytu i rozładowania BESS)
+  - `binary_sensor.energa_[meter_id]_rce_negative_price` (alarm ujemnej ceny PSE)
+- **Nowe sensory telemetryczne w `sensor.py`:**
+  - `sensor.energa_[meter_id]_rce_dynamic_price` (bieżąca dynamiczna cena rynkowa PSE w PLN/kWh z atrybutami interwału UTC)
+  - `sensor.energa_[meter_id]_bess_arbitrage_spread` (bieżący spread arbitrażowy BESS z uwzględnieniem strat sprawności)
+
+---
+
 ## v1.2.0 (2026-09-07) — Wdrożenie Etapu 4 Architektury Docelowej V1.0 (Produkcja, Recorder Adapter, Migration Map, Diagnostyka i Alerty)
+
 
 ### 🏗️ Architektura Produkcyjna Home Assistant (Implementation Brief V1.0 - Etap 4)
 - **Dedykowany Pakiet `ha/` i Adapter Home Assistant Recorder (`RecorderAdapter`):**
