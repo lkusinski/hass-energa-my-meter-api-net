@@ -71,6 +71,17 @@ comp_mod.lovelace = sys.modules["homeassistant.components.lovelace"]
 comp_mod.recorder = sys.modules["homeassistant.components.recorder"]
 comp_mod.persistent_notification = sys.modules["homeassistant.components.persistent_notification"]
 
+recorder_models = sys.modules["homeassistant.components.recorder.models"]
+class _StatisticMetaData:
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+recorder_models.StatisticMetaData = _StatisticMetaData
+
+class _StatisticMeanType:
+    NONE = 0
+recorder_models.StatisticMeanType = _StatisticMeanType
+
 coord_mod = sys.modules["homeassistant.helpers.update_coordinator"]
 class _CoordinatorEntity:
     def __init__(self, coordinator):

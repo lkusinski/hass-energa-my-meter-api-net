@@ -501,6 +501,44 @@ class CanonicalStorage:
                 )
             return out
 
+    def get_schema_version(self) -> int:
+        """Return current database schema version."""
+        with self._connection() as conn:
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+            return int(row[0]) if row else 1
+
+    def get_readings_count(self, ppe_id: str | None = None) -> int:
+        """Return count of interval readings."""
+        with self._connection() as conn:
+            if ppe_id:
+                row = conn.execute(
+                    "SELECT count(*) FROM interval_reading WHERE ppe_id = ?", (ppe_id,)
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT count(*) FROM interval_reading").fetchone()
+            return int(row[0]) if row else 0
+
+    def get_latest_reading_time(self, ppe_id: str | None = None) -> datetime | None:
+        """Return timestamp of the newest interval reading."""
+        with self._connection() as conn:
+            if ppe_id:
+                row = conn.execute(
+                    "SELECT MAX(interval_start_utc) FROM interval_reading WHERE ppe_id = ?",
+                    (ppe_id,),
+                ).fetchone()
+            else:
+                row = conn.execute("SELECT MAX(interval_start_utc) FROM interval_reading").fetchone()
+
+            if row and row[0]:
+                val = row[0]
+                if isinstance(val, datetime):
+                    return val
+                try:
+                    return datetime.fromisoformat(val)
+                except Exception:
+                    return None
+            return None
+
     # -------------------------------------------------------------------------
     # Resumable Checkpoints
     # -------------------------------------------------------------------------

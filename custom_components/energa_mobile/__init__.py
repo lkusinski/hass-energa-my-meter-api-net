@@ -102,10 +102,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await session.close()
         raise ConfigEntryNotReady(err) from err
 
-    # Initialize Canonical SQLite Storage (v1.0 Architecture)
+    # Initialize Canonical SQLite Storage & HA Production Adapters (v1.0 Architecture)
     from .storage.sqlite.database import CanonicalStorage
+    from .ha.recorder_adapter import RecorderAdapter
+    from .ha.migration_map import MigrationMap
+    from .ha.alerts import ProsumerAlertManager
+
     db_path = hass.config.path(".storage", "energa_canonical.db")
     storage = CanonicalStorage(db_path)
+    recorder_adapter = RecorderAdapter(hass)
+    migration_map = MigrationMap()
+    alert_manager = ProsumerAlertManager(storage)
 
     # Store API and storage instances
     hass.data.setdefault(DOMAIN, {})
@@ -113,6 +120,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "session": session,
         "storage": storage,
+        "recorder_adapter": recorder_adapter,
+        "migration_map": migration_map,
+        "alert_manager": alert_manager,
     }
 
     # Close session when HA shuts down
@@ -357,10 +367,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Reload integration when options change (e.g. prices updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
-    # v0.3.0: blind 730-day auto-backfill in the background when the
-    # entry has no statistics yet (fresh first boot). Never blocks
-    # setup; progress lands in notifications (energa_import_*).
-    hass.async_create_task(_maybe_auto_backfill(hass, api, entry))
+    # v0.3.0 / v1.1.2: blind 730-day auto-backfill in the background when the
+    # entry has no statistics yet (fresh first boot). Uses background task
+    # so HA startup bootstrap is never blocked.
+    if hasattr(entry, "async_create_background_task"):
+        entry.async_create_background_task(
+            hass, _maybe_auto_backfill(hass, api, entry), name="energa_auto_backfill"
+        )
+    else:
+        hass.async_create_task(_maybe_auto_backfill(hass, api, entry))
 
     return True
 
@@ -848,22 +863,31 @@ async def _import_meter_history(
             )
             entity_id = f"sensor.energa_{meter_id}_{energy_sensor_name}"
 
-            # Import energy statistics
-            metadata = StatisticMetaData(
-                source="recorder",
-                statistic_id=entity_id,
-                name=None,
-                unit_of_measurement="kWh",
-                has_mean=False,
-                has_sum=True,
-                mean_type=StatisticMeanType.NONE,
-                unit_class="energy",
+            # Import energy statistics via RecorderAdapter
+            recorder_adapter = (
+                hass.data.get(DOMAIN, {})
+                .get(entry.entry_id, {})
+                .get("recorder_adapter")
             )
-
-            async_import_statistics(hass, metadata, statistics)
-            _LOGGER.info(
-                "Imported %d energy statistics for %s", len(statistics), entity_id
-            )
+            if recorder_adapter:
+                recorder_adapter.import_energy_statistics(
+                    statistic_id=entity_id,
+                    statistics=statistics,
+                    name=None,
+                    unit="kWh",
+                )
+            else:
+                metadata = StatisticMetaData(
+                    source="recorder",
+                    statistic_id=entity_id,
+                    name=None,
+                    unit_of_measurement="kWh",
+                    has_mean=False,
+                    has_sum=True,
+                    mean_type=StatisticMeanType.NONE,
+                    unit_class="energy",
+                )
+                async_import_statistics(hass, metadata, statistics)
 
             # Canonically archive chunk to SQLite (v1.0 Architecture)
             storage = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("storage")
@@ -905,18 +929,25 @@ async def _import_meter_history(
                 }
                 cost_name = cost_name_map.get(entity_suffix, f"Koszt {entity_suffix}")
 
-                cost_metadata = StatisticMetaData(
-                    source="recorder",
-                    statistic_id=cost_entity_id,
-                    name=cost_name,
-                    unit_of_measurement="PLN",
-                    has_mean=False,
-                    has_sum=True,
-                    mean_type=StatisticMeanType.NONE,
-                    unit_class=None,
-                )
-
-                async_import_statistics(hass, cost_metadata, cost_statistics)
+                if recorder_adapter:
+                    recorder_adapter.import_cost_statistics(
+                        statistic_id=cost_entity_id,
+                        statistics=cost_statistics,
+                        name=cost_name,
+                        unit="PLN",
+                    )
+                else:
+                    cost_metadata = StatisticMetaData(
+                        source="recorder",
+                        statistic_id=cost_entity_id,
+                        name=cost_name,
+                        unit_of_measurement="PLN",
+                        has_mean=False,
+                        has_sum=True,
+                        mean_type=StatisticMeanType.NONE,
+                        unit_class=None,
+                    )
+                    async_import_statistics(hass, cost_metadata, cost_statistics)
                 _LOGGER.info(
                     "Imported %d cost statistics for %s (price: %.4f PLN/kWh)",
                     len(cost_statistics),
@@ -1104,17 +1135,25 @@ async def _import_meter_history(
                 ]
                 if not _stats:
                     continue
-                _meta = StatisticMetaData(
-                    source="recorder",
-                    statistic_id=_eid,
-                    name=None,
-                    unit_of_measurement="kWh",
-                    has_mean=False,
-                    has_sum=True,
-                    mean_type=StatisticMeanType.NONE,
-                    unit_class="energy",
-                )
-                async_import_statistics(hass, _meta, _stats)
+                if recorder_adapter:
+                    recorder_adapter.import_energy_statistics(
+                        statistic_id=_eid,
+                        statistics=_stats,
+                        name=None,
+                        unit="kWh",
+                    )
+                else:
+                    _meta = StatisticMetaData(
+                        source="recorder",
+                        statistic_id=_eid,
+                        name=None,
+                        unit_of_measurement="kWh",
+                        has_mean=False,
+                        has_sum=True,
+                        mean_type=StatisticMeanType.NONE,
+                        unit_class="energy",
+                    )
+                    async_import_statistics(hass, _meta, _stats)
                 _LOGGER.info("Backfilled %d flow statistics for %s", len(_stats), _eid)
         except Exception as err:
             _LOGGER.debug("Flow history backfill skipped for %s: %s", serial, err)

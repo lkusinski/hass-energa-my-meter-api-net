@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.2.0 (2026-09-07) — Wdrożenie Etapu 4 Architektury Docelowej V1.0 (Produkcja, Recorder Adapter, Migration Map, Diagnostyka i Alerty)
+
+### 🏗️ Architektura Produkcyjna Home Assistant (Implementation Brief V1.0 - Etap 4)
+- **Dedykowany Pakiet `ha/` i Adapter Home Assistant Recorder (`RecorderAdapter`):**
+  - Wyodrębniono `ha/recorder_adapter.py` izolujący domenę integracji od bezpośrednich wywołań silnika bazy danych Home Assistant Core.
+  - Wdrożono rygorystyczną walidację i sanityzację punktów `StatisticData`:
+    - **Gwarancja monotoniczności:** `validate_and_clean_statistics` blokuje i koryguje jakiekolwiek ujemne uskoki sum w ramach serii, eliminując błędy resetu licznika w HA.
+    - **Ochrona przed wartościami ujemnymi i skokami fizycznymi:** odrzucanie anomalii powyżej `MAX_HOURLY_KWH` (50 kWh/h) oraz ujemnych delty energii.
+    - **Prawidłowe metadane:** wymuszenie `has_mean: False`, `has_sum: True`, `StatisticMeanType.NONE`, `unit_class: energy`.
+- **Mapa Migracji i Wymiana Licznika (`MigrationMap`):**
+  - Zapewniono obsługę scenariusza *Meter Replacement* (wymiana fizycznego licznika na danym PPE): automatyczne wyliczanie offsetu kumulacyjnego gwarantuje gładką ciągłość sum energii bez zapaści ani utraty historii w Panelu Energia.
+  - Zdefiniowano most łączący dotychczasowe identyfikatory encji (`sensor.energa_{serial}_...`) ze stabilnymi logicznymi identyfikatorami PPE (`energa_mobile:{ppe_id}__...`).
+- **Odporność na Restarty Offline i Awarie Sieci:**
+  - Zabezpieczono wszystkie sensory (`EnergaStatisticsSensor`, `EnergaBankKwhSensor`, `EnergaBillCurrentSensor`): przy braku połączenia z API Energi podczas startu HA encje nie emitują fałszywych zer (`0.0`), zachowując poprzedni stan lub zgłaszając `unavailable` bez naruszania bazy statystyk.
+- **Oficjalna Platforma Diagnostyczna Home Assistant (`diagnostics.py`):**
+  - Wdrożono natywną funkcję `async_get_config_entry_diagnostics` dostępną z interfejsu HA (*Pobierz diagnostykę*).
+  - Automatyczne, rekursywne maskowanie danych wrażliwych (PII: hasła, tokeny, PESEL, adresy zamieszkania, telefony, e-maile).
+  - Pełny zrzut metryk kanonicznej bazy SQLite WAL: wersja schematu, liczba odczytów, zakres dat, rozmiar pliku, status koordynatora oraz aktywne alerty.
+- **System Wczesnego Ostrzegania Prosumenckiego (`alerts.py`):**
+  - Wykrywanie przerw w odczytach powyżej 48h (*source staleness*).
+  - Monitorowanie 12-miesięcznego terminu wygasania lotów FIFO (kroczące ostrzeżenia 30- i 7-dniowe dla depozytu net-billing i energii net-metering).
+  - Wykrywanie niezaakceptowanych rozbieżności faktur wymagających weryfikacji.
+- **Eliminacja Ostrzeżeń Bootstrapu Home Assistant:**
+  - Przeniesiono 2-letni auto-backfill z `hass.async_create_task` na `entry.async_create_background_task`, dzięki czemu start Home Assistant Core nie jest blokowany i przebiega natychmiastowo.
+
 ## v1.1.1 (2026-09-06) — Eliminacja Błędnego Kodowania Tytułu Pulpitu Lovelace (Auto-Purge PrzeglÄ d)
 
 ### 🎨 Standaryzacja Interfejsu i Poprawka Kodowania (i18n)
