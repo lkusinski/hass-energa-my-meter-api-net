@@ -6,8 +6,9 @@ Supports multi-zone tariffs (G12w: strefa 1 + strefa 2).
 """
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import logging
 from typing import override
 from zoneinfo import ZoneInfo
 
