@@ -10,12 +10,13 @@ Tests:
 - Zero float precision loss (Decimal assertions).
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import tempfile
 
 import pytest
 
+from custom_components.energa_mobile.adapters.pse.models import MarketPriceRecord
 from custom_components.energa_mobile.core.identity.models import (
     PPE,
     MeterLifecycle,
@@ -26,6 +27,7 @@ from custom_components.energa_mobile.core.readings.models import (
     SourceObservation,
 )
 from custom_components.energa_mobile.storage.sqlite.database import CanonicalStorage
+
 
 
 @pytest.fixture
@@ -402,4 +404,50 @@ def test_invoice_reconciliation_storage_and_approval(storage: CanonicalStorage):
     # Test user approval workflow
     ok = storage.set_reconciliation_approval("1200222768/FES/00017", approved=True, approved_by="admin")
     assert ok is True
+
+
+def test_rce_interval_prices_storage(storage: CanonicalStorage):
+    """Test saving and querying interval RCE market prices with start_utc/end_utc."""
+    now_utc = datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc)
+    records = [
+        MarketPriceRecord(
+            price_type="RCE",
+            applicable_year=2026,
+            applicable_month=9,
+            publication_date=date(2026, 8, 31),
+            price_mwh=Decimal("450.0"),
+            price_kwh=Decimal("0.450"),
+            interval_start_utc=now_utc,
+            interval_end_utc=now_utc + timedelta(minutes=15),
+            resolution="15M",
+            business_date=date(2026, 9, 1),
+        ),
+        MarketPriceRecord(
+            price_type="RCE",
+            applicable_year=2026,
+            applicable_month=9,
+            publication_date=date(2026, 8, 31),
+            price_mwh=Decimal("-30.0"),
+            price_kwh=Decimal("-0.030"),
+            interval_start_utc=now_utc + timedelta(minutes=15),
+            interval_end_utc=now_utc + timedelta(minutes=30),
+            resolution="15M",
+            business_date=date(2026, 9, 1),
+        ),
+    ]
+
+    count = storage.save_market_prices(records)
+    assert count == 2
+
+    # Query without filters
+    fetched = storage.get_rce_interval_prices()
+    assert len(fetched) == 2
+    assert fetched[0].price_kwh == Decimal("0.450")
+    assert fetched[1].price_kwh == Decimal("-0.030")
+
+    # Query with time filter
+    filtered = storage.get_rce_interval_prices(start_utc=now_utc + timedelta(minutes=15))
+    assert len(filtered) == 1
+    assert filtered[0].price_kwh == Decimal("-0.030")
+
 

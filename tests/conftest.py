@@ -25,6 +25,7 @@ _HA_MODULES = [
     "homeassistant.components",
     "homeassistant.components.sensor",
     "homeassistant.components.button",
+    "homeassistant.components.binary_sensor",
     "homeassistant.components.frontend",
     "homeassistant.components.lovelace",
     "homeassistant.components.recorder",
@@ -57,19 +58,39 @@ sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_
 sensor_mod = sys.modules["homeassistant.components.sensor"]
 sensor_mod.SensorDeviceClass = MagicMock()
 sensor_mod.SensorStateClass = MagicMock()
-sensor_mod.SensorEntity = type("SensorEntity", (), {})
+
+class _MockSensorEntity:
+    @property
+    def extra_state_attributes(self):
+        return getattr(self, "_attr_extra_state_attributes", {})
+
+sensor_mod.SensorEntity = _MockSensorEntity
 
 # Provide ButtonEntity as mock class
 button_mod = sys.modules["homeassistant.components.button"]
 button_mod.ButtonEntity = type("ButtonEntity", (), {})
 
+# Provide BinarySensorEntity and BinarySensorDeviceClass as mock class
+binary_sensor_mod = sys.modules["homeassistant.components.binary_sensor"]
+binary_sensor_mod.BinarySensorDeviceClass = MagicMock()
+
+class _MockBinarySensorEntity:
+    @property
+    def extra_state_attributes(self):
+        return getattr(self, "_attr_extra_state_attributes", {})
+
+binary_sensor_mod.BinarySensorEntity = _MockBinarySensorEntity
+
+
 comp_mod = sys.modules["homeassistant.components"]
 comp_mod.sensor = sensor_mod
 comp_mod.button = button_mod
+comp_mod.binary_sensor = binary_sensor_mod
 comp_mod.frontend = sys.modules["homeassistant.components.frontend"]
 comp_mod.lovelace = sys.modules["homeassistant.components.lovelace"]
 comp_mod.recorder = sys.modules["homeassistant.components.recorder"]
 comp_mod.persistent_notification = sys.modules["homeassistant.components.persistent_notification"]
+
 
 recorder_models = sys.modules["homeassistant.components.recorder.models"]
 class _StatisticMetaData:

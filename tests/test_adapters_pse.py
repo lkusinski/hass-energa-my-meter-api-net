@@ -10,6 +10,8 @@ Verifies:
 
 from datetime import date
 from decimal import Decimal
+import pytest
+
 
 from custom_components.energa_mobile.adapters.pse.rcem_parser import (
     get_effective_rcem,
@@ -83,3 +85,35 @@ def test_rcem_correction_and_as_of_filtering():
     assert eff_late.revision == 2
     assert eff_late.price_kwh == Decimal("0.32510")
     assert eff_late.is_correction is True
+
+
+@pytest.mark.asyncio
+async def test_async_fetch_rce_day():
+    """Verify async fetching of daily RCE records via PSE API."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.energa_mobile.adapters.pse.rce_client import async_fetch_rce_day
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={
+        "value": [
+            {
+                "dtime": "2026-09-01 00:15:00",
+                "period": "00:00 - 00:15",
+                "rce_pln": 520.0,
+                "dtime_utc": "2026-08-31 22:15:00",
+                "period_utc": "22:00 - 22:15",
+                "business_date": "2026-09-01",
+                "publication_ts_utc": "2026-08-31 12:01:00",
+            }
+        ]
+    })
+
+    mock_session = MagicMock()
+    mock_session.get.return_value.__aenter__.return_value = mock_resp
+
+    records = await async_fetch_rce_day(mock_session, date(2026, 9, 1))
+    assert len(records) == 1
+    assert records[0].price_kwh == Decimal("0.520")
+    assert records[0].business_date == date(2026, 9, 1)
+

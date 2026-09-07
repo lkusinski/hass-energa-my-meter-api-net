@@ -8,7 +8,7 @@ Explicit applicable month, publication date, and revision tracking.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 
@@ -26,8 +26,13 @@ class MarketPriceRecord:
     source_url: str = "https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej"
     is_correction: bool = False
     raw_snippet: str = ""
+    interval_start_utc: datetime | None = None
+    interval_end_utc: datetime | None = None
+    resolution: str = "1M"                  # "1M", "1H", or "15M"
+    business_date: date | None = None
 
     @property
     def price_with_vat_multiplier(self) -> Decimal:
         """Standard 1.23 multiplier for net-billing valuation."""
         return round(self.price_kwh * Decimal("1.23"), 5)
+

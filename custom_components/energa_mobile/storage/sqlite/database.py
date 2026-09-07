@@ -604,14 +604,23 @@ class CanonicalStorage:
         """
         params = []
         for p in prices:
-            pid = f"{p.price_type}_{p.applicable_year}_{p.applicable_month:02d}_rev{p.revision}"
+            if p.interval_start_utc:
+                dt_iso = p.interval_start_utc.isoformat()
+                pid = f"{p.price_type}_{p.applicable_year}_{p.applicable_month:02d}_{dt_iso}_rev{p.revision}"
+                start_str = dt_iso
+                res = p.resolution or "15M"
+            else:
+                pid = f"{p.price_type}_{p.applicable_year}_{p.applicable_month:02d}_rev{p.revision}"
+                start_str = None
+                res = p.resolution or "1M"
+
             params.append((
                 pid,
                 p.price_type,
                 p.applicable_year,
                 p.applicable_month,
-                None,
-                "1M",
+                start_str,
+                res,
                 p.publication_date.isoformat(),
                 p.revision,
                 str(p.price_mwh),
@@ -623,6 +632,54 @@ class CanonicalStorage:
         with self._connection() as conn:
             cur = conn.executemany(sql, params)
             return cur.rowcount
+
+    def get_rce_interval_prices(
+        self,
+        start_utc: datetime | None = None,
+        end_utc: datetime | None = None,
+    ) -> list[MarketPriceRecord]:
+        """Fetch chronological interval RCE prices."""
+        conditions = ["price_type = 'RCE'"]
+        params: list[str] = []
+        if start_utc is not None:
+            conditions.append("interval_start_utc >= ?")
+            params.append(start_utc.isoformat())
+        if end_utc is not None:
+            conditions.append("interval_start_utc <= ?")
+            params.append(end_utc.isoformat())
+
+        where_clause = " AND ".join(conditions)
+        sql = f"""
+        SELECT * FROM market_price
+        WHERE {where_clause}
+        ORDER BY interval_start_utc ASC;
+        """
+        with self._connection() as conn:
+            cur = conn.execute(sql, params)
+            out = []
+            for row in cur.fetchall():
+                start_dt = (
+                    datetime.fromisoformat(row["interval_start_utc"])
+                    if row["interval_start_utc"]
+                    else None
+                )
+                out.append(
+                    MarketPriceRecord(
+                        price_type=row["price_type"],
+                        applicable_year=row["applicable_year"],
+                        applicable_month=row["applicable_month"],
+                        publication_date=date.fromisoformat(row["publication_date"]),
+                        revision=row["revision"],
+                        price_mwh=Decimal(row["price_mwh"]),
+                        price_kwh=Decimal(row["price_kwh"]),
+                        source_url=row["source_url"],
+                        is_correction=bool(row["is_correction"]),
+                        raw_snippet=row["raw_snippet"] or "",
+                        interval_start_utc=start_dt,
+                        resolution=row["resolution"] or "15M",
+                    )
+                )
+            return out
 
     def get_market_prices(
         self,

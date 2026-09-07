@@ -135,7 +135,10 @@ async def async_setup_entry(
     sw_version = str(integration.version)  # Must be string for AwesomeVersion
 
     # Create coordinator
-    coordinator = EnergaCoordinator(hass, api, entry)
+    storage = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("storage")
+    coordinator = EnergaCoordinator(hass, api, entry, storage=storage)
+    hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})["coordinator"] = coordinator
+
 
     # Initial data fetch
     try:
@@ -724,7 +727,26 @@ async def async_setup_entry(
                             )
                         )
 
+            # Dynamic PSE RCE and BESS Arbitrage Spread sensors (Etap 5)
+            sensors.append(
+                PseRceDynamicPriceSensor(
+                    coordinator=coordinator,
+                    entry=entry,
+                    meter_point_id=meter_id,
+                    meter_serial=serial,
+                )
+            )
+            sensors.append(
+                PseRceArbitrageSpreadSensor(
+                    coordinator=coordinator,
+                    entry=entry,
+                    meter_point_id=meter_id,
+                    meter_serial=serial,
+                )
+            )
+
         # === PRICE SENSORS (F1: v4.14) ===
+
 
         if has_zones:
             price_keys = [
@@ -942,7 +964,7 @@ async def async_setup_entry(
 class EnergaCoordinator(DataUpdateCoordinator):
     """Coordinator for fetching Energa data with smart fetch."""
 
-    def __init__(self, hass: HomeAssistant, api, entry) -> None:
+    def __init__(self, hass: HomeAssistant, api, entry, storage=None) -> None:
         """Initialize coordinator."""
         super().__init__(
             hass,
@@ -952,6 +974,16 @@ class EnergaCoordinator(DataUpdateCoordinator):
         )
         self.api = api
         self.entry = entry
+        self.storage = storage
+        from .projections.arbitrage import ArbitrageEngine
+        self._arbitrage_engine = ArbitrageEngine(
+            battery_efficiency=Decimal(str(entry.options.get("bess_efficiency", "0.88"))),
+            charge_hours=int(entry.options.get("bess_charge_hours", 3)),
+            discharge_hours=int(entry.options.get("bess_discharge_hours", 3)),
+        )
+        self._rce_interval_records: list = []
+        self._arbitrage_plan = None
+        self._rce_current_record = None
         self._hourly_stats: dict = {}  # {meter_id: {"import_1": [...], "import_2": [...], ...}}
         self._pre_fetched_stats: dict = {}  # {entity_id: {"sum": x, "start": dt}}
         self._meter_totals: dict = {}  # {meter_id: {"import_1": x, "import_2": y, ...}}
@@ -962,6 +994,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._rolling_365: dict = {}  # v0.2.11: {meter_id: {suffix: kWh, "_coverage_days": n}}
         self._monthly: dict = {}  # v0.2.20: {meter_id: {(y, m): {suffix: kWh}}} for FIFO bank
         self._mtd: dict = {}  # v0.2.11: month-to-date sums, same shape
+
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -1045,7 +1078,40 @@ class EnergaCoordinator(DataUpdateCoordinator):
             except Exception as rce_err:
                 _LOGGER.debug("RCE auto-fetch skipped: %s", rce_err)
 
+            # === Dynamic RCE auto-fetch & BESS Arbitrage Plan ===
+            try:
+                from .adapters.pse.rce_client import async_fetch_rce_day
+                from datetime import date as _date, datetime as _dt
+                today = _date.today()
+                sess = getattr(self.api, "_session", None)
+                if sess is None or getattr(sess, "closed", True):
+                    sess = self.api._create_session_fn()
+
+                records_today = await async_fetch_rce_day(sess, today)
+                all_rce = list(records_today)
+                now_local = _dt.now()
+                if now_local.hour >= 14:
+                    tomorrow = today + timedelta(days=1)
+                    records_tomorrow = await async_fetch_rce_day(sess, tomorrow)
+                    all_rce.extend(records_tomorrow)
+
+                if all_rce:
+                    self._rce_interval_records = all_rce
+                    if self.storage:
+                        self.storage.save_market_prices(all_rce)
+
+                    now_utc = _dt.now(timezone.utc)
+                    curr = next(
+                        (r for r in all_rce if r.interval_start_utc and r.interval_end_utc and r.interval_start_utc <= now_utc < r.interval_end_utc),
+                        None
+                    )
+                    self._rce_current_record = curr or (all_rce[-1] if all_rce else None)
+                    self._arbitrage_plan = self._arbitrage_engine.plan_day(all_rce, target_date=today)
+            except Exception as rce_dyn_err:
+                _LOGGER.debug("Dynamic RCE auto-fetch skipped: %s", rce_dyn_err)
+
             # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===
+
             await self.async_refresh_settlement(notify=False)
 
             return active_meters
@@ -2935,37 +3001,79 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         except (ValueError, TypeError):
             bill_mtd = None
         # Extrapolation of flows to month end, then re-price.
-        # Early-month volatility smoothing (day 1-6): blend MTD with trailing history
+        # Check if Canonical Storage has historical interval readings for this meter (Etap 5)
+        storage = getattr(self.coordinator, "storage", None)
+        profile_res = None
+        if storage:
+            try:
+                from .projections.forecast import HourlyProfileForecaster
+                canonical_readings = storage.get_readings(
+                    ppe_id=str(self._meter_id),
+                    resolution="1h",
+                )
+                if canonical_readings:
+                    forecaster = HourlyProfileForecaster(
+                        readings=canonical_readings,
+                        tariff_code=self._meter_tariff(),
+                    )
+                    if forecaster.history_days_count >= 7:
+                        month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
+                        mtd_readings = [
+                            r for r in canonical_readings
+                            if r.interval_start_utc >= month_start_utc
+                        ]
+                        profile_res = forecaster.forecast_month(
+                            current_date=today,
+                            mtd_readings=mtd_readings,
+                            tariff_options=opts,
+                            rce_price=rce,
+                            warehouse_kwh=self._warehouse_cover() if old_system else 0.0,
+                            is_old_system=old_system,
+                        )
+            except Exception as pf_err:
+                _LOGGER.debug("Profile forecaster failed, falling back: %s", pf_err)
+
         days_in_month = _cal.monthrange(today.year, today.month)[1]
         elapsed = min(max(today.day, 1), days_in_month)
 
-        rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(self._meter_id), {})
-        cov = int(rolling.get("_coverage_days", 0)) if rolling else 0
-
-        if elapsed < 7 and cov >= 14:
-            w_mtd = elapsed / 7.0
-            w_hist = 1.0 - w_mtd
-
-            t_imp_d = float(rolling.get("import_1" if self._has_zones else "import", 0)) / cov
-            t_imp_n = float(rolling.get("import_2", 0)) / cov if self._has_zones else 0.0
-            t_exp = (
-                (float(rolling.get("export_1", 0)) + float(rolling.get("export_2", 0))) / cov
-                if self._has_zones
-                else float(rolling.get("export", 0)) / cov
+        if profile_res and profile_res.method == "hourly_profile_wal":
+            f_imp_d = float(profile_res.forecast_import_t1_kwh)
+            f_imp_n = float(profile_res.forecast_import_t2_kwh)
+            f_exp = float(profile_res.forecast_export_total_kwh)
+            forecast_method = (
+                f"hourly_profile_wal ({profile_res.history_days_count} dni historii, "
+                f"trend: {profile_res.trend_factor:.2f})"
             )
-
-            m_imp_d = imp_d / elapsed
-            m_imp_n = imp_n / elapsed
-            m_exp = exp_tot / elapsed
-
-            f_imp_d = (w_mtd * m_imp_d + w_hist * t_imp_d) * days_in_month
-            f_imp_n = (w_mtd * m_imp_n + w_hist * t_imp_n) * days_in_month
-            f_exp = (w_mtd * m_exp + w_hist * t_exp) * days_in_month
-            forecast_method = f"smoothed_blend_7d (dzień {elapsed}/7, {w_hist*100:.0f}% historia)"
         else:
-            factor = days_in_month / elapsed
-            f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
-            forecast_method = "linear_mtd"
+            # Early-month volatility smoothing (day 1-6): blend MTD with trailing history
+            rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(self._meter_id), {})
+            cov = int(rolling.get("_coverage_days", 0)) if rolling else 0
+
+            if elapsed < 7 and cov >= 14:
+                w_mtd = elapsed / 7.0
+                w_hist = 1.0 - w_mtd
+
+                t_imp_d = float(rolling.get("import_1" if self._has_zones else "import", 0)) / cov
+                t_imp_n = float(rolling.get("import_2", 0)) / cov if self._has_zones else 0.0
+                t_exp = (
+                    (float(rolling.get("export_1", 0)) + float(rolling.get("export_2", 0))) / cov
+                    if self._has_zones
+                    else float(rolling.get("export", 0)) / cov
+                )
+
+                m_imp_d = imp_d / elapsed
+                m_imp_n = imp_n / elapsed
+                m_exp = exp_tot / elapsed
+
+                f_imp_d = (w_mtd * m_imp_d + w_hist * t_imp_d) * days_in_month
+                f_imp_n = (w_mtd * m_imp_n + w_hist * t_imp_n) * days_in_month
+                f_exp = (w_mtd * m_exp + w_hist * t_exp) * days_in_month
+                forecast_method = f"smoothed_blend_7d (dzień {elapsed}/7, {w_hist*100:.0f}% historia)"
+            else:
+                factor = days_in_month / elapsed
+                f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
+                forecast_method = "linear_mtd"
+
 
         if old_system:
             f_cover_d, f_cover_n = split_cover(
@@ -3000,7 +3108,18 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             "period": f"{today.year}-{today.month:02d}",
             "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if profile_res and profile_res.method == "hourly_profile_wal":
+            self._attr_extra_state_attributes.update({
+                "profile_confidence": profile_res.confidence_score,
+                "profile_history_days": profile_res.history_days_count,
+                "profile_trend_factor": profile_res.trend_factor,
+                "forecast_import_t1_kwh": float(profile_res.forecast_import_t1_kwh),
+                "forecast_import_t2_kwh": float(profile_res.forecast_import_t2_kwh),
+                "forecast_export_t1_kwh": float(profile_res.forecast_export_t1_kwh),
+                "forecast_export_t2_kwh": float(profile_res.forecast_export_t2_kwh),
+            })
         if bill_mtd is not None and bill_fc is not None:
+
             self._attr_extra_state_attributes.update({
                 "system": "stare net-metering (magazyn kWh)"
                 if old_system else "nowe net-billing (depozyt PLN)",
@@ -3228,5 +3347,111 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             "energy_export_2": attrs.get("mtd_export_night_kwh"),
         }
         return key_map.get(self._component_key)
+
+
+class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
+    """Dynamic RCE market price sensor (PSE OIRE 15-min / hourly intervals)."""
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "PLN/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._meter_point_id = meter_point_id
+        self._meter_serial = meter_serial
+        self._attr_unique_id = f"energa_{meter_point_id}_rce_dynamic_price"
+        self._attr_name = "Dynamiczna cena energii RCE"
+        self._attr_icon = "mdi:chart-line"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._meter_point_id)},
+            name=f"Licznik {self._meter_serial}",
+            manufacturer="Energa-Operator",
+            model="Licznik zdalnego odczytu",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        rec = getattr(self.coordinator, "_rce_current_record", None)
+        if rec is not None:
+            return float(rec.price_kwh)
+        rcem = getattr(self.coordinator, "_rce_cache", None)
+        return float(rcem) if rcem is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        rec = getattr(self.coordinator, "_rce_current_record", None)
+        if rec:
+            return {
+                "price_mwh": float(rec.price_mwh),
+                "resolution": rec.resolution,
+                "interval_start_utc": rec.interval_start_utc.isoformat() if rec.interval_start_utc else None,
+                "interval_end_utc": rec.interval_end_utc.isoformat() if rec.interval_end_utc else None,
+                "source": "PSE OIRE API (api.raporty.pse.pl)",
+            }
+        return {"source": "brak danych"}
+
+
+class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
+    """BESS Arbitrage Spread sensor comparing discharge peak vs charge valley."""
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "PLN/kWh"
+    _attr_device_class = SensorDeviceClass.MONETARY
+
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._meter_point_id = meter_point_id
+        self._meter_serial = meter_serial
+        self._attr_unique_id = f"energa_{meter_point_id}_bess_arbitrage_spread"
+        self._attr_name = "Spread arbitrażowy BESS (RCE)"
+        self._attr_icon = "mdi:swap-vertical-bold"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._meter_point_id)},
+            name=f"Licznik {self._meter_serial}",
+            manufacturer="Energa-Operator",
+            model="Licznik zdalnego odczytu",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        plan = getattr(self.coordinator, "_arbitrage_plan", None)
+        if plan is not None:
+            return float(plan.effective_spread_kwh)
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        plan = getattr(self.coordinator, "_arbitrage_plan", None)
+        if not plan:
+            return {"status": "no_plan"}
+        return {
+            "is_spread_profitable": plan.is_spread_profitable,
+            "avg_charge_price_pln_kwh": float(plan.avg_charge_price_kwh),
+            "avg_discharge_price_pln_kwh": float(plan.avg_discharge_price_kwh),
+            "battery_efficiency": float(plan.battery_efficiency),
+            "target_date": plan.target_date.isoformat(),
+        }
+
 
 

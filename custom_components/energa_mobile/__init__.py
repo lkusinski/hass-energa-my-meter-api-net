@@ -52,8 +52,9 @@ from .dashboard_generator import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "button"]
+PLATFORMS = ["sensor", "button", "binary_sensor"]
 TIMEZONE = ZoneInfo("Europe/Warsaw")
+
 
 # Blind auto-backfill window (v0.3.0): the Energa API holds ~2 years.
 # No detection probing — history just downloads in the background.
