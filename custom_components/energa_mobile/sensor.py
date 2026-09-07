@@ -564,6 +564,7 @@ async def async_setup_entry(
                 )
             )
 
+
             # MTD energy volume breakdown sensors (v1.0.8)
             if has_zones:
                 sensors.append(
@@ -3127,6 +3128,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "mtd_import_night_kwh": round(imp_n, 2),
                 "mtd_sale_total_pln": bill_mtd["sale_total"],
                 "mtd_distr_total_pln": bill_mtd["distr_total"],
+                "mtd_sale_gross_pln": bill_mtd["sale_gross"],
+                "mtd_distr_gross_pln": bill_mtd["distr_gross"],
                 "mtd_netto_pln": bill_mtd["netto"],
                 "mtd_vat_pln": bill_mtd["vat"],
                 "mtd_brutto_pln": bill_mtd["brutto"],
@@ -3134,8 +3137,11 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "mtd_deposit_applied_pln": bill_mtd["deposit_applied"],
                 "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
                 "forecast_brutto_pln": bill_fc["brutto"],
+                "forecast_sale_gross_pln": bill_fc["sale_gross"],
+                "forecast_distr_gross_pln": bill_fc["distr_gross"],
                 "forecast_deposit_applied_pln": bill_fc["deposit_applied"],
                 "forecast_do_zaplaty_pln": bill_fc["do_zaplaty"],
+
                 "cover_day_kwh": cover_d,
                 "cover_night_kwh": cover_n,
                 "capacity_source": capacity_source,
@@ -3244,14 +3250,16 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             "mtd_import_night_kwh": round(imp_n, 2),
             "mtd_export_day_kwh": round(exp_d, 2),
             "mtd_export_night_kwh": round(exp_n, 2),
-            "mtd_sale_total_pln": bill_mtd["sale_total"],
-            "mtd_distr_total_pln": bill_mtd["distr_total"],
-            "mtd_netto_pln": bill_mtd["netto"],
-            "mtd_vat_pln": bill_mtd["vat"],
-            "mtd_brutto_pln": bill_mtd["brutto"],
-            "mtd_deposit_pln": bill_mtd["deposit"],
-            "mtd_deposit_applied_pln": bill_mtd["deposit_applied"],
-            "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
+            "mtd_sale_total_pln": bill_mtd.get("sale_total"),
+            "mtd_distr_total_pln": bill_mtd.get("distr_total"),
+            "mtd_sale_gross_pln": bill_mtd.get("sale_gross", round((bill_mtd.get("sale_total") or 0.0) * 1.23, 2)),
+            "mtd_distr_gross_pln": bill_mtd.get("distr_gross", round((bill_mtd.get("distr_total") or 0.0) * 1.23, 2)),
+            "mtd_netto_pln": bill_mtd.get("netto"),
+            "mtd_vat_pln": bill_mtd.get("vat"),
+            "mtd_brutto_pln": bill_mtd.get("brutto"),
+            "mtd_deposit_pln": bill_mtd.get("deposit"),
+            "mtd_deposit_applied_pln": bill_mtd.get("deposit_applied"),
+            "mtd_do_zaplaty_pln": bill_mtd.get("do_zaplaty"),
             "cover_day_kwh": cover_d,
             "cover_night_kwh": cover_n,
             "capacity_source": capacity_source,
@@ -3320,6 +3328,27 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             "calculated_at": attrs.get("calculated_at"),
             "system": attrs.get("system"),
         }
+        if self._component_key == "sale_total":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_sale_total_pln"),
+                "gross_pln": attrs.get("mtd_sale_gross_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
+        elif self._component_key == "distr_total":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_distr_total_pln"),
+                "gross_pln": attrs.get("mtd_distr_gross_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
+        elif self._component_key == "brutto":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_netto_pln"),
+                "vat_pln": attrs.get("mtd_vat_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
         if self._component_key == "deposit_applied":
             val = attrs.get("mtd_deposit_applied_pln")
             if val is not None:
@@ -3333,8 +3362,8 @@ class EnergaBillComponentSensor(EnergaBillCurrentSensor):
             return None
         key_map = {
             "brutto": attrs.get("mtd_brutto_pln"),
-            "sale_total": attrs.get("mtd_sale_total_pln"),
-            "distr_total": attrs.get("mtd_distr_total_pln"),
+            "sale_total": attrs.get("mtd_sale_gross_pln"),
+            "distr_total": attrs.get("mtd_distr_gross_pln"),
             "deposit": attrs.get("mtd_deposit_pln"),
             "deposit_applied": attrs.get("mtd_deposit_applied_pln"),
             "cover_day": attrs.get("cover_day_kwh"),
@@ -3384,20 +3413,24 @@ class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         rec = getattr(self.coordinator, "_rce_current_record", None)
         if rec is not None:
-            return float(rec.price_kwh)
+            return float(rec.price_with_vat_multiplier)
         rcem = getattr(self.coordinator, "_rce_cache", None)
-        return float(rcem) if rcem is not None else None
+        return round(float(rcem) * 1.23, 5) if rcem is not None else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         rec = getattr(self.coordinator, "_rce_current_record", None)
         if rec:
             return {
+                "price_brutto_pln_kwh": float(rec.price_with_vat_multiplier),
+                "price_netto_pln_kwh": float(rec.price_kwh),
+                "vat_multiplier": 1.23,
                 "price_mwh": float(rec.price_mwh),
                 "resolution": rec.resolution,
                 "interval_start_utc": rec.interval_start_utc.isoformat() if rec.interval_start_utc else None,
                 "interval_end_utc": rec.interval_end_utc.isoformat() if rec.interval_end_utc else None,
                 "source": "PSE OIRE API (api.raporty.pse.pl)",
+                "note": "Wartość brutto (z VAT 23%) — wycena depozytu prosumenckiego zgodnie z art. 4b ustawy OZE",
             }
         return {"source": "brak danych"}
 
@@ -3437,7 +3470,7 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> float | None:
         plan = getattr(self.coordinator, "_arbitrage_plan", None)
         if plan is not None:
-            return float(plan.effective_spread_kwh)
+            return round(float(plan.effective_spread_kwh) * 1.23, 5)
         return None
 
     @property
@@ -3447,10 +3480,15 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
             return {"status": "no_plan"}
         return {
             "is_spread_profitable": plan.is_spread_profitable,
+            "effective_spread_brutto_pln_kwh": round(float(plan.effective_spread_kwh) * 1.23, 5),
+            "effective_spread_netto_pln_kwh": float(plan.effective_spread_kwh),
+            "avg_charge_price_brutto_pln_kwh": round(float(plan.avg_charge_price_kwh) * 1.23, 5),
+            "avg_discharge_price_brutto_pln_kwh": round(float(plan.avg_discharge_price_kwh) * 1.23, 5),
             "avg_charge_price_pln_kwh": float(plan.avg_charge_price_kwh),
             "avg_discharge_price_pln_kwh": float(plan.avg_discharge_price_kwh),
             "battery_efficiency": float(plan.battery_efficiency),
             "target_date": plan.target_date.isoformat(),
+            "vat_multiplier": 1.23,
         }
 
 
