@@ -143,6 +143,11 @@ class RecorderAdapter:
         Returns:
             Number of successfully imported points.
         """
+        stat_id = (
+            metadata.get("statistic_id")
+            if isinstance(metadata, dict)
+            else getattr(metadata, "statistic_id", "")
+        )
         if not statistics:
             return 0
 
@@ -152,7 +157,7 @@ class RecorderAdapter:
             last_known_sum=last_known_sum,
         )
         if not clean_stats:
-            _LOGGER.debug("No valid statistics to import for %s after cleaning", metadata.statistic_id)
+            _LOGGER.debug("No valid statistics to import for %s after cleaning", stat_id)
             return 0
 
         try:
@@ -160,14 +165,14 @@ class RecorderAdapter:
             _LOGGER.info(
                 "Successfully imported %d statistics for %s (final sum: %.3f)",
                 len(clean_stats),
-                metadata.statistic_id,
+                stat_id,
                 clean_stats[-1]["sum"],
             )
             return len(clean_stats)
         except Exception as err:
             _LOGGER.error(
                 "Failed to import statistics for %s: %s",
-                metadata.statistic_id,
+                stat_id,
                 err,
                 exc_info=True,
             )

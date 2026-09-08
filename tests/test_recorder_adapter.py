@@ -102,3 +102,19 @@ def test_recorder_adapter_empty_batch():
     """Verify handling of empty or None statistics."""
     adapter = RecorderAdapter(hass=MagicMock())
     assert adapter.import_statistics(MagicMock(), []) == 0
+
+
+def test_recorder_adapter_dict_metadata():
+    """Verify import_statistics accepts a plain dict (TypedDict in HA Core)."""
+    hass_mock = MagicMock()
+    adapter = RecorderAdapter(hass=hass_mock)
+    dict_meta = {
+        "statistic_id": "sensor.energa_test_id",
+        "source": "recorder",
+        "unit_of_measurement": "kWh",
+    }
+    t0 = datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc)
+    stats = [{"start": t0, "state": 1.5}]
+    count = adapter.import_statistics(dict_meta, stats, last_known_sum=10.0)
+    assert count == 1
+
