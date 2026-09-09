@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.1 (2026-09-09) — Ujednolicenie Brutto (z VAT 23%) i Poprawki Stabilności Recordera
+
+### 🛡️ Poprawki Stabilności i Bezpieczeństwo
+- **Bezpieczny odczyt `StatisticMetaData` TypedDict (`ha/recorder_adapter.py`):**
+  - Obsługa obiektów `StatisticMetaData` będących typami słownikowymi `TypedDict` w Home Assistant Core (zapobieganie `AttributeError: 'dict' object has no attribute 'statistic_id'`).
+- **Brakujący import `Decimal` (`sensor.py`):**
+  - Naprawiono błąd `NameError: name 'Decimal' is not defined` przy inicjalizacji współczynnika sprawności BESS (`bess_efficiency`).
+
+### 💰 Spójność Finansowa i Ujednolicenie Kwot BRUTTO (z VAT 23%)
+- **Ujednolicenie encji składowych rachunku (`EnergaBillComponentSensor`):**
+  - Wszystkie sensory wartości bilingowych (`sale_total`, `distr_total`) raportują teraz kwoty **BRUTTO (z VAT 23%)**, zapewniając pełną tożsamość: $\text{Energia Czynna Brutto} + \text{Dystrybucja Brutto} = \text{Koszt Brutto MTD}$.
+  - Wartości netto oraz stawka VAT są dostępne w atrybutach encji (`netto_pln`, `vat_rate`).
+- **Ceny dynamiczne RCE w brutto (`sensor.energa_[meter_id]_rce_dynamic_price`):**
+  - Zgodnie z art. 4b ustawy o OZE wycena depozytu oraz stawka rynkowa prezentowana jest z mnożnikiem VAT 23%.
+
 ## v1.3.0 (2026-09-07) — Wdrożenie Etapu 5 Architektury Docelowej V1.0 (Zaawansowane Prognozowanie WAL, Ceny Dynamiczne PSE RCE i Arbitraż BESS)
 
 ### 📈 Zaawansowane Prognozowanie Godzinowe (Hourly Profile Forecaster)
