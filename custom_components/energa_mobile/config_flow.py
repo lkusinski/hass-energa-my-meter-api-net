@@ -45,6 +45,7 @@ from .const import (
     CONF_TARIFF_TRADE_FEE,
     CONF_USERNAME,
     CONF_USE_ROLLING_365D,
+    CONF_INVERTER_ENERGY_ENTITY,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_PLN,
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
+    DEFAULT_INVERTER_ENERGY_ENTITY,
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
     DEFAULT_SETTLEMENT_DATE,
@@ -448,6 +450,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             current_settlement = self._config_entry.options.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
             current_auto_settle = self._config_entry.options.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT)
             current_rolling = self._config_entry.options.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D)
+            current_inverter = self._config_entry.options.get(CONF_INVERTER_ENERGY_ENTITY, DEFAULT_INVERTER_ENERGY_ENTITY)
 
             return self.async_show_form(
                 step_id="prices",
@@ -481,6 +484,11 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
                         vol.Optional(
+                            CONF_INVERTER_ENERGY_ENTITY, default=current_inverter
+                        ): selector.EntitySelector(
+                            selector.EntitySelectorConfig(domain="sensor", device_class="energy")
+                        ) if hasattr(selector, "EntitySelector") else str,
+                        vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
                         ): bool,
                         vol.Optional(
@@ -506,6 +514,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             current_settlement = self._config_entry.options.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
             current_auto_settle = self._config_entry.options.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT)
             current_rolling = self._config_entry.options.get(CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D)
+            current_inverter = self._config_entry.options.get(CONF_INVERTER_ENERGY_ENTITY, DEFAULT_INVERTER_ENERGY_ENTITY)
 
             return self.async_show_form(
                 step_id="prices",
@@ -535,6 +544,11 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_INVERTER_ENERGY_ENTITY, default=current_inverter
+                        ): selector.EntitySelector(
+                            selector.EntitySelectorConfig(domain="sensor", device_class="energy")
+                        ) if hasattr(selector, "EntitySelector") else str,
                         vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
                         ): bool,

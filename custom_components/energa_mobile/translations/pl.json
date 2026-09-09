@@ -65,6 +65,7 @@
           "bank_rce_price": "Cena RCE/RCEm [PLN/kWh] (np. 0.26288 dla 07.2026)",
           "bank_initial_kwh": "Bank początkowy kWh (stary system, z faktury)",
           "bank_initial_pln": "Bank początkowy PLN (nowy system, z faktury)",
+          "inverter_energy_entity": "Encja energii falownika (kWh z PV dla autokonsumpcji)",
           "rce_auto_fetch": "Auto-pobieraj RCEm z API PSE co 24h",
           "settlement_date": "Rocznica rozliczenia rocznego RRRR-MM-DD (stary system, np. data faktury)",
           "enable_auto_settlement": "Pokazuj atrybuty kalibracji rozliczenia/wygasania",
