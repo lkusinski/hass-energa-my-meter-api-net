@@ -50,6 +50,7 @@ from .const import (
     CONF_SETTLEMENT_DATE,
     CONF_TARIFF_CAPACITY,
     CONF_USE_ROLLING_365D,
+    CONF_INVERTER_ENERGY_ENTITY,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_PLN,
@@ -747,6 +748,33 @@ async def async_setup_entry(
                 )
             )
 
+            # Hour-Synchronized PV Autoconsumption & Microgrid sensors
+            autoconsumption_specs = [
+                ("today_kwh", "Autokonsumpcja Dziś", "mdi:solar-power-variant", "kWh", SensorDeviceClass.ENERGY),
+                ("yesterday_kwh", "Autokonsumpcja Wczoraj", "mdi:solar-power", "kWh", SensorDeviceClass.ENERGY),
+                ("mtd_kwh", "Autokonsumpcja MTD", "mdi:home-lightning-bolt", "kWh", SensorDeviceClass.ENERGY),
+                ("autoconsumption_ratio_mtd", "Stopień Autokonsumpcji MTD", "mdi:percent-outline", "%", None),
+                ("self_sufficiency_ratio_mtd", "Samowystarczalność Energetyczna MTD", "mdi:home-battery", "%", None),
+                ("today_home_consumption_kwh", "Realne Zużycie Domu Dziś", "mdi:home-clock", "kWh", SensorDeviceClass.ENERGY),
+                ("mtd_home_consumption_kwh", "Realne Zużycie Domu MTD", "mdi:home-analytics", "kWh", SensorDeviceClass.ENERGY),
+                ("savings_mtd_pln", "Oszczędność Autokonsumpcja MTD", "mdi:piggy-bank-outline", "PLN", SensorDeviceClass.MONETARY),
+            ]
+            for m_key, m_name, m_icon, m_unit, m_devclass in autoconsumption_specs:
+                sensors.append(
+                    EnergaAutoconsumptionSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        metric_key=m_key,
+                        name=m_name,
+                        icon=m_icon,
+                        unit=m_unit,
+                        device_class=m_devclass,
+                        serial=serial,
+                    )
+                )
+
         # === PRICE SENSORS (F1: v4.14) ===
 
 
@@ -996,7 +1024,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._rolling_365: dict = {}  # v0.2.11: {meter_id: {suffix: kWh, "_coverage_days": n}}
         self._monthly: dict = {}  # v0.2.20: {meter_id: {(y, m): {suffix: kWh}}} for FIFO bank
         self._mtd: dict = {}  # v0.2.11: month-to-date sums, same shape
-
+        self._autoconsumption_summary: dict = {}
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -1115,6 +1143,9 @@ class EnergaCoordinator(DataUpdateCoordinator):
             # === v0.2.11 settlement calibration: rolling 365d + MTD sums ===
 
             await self.async_refresh_settlement(notify=False)
+
+            # === Autoconsumption calculation (hour-synchronized with PV) ===
+            await self.async_update_autoconsumption(active_meters)
 
             return active_meters
 
@@ -1345,6 +1376,113 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     self.async_update_listeners()
         except Exception as cal_err:
             _LOGGER.debug("Settlement refresh skipped: %s", cal_err)
+
+    async def async_update_autoconsumption(self, active_meters: list[dict]) -> None:
+        """Compute hour-synchronized autoconsumption metrics for active meters."""
+        inverter_entity = self.entry.options.get(CONF_INVERTER_ENERGY_ENTITY)
+        if not inverter_entity:
+            return
+
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        from .autoconsumption import compute_autoconsumption_summary
+        from .core.readings.models import IntervalReading
+        from .ha.recorder_adapter import RecorderAdapter
+
+        rec_adapter = RecorderAdapter(self.hass)
+        now = datetime.now(timezone.utc)
+        start_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # 1. Fetch hourly solar generation from inverter entity
+        try:
+            pv_hourly = await rec_adapter.async_get_hourly_statistics(
+                inverter_entity, start_month, now
+            )
+        except Exception as err:
+            _LOGGER.warning("Failed to fetch inverter hourly statistics for %s: %s", inverter_entity, err)
+            pv_hourly = {}
+
+        if not pv_hourly:
+            _LOGGER.debug("No inverter hourly statistics found for %s", inverter_entity)
+            return
+
+        # 2. For each meter, gather interval readings
+        for meter in active_meters:
+            meter_id = str(meter["meter_point_id"])
+            ppe_id = str(meter.get("ppe", meter_id))
+            tariff = meter.get("tariff_name", "G12W")
+
+            readings: list[IntervalReading] = []
+            if self.storage:
+                try:
+                    readings = self.storage.get_readings(
+                        ppe_id=ppe_id,
+                        start_utc=start_month,
+                        end_utc=now,
+                        resolution="1h",
+                    )
+                    if not readings and ppe_id != meter_id:
+                        readings = self.storage.get_readings(
+                            ppe_id=meter_id,
+                            start_utc=start_month,
+                            end_utc=now,
+                            resolution="1h",
+                        )
+                except Exception as err:
+                    _LOGGER.debug("Error getting readings from storage for %s: %s", meter_id, err)
+
+            # Fallback to coordinator's _hourly_stats if storage yielded no readings
+            if not readings and meter_id in self._hourly_stats:
+                h_stats = self._hourly_stats[meter_id]
+                imp_pts = h_stats.get("import", []) or []
+                if not imp_pts and (h_stats.get("import_1") or h_stats.get("import_2")):
+                    z1 = dict(h_stats.get("import_1", []))
+                    z2 = dict(h_stats.get("import_2", []))
+                    all_times = sorted(set(z1.keys()).union(z2.keys()))
+                    imp_pts = [(t, z1.get(t, 0.0) + z2.get(t, 0.0)) for t in all_times]
+
+                exp_pts = h_stats.get("export", []) or []
+                if not exp_pts and (h_stats.get("export_1") or h_stats.get("export_2")):
+                    z1 = dict(h_stats.get("export_1", []))
+                    z2 = dict(h_stats.get("export_2", []))
+                    all_times = sorted(set(z1.keys()).union(z2.keys()))
+                    exp_pts = [(t, z1.get(t, 0.0) + z2.get(t, 0.0)) for t in all_times]
+
+                exp_dict = dict(exp_pts)
+                for dt_pt, imp_val in imp_pts:
+                    exp_val = exp_dict.get(dt_pt, 0.0)
+                    utc_dt = dt_pt if dt_pt.tzinfo else dt_pt.replace(tzinfo=timezone.utc)
+                    readings.append(
+                        IntervalReading(
+                            ppe_id=ppe_id,
+                            meter_id=meter_id,
+                            register="combined",
+                            interval_start_utc=utc_dt,
+                            resolution="1h",
+                            import_kwh=Decimal(str(round(imp_val, 4))),
+                            export_kwh=Decimal(str(round(exp_val, 4))),
+                            quality="ok",
+                            source="energa",
+                        )
+                    )
+
+            if readings:
+                summary = compute_autoconsumption_summary(
+                    pv_hourly_map=pv_hourly,
+                    energa_readings=readings,
+                    tariff=tariff,
+                    options=self.entry.options,
+                    now_dt=now,
+                )
+                self._autoconsumption_summary[meter_id] = summary
+                _LOGGER.info(
+                    "Autoconsumption updated for meter %s: today=%.2f kWh, MTD=%.2f kWh (ratio: %.1f%%, saved: %.2f PLN)",
+                    meter_id,
+                    summary.today_kwh,
+                    summary.mtd_kwh,
+                    summary.autoconsumption_ratio_mtd,
+                    summary.savings_mtd_pln,
+                )
 
     def _compute_period_sums_from_memory(self, start, end) -> dict:
         """Fallback: compute period sums directly from coordinator._hourly_stats in memory."""
@@ -3491,6 +3629,81 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
             "target_date": plan.target_date.isoformat(),
             "vat_multiplier": 1.23,
         }
+
+
+class EnergaAutoconsumptionSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for reporting hour-synchronized PV autoconsumption metrics."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: EnergaCoordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        metric_key: str,
+        name: str,
+        icon: str,
+        unit: str | None = "kWh",
+        device_class: SensorDeviceClass | None = SensorDeviceClass.ENERGY,
+        serial: str = "",
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = str(meter_id)
+        self._entry = entry
+        self._metric_key = metric_key
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        self._attr_unique_id = f"energa_{meter_id}_autoconsumption_{metric_key}"
+        self._attr_device_info = device_info
+        self._attr_state_class = None
+
+    @property
+    def native_value(self) -> float | None:
+        summary = self.coordinator._autoconsumption_summary.get(self._meter_id)
+        if summary is None:
+            return None
+        return getattr(summary, self._metric_key, None)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        summary = self.coordinator._autoconsumption_summary.get(self._meter_id)
+        if not summary:
+            return {
+                "status": "waiting_for_sync",
+                "inverter_entity": self._entry.options.get(CONF_INVERTER_ENERGY_ENTITY, ""),
+            }
+        attrs: dict[str, Any] = {
+            "synced_hours_count": summary.synced_hours_count,
+            "synced_until": summary.synced_until.isoformat() if summary.synced_until else None,
+            "inverter_entity": self._entry.options.get(CONF_INVERTER_ENERGY_ENTITY, ""),
+        }
+        if self._metric_key in ("today_kwh", "today_home_consumption_kwh"):
+            attrs.update({
+                "today_autoconsumption_kwh": summary.today_kwh,
+                "today_home_consumption_kwh": summary.today_home_consumption_kwh,
+                "savings_today_pln": summary.savings_today_pln,
+            })
+        elif self._metric_key in ("yesterday_kwh", "yesterday_home_consumption_kwh"):
+            attrs.update({
+                "yesterday_autoconsumption_kwh": summary.yesterday_kwh,
+                "yesterday_home_consumption_kwh": summary.yesterday_home_consumption_kwh,
+                "savings_yesterday_pln": summary.savings_yesterday_pln,
+            })
+        elif self._metric_key in ("mtd_kwh", "mtd_home_consumption_kwh", "savings_mtd_pln", "autoconsumption_ratio_mtd", "self_sufficiency_ratio_mtd"):
+            attrs.update({
+                "mtd_autoconsumption_kwh": summary.mtd_kwh,
+                "mtd_home_consumption_kwh": summary.mtd_home_consumption_kwh,
+                "mtd_pv_kwh": summary.mtd_pv_kwh,
+                "autoconsumption_ratio_mtd": summary.autoconsumption_ratio_mtd,
+                "self_sufficiency_ratio_mtd": summary.self_sufficiency_ratio_mtd,
+                "savings_mtd_pln": summary.savings_mtd_pln,
+            })
+        return attrs
+
 
 
 

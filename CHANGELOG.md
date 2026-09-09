@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.3.2 (2026-09-09) — Silnik Autokonsumpcji PV i Realnego Zużycia Domu (Hour-by-Hour Alignment)
+
+### ☀️ Asynchroniczny Bilans Autokonsumpcji i Domu (`autoconsumption.py`)
+- **Dopasowanie godzinowe (Hour-by-Hour Bucket Alignment):**
+  - Wyeliminowano błąd pozornej „100% autokonsumpcji” wynikający z opóźnienia OSD Mój Licznik (3–24h) względem falownika PV. Bilans liczony jest ściśle w zamkniętych interwałach godzinowych, dla których dostępne są oba źródła telemetrii.
+  - Wyliczanie rzeczywistego zużycia domu: $\text{Zużycie Domu}[h] = \text{Pobór}[h] + \max(0, \text{Produkcja PV}[h] - \text{Oddanie}[h])$.
+  - Wyliczanie oszczędności finansowych w kwotach **BRUTTO (z VAT 23%)** w odniesieniu do stawek zmiennych energii i dystrybucji taryf G11, G12 oraz G12w.
+
+### 🏠 Nowe Sensory Telemetryczne Home Assistant
+- `sensor.energa_[meter_id]_autokonsumpcja_dzis` (kWh z atrybutami godzinowymi synchronizacji)
+- `sensor.energa_[meter_id]_autokonsumpcja_wczoraj` (kWh — pełna, ostateczna zamknięta doba)
+- `sensor.energa_[meter_id]_autokonsumpcja_mtd` (kWh)
+- `sensor.energa_[meter_id]_stopien_autokonsumpcji_mtd` (% wyprodukowanej energii zużytej na miejscu)
+- `sensor.energa_[meter_id]_samowystarczalnosc_energetyczna_mtd` (% zapotrzebowania domu pokrytego ze słońca)
+- `sensor.energa_[meter_id]_realne_zuzycie_domu_dzis` (kWh)
+- `sensor.energa_[meter_id]_realne_zuzycie_domu_mtd` (kWh)
+- `sensor.energa_[meter_id]_oszczednosc_autokonsumpcja_mtd` (PLN brutto zaoszczędzone dzięki autokonsumpcji)
+
+### ⚙️ Konfiguracja i Integracja z HA Recorder
+- W `OptionsFlow` dodano pole wyboru encji falownika (`inverter_energy_entity`, np. `sensor.solis_energy_total`).
+- `RecorderAdapter.async_get_hourly_statistics`: odpytuje rejestrator HA Core (`statistics_during_period`) o godzinowe delty produkcji falownika.
+
 ## v1.3.1 (2026-09-09) — Ujednolicenie Brutto (z VAT 23%) i Poprawki Stabilności Recordera
 
 ### 🛡️ Poprawki Stabilności i Bezpieczeństwo

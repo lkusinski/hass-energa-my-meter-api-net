@@ -213,3 +213,62 @@ class RecorderAdapter:
         return self.import_statistics(
             meta, statistics, last_known_sum=last_known_sum, max_hourly=500.0
         )
+
+    async def async_get_hourly_statistics(
+        self,
+        statistic_id: str,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> dict[datetime, float]:
+        """Fetch hourly energy delta (kWh) from HA Recorder for a given statistic_id."""
+        if not self.hass or not statistic_id:
+            return {}
+
+        import functools
+
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+
+            res = await get_instance(self.hass).async_add_executor_job(
+                functools.partial(
+                    statistics_during_period,
+                    self.hass,
+                    start_time,
+                    end_time,
+                    [statistic_id],
+                    "hour",
+                    None,
+                    {"change", "state", "sum"},
+                )
+            )
+            rows = (res or {}).get(statistic_id) or []
+            hourly_map: dict[datetime, float] = {}
+
+            for idx, r in enumerate(rows):
+                raw_start = r.get("start")
+                if raw_start is None:
+                    continue
+                if isinstance(raw_start, (int, float)):
+                    dt = datetime.fromtimestamp(raw_start, tz=timezone.utc)
+                elif isinstance(raw_start, datetime):
+                    dt = raw_start if raw_start.tzinfo else raw_start.replace(tzinfo=timezone.utc)
+                else:
+                    continue
+
+                dt_hour = dt.replace(minute=0, second=0, microsecond=0)
+                change = r.get("change")
+                if change is not None and change >= 0:
+                    hourly_map[dt_hour] = float(change)
+                elif r.get("sum") is not None:
+                    if idx > 0 and rows[idx - 1].get("sum") is not None:
+                        d = float(r["sum"]) - float(rows[idx - 1]["sum"])
+                        hourly_map[dt_hour] = max(0.0, d)
+                    else:
+                        hourly_map[dt_hour] = 0.0
+
+            return hourly_map
+        except Exception as err:
+            _LOGGER.warning("Could not fetch hourly statistics for %s: %s", statistic_id, err)
+            return {}
+

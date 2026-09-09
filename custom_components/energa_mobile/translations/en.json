@@ -65,6 +65,7 @@
           "bank_rce_price": "RCE/RCEm price [PLN/kWh] (e.g. 0.26288 for 07.2026)",
           "bank_initial_kwh": "Bank initial kWh (old system, from invoice)",
           "bank_initial_pln": "Bank initial PLN (new system, from invoice)",
+          "inverter_energy_entity": "Inverter Energy Entity (PV Total/Daily kWh for Autoconsumption)",
           "rce_auto_fetch": "Auto-fetch RCEm from PSE API every 24h",
           "settlement_date": "Annual settlement anniversary YYYY-MM-DD (old system, e.g. invoice date)",
           "enable_auto_settlement": "Show settlement/expiry calibration attributes",
