@@ -167,6 +167,47 @@ def test_idempotent_readings_insert(storage: CanonicalStorage):
     assert readings[1].import_kwh == Decimal("1.104")
 
 
+def test_get_readings_ppe_prefix_and_meter_id_fallback(storage: CanonicalStorage):
+    """Test that get_readings matches across PPE_ prefix variants and meter_id."""
+    ppe_id = "372197"
+    storage.upsert_ppe(PPE(ppe_id=ppe_id))
+
+    t1 = datetime(2026, 9, 8, 10, 0, 0)
+    t2 = datetime(2026, 9, 8, 11, 0, 0)
+
+    # Saved with PPE_ prefix
+    r1 = IntervalReading(
+        ppe_id="PPE_372197",
+        meter_id="11685328",
+        register="1.8.0",
+        interval_start_utc=t1,
+        resolution="1h",
+        import_kwh=Decimal("0.500"),
+    )
+    # Saved with raw numeric ppe_id
+    r2 = IntervalReading(
+        ppe_id="372197",
+        meter_id="11685328",
+        register="1.8.0",
+        interval_start_utc=t2,
+        resolution="1h",
+        import_kwh=Decimal("0.750"),
+    )
+    storage.insert_readings_idempotent([r1, r2])
+
+    # Querying with '372197' finds both
+    res = storage.get_readings(ppe_id="372197", resolution="1h")
+    assert len(res) == 2
+
+    # Querying with 'PPE_372197' finds both
+    res_pref = storage.get_readings(ppe_id="PPE_372197", resolution="1h")
+    assert len(res_pref) == 2
+
+    # Querying with meter_id finds both
+    res_meter = storage.get_readings(ppe_id="other_ppe", meter_id="11685328", resolution="1h")
+    assert len(res_meter) == 2
+
+
 def test_reading_revisions(storage: CanonicalStorage):
     """Test that higher revisions supersede earlier ones without deleting history."""
     ppe_id = "PL_REV_001"
