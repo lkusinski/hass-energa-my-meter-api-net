@@ -1420,14 +1420,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         start_utc=start_month,
                         end_utc=now,
                         resolution="1h",
+                        meter_id=meter_id,
                     )
-                    if not readings and ppe_id != meter_id:
-                        readings = self.storage.get_readings(
-                            ppe_id=meter_id,
-                            start_utc=start_month,
-                            end_utc=now,
-                            resolution="1h",
-                        )
                 except Exception as err:
                     _LOGGER.debug("Error getting readings from storage for %s: %s", meter_id, err)
 

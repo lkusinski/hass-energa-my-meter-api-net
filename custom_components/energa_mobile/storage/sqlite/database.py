@@ -452,10 +452,19 @@ class CanonicalStorage:
         start_utc: datetime | None = None,
         end_utc: datetime | None = None,
         resolution: str = "1h",
+        meter_id: str | None = None,
     ) -> list[IntervalReading]:
         """Fetch canonical readings matching filters, ordered by time ASC."""
-        conditions = ["ppe_id = ?", "resolution = ?"]
-        params: list[str] = [ppe_id, resolution]
+        ppe_clean = ppe_id.replace("PPE_", "")
+        ppe_variants = list(dict.fromkeys([ppe_id, ppe_clean, f"PPE_{ppe_clean}"]))
+        if meter_id:
+            ppe_variants.append(meter_id)
+        placeholders = ", ".join(["?"] * len(ppe_variants))
+        conditions = [
+            f"(ppe_id IN ({placeholders}) OR meter_id IN ({placeholders}))",
+            "resolution = ?",
+        ]
+        params: list[str] = ppe_variants + ppe_variants + [resolution]
 
         if register:
             conditions.append("register = ?")
