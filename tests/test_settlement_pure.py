@@ -14,6 +14,7 @@ from custom_components.energa_mobile.core.settlement.fifo_net_billing import (
     run_fifo_net_billing,
 )
 from custom_components.energa_mobile.core.settlement.fifo_net_metering import (
+    run_dual_zone_fifo_net_metering,
     run_fifo_net_metering,
 )
 from custom_components.energa_mobile.core.settlement.models import SettlementLot
@@ -69,6 +70,29 @@ class TestNetMeteringPureFIFO:
         )
         assert res_expired.total_active_balance == Decimal("0.0")
         assert res_expired.total_expired == Decimal("600.0")
+
+    def test_dual_zone_pure_fifo(self):
+        flows_l1 = [
+            {"year": 2025, "month": 1, "import_kwh": "50.0", "export_kwh": "500.0"},
+        ]
+        flows_l2 = [
+            {"year": 2025, "month": 1, "import_kwh": "100.0", "export_kwh": "300.0"},
+        ]
+        s1, s2, total = run_dual_zone_fifo_net_metering(
+            ppe_id="PL_TEST_DUAL",
+            monthly_flows_l1=flows_l1,
+            monthly_flows_l2=flows_l2,
+            coefficient=Decimal("0.8"),
+            today=date(2025, 2, 1),
+        )
+        # L1: 500 * 0.8 = 400 deposit - 50 consumed = 350
+        assert s1.total_active_balance == Decimal("350.0")
+        assert s1.active_lots[0].zone == "day"
+        # L2: 300 * 0.8 = 240 deposit - 100 consumed = 140
+        assert s2.total_active_balance == Decimal("140.0")
+        assert s2.active_lots[0].zone == "night"
+        # Total: 350 + 140 = 490
+        assert total == Decimal("490.0")
 
 
 class TestNetBillingPureFIFO:

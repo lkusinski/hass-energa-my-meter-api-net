@@ -249,6 +249,53 @@ def fifo_kwh_bank(
     return (round(bank, 2), detail)
 
 
+def fifo_dual_zone_kwh_bank(
+    flows_l1, flows_l2, coefficient: float, today=None
+) -> tuple[float, dict]:
+    """Dual-zone (L1 day / L2 night) old-system warehouse calculation (v1.4.0).
+
+    Energa Operator net-metering rules for multi-zone tariffs (G12, G12w, G12r):
+    energy introduced in Zone 1 settles ONLY against consumption in Zone 1.
+    Energy introduced in Zone 2 settles ONLY against consumption in Zone 2.
+    Each zone maintains its own independent FIFO 12-month expiry queue.
+
+    Args:
+        flows_l1: iterable of (year, month, import_kwh, export_kwh) for Zone 1.
+        flows_l2: iterable of (year, month, import_kwh, export_kwh) for Zone 2.
+        coefficient: prosumer factor (0.8 / 0.7).
+        today: reference date (default: today).
+
+    Returns:
+        (total_bank, combined_detail)
+    """
+    bank_1, detail_1 = fifo_kwh_bank(flows_l1, coefficient, today=today)
+    bank_2, detail_2 = fifo_kwh_bank(flows_l2, coefficient, today=today)
+    total_bank = round(bank_1 + bank_2, 2)
+
+    total_expired = round(detail_1.get("expired_kwh", 0.0) + detail_2.get("expired_kwh", 0.0), 2)
+    total_uncovered = round(detail_1.get("uncovered_kwh", 0.0) + detail_2.get("uncovered_kwh", 0.0), 2)
+    total_deposits = round(detail_1.get("deposits_kwh", 0.0) + detail_2.get("deposits_kwh", 0.0), 2)
+    months_used = max(detail_1.get("months_used", 0), detail_2.get("months_used", 0))
+
+    l1_share = round((bank_1 / total_bank * 100.0), 1) if total_bank > 0 else 0.0
+    l2_share = round((bank_2 / total_bank * 100.0), 1) if total_bank > 0 else 0.0
+
+    combined_detail = {
+        "bank_kwh_l1": bank_1,
+        "bank_kwh_l2": bank_2,
+        "bank_l1_share_pct": l1_share,
+        "bank_l2_share_pct": l2_share,
+        "expired_kwh": total_expired,
+        "uncovered_kwh": total_uncovered,
+        "deposits_kwh": total_deposits,
+        "months_used": months_used,
+        "detail_l1": detail_1,
+        "detail_l2": detail_2,
+    }
+    return (total_bank, combined_detail)
+
+
+
 def anchor_flow_series(cums, base: float = 0.0) -> list:
     """Anchor a cumulative flow series on an existing sum (v0.3.4).
 
