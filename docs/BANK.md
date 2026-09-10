@@ -108,8 +108,23 @@ cards:
 
 ## Weryfikacja z fakturami
 
-* Faktura G12W-stare `01.05–30.06.2026`: `Razem w magazynie L1/L2` = `752+606=1358`. Baseline = wskazania `od` faktury lub `do`; bank start `1358 + (licznik-baseline)×0.8`.
+* Faktura G12W-stare `01.05–30.06.2026` (Wiśniowa): `Razem w magazynie L1/L2` = `752+606=1358`. Baseline = wskazania `od` faktury lub `do`; bank start `1358 + (licznik-baseline)×0.8`.
+* Faktura G12W-stare `01.07–31.08.2026` (Wiśniowa — Faktura VAT 4104603000/FES/00042):
+  * Magazyn przed: L1 = **752 kWh**, L2 = **606 kWh** (Razem = **1358 kWh**).
+  * Przepływy w okresie (01.07–31.08):
+    * **L1 (dzień):** pobór 83 kWh (w 100% z magazynu L1, pozostało 669 kWh), oddanie 1061 kWh $\times 0.8 =$ **+849 kWh** nowego wkładu.
+    * **L2 (noc/weekend):** pobór 342 kWh (w 100% z magazynu L2, pozostało 264 kWh), oddanie 843 kWh $\times 0.8 =$ **+674 kWh** nowego wkładu.
+  * Magazyn po rozliczeniu: L1 = **1518 kWh**, L2 = **938 kWh**, **Łącznie = 2456 kWh**.
+  * Koszt: **158,72 zł brutto** (129,04 zł netto + 29,68 zł VAT). Energia czynna i zmienna sieciowa: 0,00 zł. Koszty wynikają w 100% z opłat stałych (150,31 zł brutto) oraz ustawowych opłat zmiennych nieumarzalnych od fizycznego poboru (8,41 zł brutto: akcyza 3,03 zł, OZE 3,81 zł, kogeneracja 1,57 zł).
 * Faktura G12W-nowe `07.2026`: `456×0.26288×1.23=147.44` → `Depozyt po 0.00` → bank PLN start `0.00`, potem `export×RCE×1.23 - import×cena` per strefa. Sprawdź w `Deweloperskie → Stany → Bank PLN atrybuty`.
+
+## Dualny Magazyn Energii (L1 / L2) w Taryfach Wielostrefowych
+
+W taryfach strefowych (G12, G12w, G12r) operator rozlicza wirtualny magazyn prosumencki **niezależnie dla każdej strefy czasowej**:
+- **Podmagazyn L1 (dzienny / szczytowy):** zasilany nadwyżką z produkcji fotowoltaicznej w dzień, pokrywa bieżące pobory w strefie dziennej.
+- **Podmagazyn L2 (nocny / weekendowy):** zasilany nadwyżkami weekendowymi i pozaszczytowymi, pokrywa pobory w strefie taniej.
+
+Oba podmagazyny posiadają własną kolejkę FIFO z ważnością wkładów przez 12 miesięcy. Integracja sumuje oba portfele do głównej encji `sensor.energa_<nr-licznika>_bank_wirtualny_kwh` (np. 2456 kWh), a docelowo udostępnia szczegółowe atrybuty strefowe `bank_kwh_l1` (1518 kWh) oraz `bank_kwh_l2` (938 kWh).
 
 > Po `v0.2.10` możesz usunąć `packages/bank_energii.yaml` — bank jest natywny.
 
@@ -144,6 +159,8 @@ Stawki w `Options → Ceny` (`tariff_*`, domyślne G12W z faktur 2026).
 * Faktura G12W-stare 01.05–30.06: magazyn przed `0/0`, po `752+606=1358`;
   przybliżenie deltami `(1067.7+1066.3)×0.8−(109.4+253.6)=1344` vs faktura `1358`
   (~1% — różnica to bilansowanie godzinowe sprzedawcy).
+* Faktura G12W-stare 01.07–31.08: magazyn przed `752+606=1358`, po `1518+938=2456`;
+  bilans poboru (425 kWh) w 100% z magazynu; nowy wsad 1523 kWh; faktura 158,72 zł brutto.
 * Faktura G12W-nowe 07: `456×0.26288×1.23=147.44`, depozyt po `0.00`.
   Faktura liczy z sumy sald godzinowych (456 kWh), sensor z delty licznika (523 kWh) —
   znane ~13% przybliżenie (`hourly_netting_note`). Bank PLN to pozycja netto
