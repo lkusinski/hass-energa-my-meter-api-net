@@ -294,6 +294,21 @@ class TestFifoDepositsAndLevel:
         _, detail = fifo_kwh_bank([], 0.8)
         assert detail["deposits_kwh"] == 0.0
 
+    def test_graceful_partial_coverage(self):
+        """4 miesiące historii - poziom wylicza się poprawnie, nie zwraca None (v1.3.4)."""
+        from datetime import date
+        from custom_components.energa_mobile.settlement import (
+            fifo_kwh_bank,
+            warehouse_level_pct,
+        )
+
+        flows = [(2026, m, 200.0, 300.0) for m in range(1, 5)]  # sty-kwi
+        bank, detail = fifo_kwh_bank(flows, 0.8, today=date(2026, 4, 30))
+        level = warehouse_level_pct(bank, detail["deposits_kwh"])
+        assert level is not None
+        assert 0.0 <= level <= 100.0
+        assert detail["months_used"] == 4
+
 
 class TestOrphanRemovedUids:
     """v0.3.0 removals: Wykryj button + export cost placeholders."""

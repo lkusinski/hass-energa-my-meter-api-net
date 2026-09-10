@@ -2032,7 +2032,7 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             attrs["fifo_deposits_kwh"] = fifo_detail.get("deposits_kwh")
             attrs["fifo_note"] = (
                 "Magazyn odtworzony z miesięcznych przepływów (FIFO 12 m-cy, "
-                "bez przepisywania z faktury). Wymaga historii ~11 mies."
+                "bez przepisywania z faktury). Wymaga historii min. 3 mies."
             )
         if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             settle_str = opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
@@ -2245,12 +2245,16 @@ class EnergaBankLevelSensor(CoordinatorEntity, SensorEntity):
         if bank is None or not detail:
             return None
         level = warehouse_level_pct(bank, detail.get("deposits_kwh"))
+        months_used = int(detail.get("months_used", 0) or 0)
         self._attr_extra_state_attributes = {
             "bank_kwh": bank,
             "deposits_12m_kwh": detail.get("deposits_kwh"),
             "expired_12m_kwh": detail.get("expired_kwh"),
             "uncovered_12m_kwh": detail.get("uncovered_kwh"),
-            "months_used": detail.get("months_used"),
+            "months_used": months_used,
+            "coverage_status": (
+                f"partial ({months_used}/12m)" if months_used < 12 else "full (12m)"
+            ),
             "source": "FIFO 12 m-cy z miesięcznych przepływów (jak Bank kWh)",
             "formula": "Bank / wkłady_12m × 100",
         }

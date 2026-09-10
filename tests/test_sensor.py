@@ -463,4 +463,30 @@ class TestPeriodSumsFallback:
         assert out["99999"]["export"] == 8.0
 
 
+def test_fifo_bank_from_monthly_partial_coverage():
+    """Verify FIFO bank coverage threshold in sensor.py (v1.3.4)."""
+    from datetime import date
+    from custom_components.energa_mobile.sensor import _fifo_bank_from_monthly
+
+    # 2 months with flows (< 3) -> should return (None, None)
+    monthly_2m = {
+        (2026, 8): {"import": 100.0, "export": 200.0},
+        (2026, 9): {"import": 150.0, "export": 250.0},
+    }
+    bank_2m, detail_2m = _fifo_bank_from_monthly(monthly_2m, 0.8)
+    assert bank_2m is None
+    assert detail_2m is None
+
+    # 3 months with flows (>= 3) -> should return valid bank and detail
+    monthly_3m = {
+        (2026, 7): {"import": 80.0, "export": 180.0},
+        (2026, 8): {"import": 100.0, "export": 200.0},
+        (2026, 9): {"import": 150.0, "export": 250.0},
+    }
+    bank_3m, detail_3m = _fifo_bank_from_monthly(monthly_3m, 0.8)
+    assert bank_3m is not None
+    assert detail_3m is not None
+    assert detail_3m["months_used"] == 3
+
+
 
