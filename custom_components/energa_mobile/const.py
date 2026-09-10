@@ -15,6 +15,8 @@ CONF_BALANCE_BASELINE_IMPORT = "balance_baseline_import"  # Meter import reading
 CONF_BALANCE_BASELINE_EXPORT = "balance_baseline_export"  # Meter export reading at period start (kWh)
 CONF_BANK_RCE_PRICE = "bank_rce_price"  # PLN/kWh for net-billing (RCE/RCEm, e.g. 0.26288 for 07.2026)
 CONF_BANK_INITIAL_KWH = "bank_initial_kwh"  # Initial kWh bank for old prosumer (e.g. 1358 from the 06.2026 invoice)
+CONF_BANK_INITIAL_KWH_L1 = "bank_initial_kwh_l1"  # Initial kWh bank for zone 1 / peak (e.g. 752 from 06.2026 invoice)
+CONF_BANK_INITIAL_KWH_L2 = "bank_initial_kwh_l2"  # Initial kWh bank for zone 2 / off-peak (e.g. 606 from 06.2026 invoice)
 CONF_BANK_INITIAL_PLN = "bank_initial_pln"  # Initial PLN bank for new prosumer (e.g. 0.0 on 01.08.2026 after the 07.2026 settlement)
 CONF_INVERTER_ENERGY_ENTITY = "inverter_energy_entity"  # Inverter total/daily energy entity for autoconsumption
 DEFAULT_INVERTER_ENERGY_ENTITY = ""
@@ -28,6 +30,8 @@ DEFAULT_PROSUMER_COEFFICIENT = 0.8
 DEFAULT_BALANCE_BASELINE = 0.0  # 0 = count from meter installation (lifetime)
 DEFAULT_BANK_RCE_PRICE = 0.26288  # RCEm for 07.2026, update monthly via PSE
 DEFAULT_BANK_INITIAL_KWH = 0.0
+DEFAULT_BANK_INITIAL_KWH_L1 = 0.0
+DEFAULT_BANK_INITIAL_KWH_L2 = 0.0
 DEFAULT_BANK_INITIAL_PLN = 0.0
 
 # Tariff fee table overrides for the full-bill forecast (v0.2.14).

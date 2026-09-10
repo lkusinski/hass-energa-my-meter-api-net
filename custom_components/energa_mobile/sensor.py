@@ -42,6 +42,8 @@ from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
     CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_KWH_L1,
+    CONF_BANK_INITIAL_KWH_L2,
     CONF_BANK_INITIAL_PLN,
     CONF_BANK_RCE_PRICE,
     CONF_ENABLE_AUTO_SETTLEMENT,
@@ -53,6 +55,8 @@ from .const import (
     CONF_INVERTER_ENERGY_ENTITY,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
+    DEFAULT_BANK_INITIAL_KWH_L1,
+    DEFAULT_BANK_INITIAL_KWH_L2,
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
     DEFAULT_ENABLE_AUTO_SETTLEMENT,
@@ -69,6 +73,7 @@ from .settlement import (
     FlowAccumulator,
     days_to_settlement,
     deposit_valid_until,
+    fifo_dual_zone_kwh_bank,
     fifo_kwh_bank,
     is_export_prosumer,
     month_to_date_forecast,
@@ -95,14 +100,15 @@ _LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Warsaw")
 
 
-def _fifo_bank_from_monthly(monthly: dict, coeff: float):
-    """Shared FIFO-12m bank math (v0.3.0).
+def _fifo_bank_from_monthly(monthly: dict, coeff: float, has_zones: bool = False):
+    """Shared FIFO-12m bank math (v0.3.0, dual-zone support v1.4.0).
 
     Args:
         monthly: coordinator._monthly[meter_id] = {(y, m): {suffix: kWh}}.
         coeff: prosumer coefficient.
+        has_zones: whether the meter has multi-zone tariff.
 
-    Returns (bank_kwh, detail) when ~11 months of flows exist,
+    Returns (bank_kwh, detail) when >= FIFO_MIN_COVERAGE_MONTHS of flows exist,
     else (None, None). Same rule as the Bank sensor so the Level (%)
     sensor never disagrees with it.
     """
@@ -111,16 +117,30 @@ def _fifo_bank_from_monthly(monthly: dict, coeff: float):
     if not monthly:
         return (None, None)
     flows = []
+    flows_1 = []
+    flows_2 = []
+    has_any_zone_data = False
     for (fy, fm) in trailing_months(_date.today(), 13):
         d = monthly.get((fy, fm), {})
         try:
-            exp = float(d.get("export", d.get("export_1", 0) + d.get("export_2", 0)))
-            imp = float(d.get("import", d.get("import_1", 0) + d.get("import_2", 0)))
+            exp1 = float(d.get("export_1", 0.0))
+            exp2 = float(d.get("export_2", 0.0))
+            imp1 = float(d.get("import_1", 0.0))
+            imp2 = float(d.get("import_2", 0.0))
+            if exp1 > 0 or exp2 > 0 or imp1 > 0 or imp2 > 0:
+                has_any_zone_data = True
+            exp = float(d.get("export", exp1 + exp2))
+            imp = float(d.get("import", imp1 + imp2))
         except (ValueError, TypeError):
+            exp1, exp2, imp1, imp2 = 0.0, 0.0, 0.0, 0.0
             exp, imp = 0.0, 0.0
         flows.append((fy, fm, imp, exp))
+        flows_1.append((fy, fm, imp1, exp1))
+        flows_2.append((fy, fm, imp2, exp2))
     if sum(1 for (_, _, i, e) in flows if i > 0 or e > 0) < FIFO_MIN_COVERAGE_MONTHS:
         return (None, None)
+    if has_zones or has_any_zone_data:
+        return fifo_dual_zone_kwh_bank(flows_1, flows_2, coeff, today=_date.today())
     return fifo_kwh_bank(flows, coeff)
 
 
@@ -439,6 +459,27 @@ async def async_setup_entry(
                         serial=serial,
                     )
                 )
+                if has_zones:
+                    sensors.append(
+                        EnergaBankZoneSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            zone=1,
+                            serial=serial,
+                        )
+                    )
+                    sensors.append(
+                        EnergaBankZoneSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            zone=2,
+                            serial=serial,
+                        )
+                    )
                 # v0.3.0: warehouse fill level % (needs FIFO history;
                 # unknown until ~11 months of statistics exist).
                 sensors.append(
@@ -1926,6 +1967,11 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
         be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
 
+        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        bank_1 = None
+        bank_2 = None
+
         if self._has_zones:
             # Per-zone baselines if available, else global
             bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
@@ -1938,6 +1984,11 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             exp1 = float(totals.get("export_1", totals.get("export", 0)))
             exp2 = float(totals.get("export_2", 0))
 
+            init_l1 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
+            init_l2 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
+            if init_l1 > 0 or init_l2 > 0:
+                initial = round(init_l1 + init_l2, 2)
+
             # If per-zone baselines not set, use total baselines with total import/export
             if bi1 == bi and bi2 == bi:
                 # No per-zone baseline — use total import/export minus global baseline
@@ -1946,12 +1997,21 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             else:
                 net_imp = (imp1 - bi1) + (imp2 - bi2)
                 net_exp = (exp1 - be1) + (exp2 - be2)
+
+            # Per-zone net flows & bank for L1 and L2
+            net_imp1 = imp1 - bi1
+            net_exp1 = exp1 - be1
+            bilans1 = (net_exp1 * coeff) - net_imp1
+            bank_1 = round(max(0.0, bilans1) + init_l1, 2)
+
+            net_imp2 = imp2 - bi2
+            net_exp2 = exp2 - be2
+            bilans2 = (net_exp2 * coeff) - net_imp2
+            bank_2 = round(max(0.0, bilans2) + init_l2, 2)
         else:
             net_imp = float(totals.get("import", 0)) - bi
             net_exp = float(totals.get("export", 0)) - be
 
-        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
         bilans = (net_exp * coeff) - net_imp
         bank = max(0, bilans) + initial
         mode = "baseline"
@@ -1987,9 +2047,9 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
                 )
 
         # v0.2.20 FIFO mode: warehouse reconstructed from monthly flows
-        # (no invoice typing). Wins over rolling/baseline when ~11 months
+        # (no invoice typing). Wins over rolling/baseline when >=3 months
         # of statistics exist (needs Download History once).
-        # Shared helper with the Level (%) sensor (v0.3.0).
+        # Shared helper with the Level (%) sensor (v0.3.0, dual-zone v1.4.0).
         fifo_detail = None
         if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
@@ -1998,13 +2058,18 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
                     coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
                 except (ValueError, TypeError):
                     coeff_f = DEFAULT_PROSUMER_COEFFICIENT
-                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f)
+                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f, has_zones=self._has_zones)
                 if _fifo_bank is not None and fifo_detail is not None:
                     bank = _fifo_bank
                     mode = "fifo_12m"
+                    if "bank_kwh_l1" in fifo_detail:
+                        bank_1 = fifo_detail["bank_kwh_l1"]
+                    if "bank_kwh_l2" in fifo_detail:
+                        bank_2 = fifo_detail["bank_kwh_l2"]
                     _LOGGER.debug(
-                        "BankKwh %s fifo: bank=%.2f expired=%.2f uncovered=%.2f",
-                        mid, bank, fifo_detail.get("expired_kwh", 0),
+                        "BankKwh %s fifo: bank=%.2f (L1=%s, L2=%s) expired=%.2f uncovered=%.2f",
+                        mid, bank, bank_1, bank_2,
+                        fifo_detail.get("expired_kwh", 0),
                         fifo_detail.get("uncovered_kwh", 0),
                     )
 
@@ -2054,9 +2119,96 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
                 "export_2": round(float(totals.get("export_2", 0)), 2),
                 "per_strefa_note": "L1 droga / L2 tania — bank łączny, per-strefa w atrybutach",
             })
+            if bank_1 is not None:
+                attrs["bank_kwh_l1"] = round(bank_1, 2)
+            if bank_2 is not None:
+                attrs["bank_kwh_l2"] = round(bank_2, 2)
+            if bank and bank > 0:
+                if bank_1 is not None:
+                    attrs["bank_l1_share_pct"] = round((bank_1 / bank) * 100.0, 1)
+                if bank_2 is not None:
+                    attrs["bank_l2_share_pct"] = round((bank_2 / bank) * 100.0, 1)
         self._attr_extra_state_attributes = attrs
 
         return round(bank, 2)
+
+
+class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
+    """Sub-sensor for zone-specific virtual warehouse (L1 or L2) for G12/G12w."""
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        zone: int,
+        serial: str = "",
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._entry = entry
+        self._zone = zone
+        zone_label = "L1 (Dzień)" if zone == 1 else "L2 (Noc)"
+        self._attr_name = f"Bank Wirtualny {zone_label} kWh"
+        self._attr_unique_id = f"energa_{meter_id}_bank_kwh_l{zone}"
+        self._attr_has_entity_name = True
+        self._attr_state_class = None
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_icon = "mdi:battery-clock" if zone == 1 else "mdi:battery-clock-outline"
+        self._attr_device_info = device_info
+
+    @property
+    def native_value(self):
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return None
+
+        opts = self._entry.options
+        mid = self._meter_id
+        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+
+        # Check FIFO mode first
+        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+            monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
+            if monthly:
+                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff, has_zones=True)
+                if _fifo_bank is not None and fifo_detail is not None:
+                    key = "bank_kwh_l1" if self._zone == 1 else "bank_kwh_l2"
+                    if key in fifo_detail:
+                        return round(fifo_detail[key], 2)
+
+        # Baseline mode
+        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        if self._zone == 1:
+            bi_z = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
+            be_z = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
+            imp_z = float(totals.get("import_1", totals.get("import", 0)))
+            exp_z = float(totals.get("export_1", totals.get("export", 0)))
+            init_z = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
+        else:
+            bi_z = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
+            be_z = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            imp_z = float(totals.get("import_2", 0))
+            exp_z = float(totals.get("export_2", 0))
+            init_z = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
+
+        net_imp = imp_z - bi_z
+        net_exp = exp_z - be_z
+        bilans = (net_exp * coeff) - net_imp
+        bank = max(0.0, bilans) + init_z
+        return round(bank, 2)
+
+    @property
+    def extra_state_attributes(self):
+        zone_label = "dzienna" if self._zone == 1 else "nocna/weekendowa"
+        return {
+            "zone": self._zone,
+            "description": f"Magazyn wirtualny dla strefy {self._zone} ({zone_label})",
+            "unit": "kWh",
+        }
 
 
 class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):

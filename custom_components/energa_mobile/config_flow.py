@@ -19,6 +19,8 @@ from .const import (
     CONF_BALANCE_BASELINE_EXPORT,
     CONF_BALANCE_BASELINE_IMPORT,
     CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_KWH_L1,
+    CONF_BANK_INITIAL_KWH_L2,
     CONF_BANK_INITIAL_PLN,
     CONF_BANK_RCE_PRICE,
     CONF_DEVICE_TOKEN,
@@ -48,6 +50,8 @@ from .const import (
     CONF_INVERTER_ENERGY_ENTITY,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
+    DEFAULT_BANK_INITIAL_KWH_L1,
+    DEFAULT_BANK_INITIAL_KWH_L2,
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
     DEFAULT_ENABLE_AUTO_SETTLEMENT,
@@ -409,6 +413,15 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
     async def async_step_prices(self, user_input=None):
         """Handle energy price configuration."""
         if user_input is not None:
+            # Auto-calculate total initial kWh if zone initial values are provided
+            init_l1 = float(user_input.get(CONF_BANK_INITIAL_KWH_L1, 0.0) or 0.0)
+            init_l2 = float(user_input.get(CONF_BANK_INITIAL_KWH_L2, 0.0) or 0.0)
+            if init_l1 > 0 or init_l2 > 0:
+                cur_total = float(user_input.get(CONF_BANK_INITIAL_KWH, 0.0) or 0.0)
+                old_total = float(self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+                if cur_total == 0.0 or cur_total == old_total:
+                    user_input[CONF_BANK_INITIAL_KWH] = round(init_l1 + init_l2, 2)
+
             # Save global prices
             new_options = {**self._config_entry.options, **user_input}
 
@@ -445,6 +458,8 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             current_price_2 = self._config_entry.options.get(CONF_IMPORT_PRICE_2, DEFAULT_IMPORT_PRICE_2)
             current_rce = self._config_entry.options.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)
             current_initial_kwh = self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH)
+            current_initial_kwh_1 = self._config_entry.options.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)
+            current_initial_kwh_2 = self._config_entry.options.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)
             current_initial_pln = self._config_entry.options.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN)
             current_rce_auto = self._config_entry.options.get(CONF_RCE_AUTO_FETCH, DEFAULT_RCE_AUTO_FETCH)
             current_settlement = self._config_entry.options.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)
@@ -479,6 +494,12 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         ): vol.Coerce(float),
                         vol.Optional(
                             CONF_BANK_INITIAL_KWH, default=current_initial_kwh
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_KWH_L1, default=current_initial_kwh_1
+                        ): vol.Coerce(float),
+                        vol.Optional(
+                            CONF_BANK_INITIAL_KWH_L2, default=current_initial_kwh_2
                         ): vol.Coerce(float),
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln

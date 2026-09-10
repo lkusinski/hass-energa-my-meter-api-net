@@ -143,3 +143,33 @@ def run_fifo_net_metering(
     summary.allocations = allocations
 
     return summary
+
+
+def run_dual_zone_fifo_net_metering(
+    ppe_id: str,
+    monthly_flows_l1: list[dict],
+    monthly_flows_l2: list[dict],
+    coefficient: Decimal = Decimal("0.8"),
+    today: date | None = None,
+) -> tuple[SettlementSummary, SettlementSummary, Decimal]:
+    """Run pure FIFO allocation for dual-zone net-metering physical energy warehouse.
+
+    Args:
+        ppe_id: Logical delivery point ID.
+        monthly_flows_l1: Monthly flows for Zone 1 (Day/Peak).
+        monthly_flows_l2: Monthly flows for Zone 2 (Night/Off-peak).
+        coefficient: Prosumer discount factor (e.g. 0.8 for <=10kW, 0.7 for >10kW).
+        today: Evaluation reference date.
+
+    Returns:
+        tuple (summary_l1, summary_l2, total_active_balance)
+    """
+    summary_1 = run_fifo_net_metering(
+        ppe_id, monthly_flows_l1, coefficient=coefficient, today=today, zone="day"
+    )
+    summary_2 = run_fifo_net_metering(
+        ppe_id, monthly_flows_l2, coefficient=coefficient, today=today, zone="night"
+    )
+    total_active = round(summary_1.total_active_balance + summary_2.total_active_balance, 2)
+    return summary_1, summary_2, total_active
+

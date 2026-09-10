@@ -463,3 +463,69 @@ class TestBucketFlows:
             max_hourly=100.0,
         )
         assert out == []
+
+
+class TestFifoDualZone:
+    """v1.4.0: Dual-zone (L1 day / L2 night) net-metering FIFO bank tests."""
+
+    def test_wisniowa_invoice_transition(self):
+        """Test exact transition matching Wiśniowa FES/00042 invoice."""
+        from datetime import date
+        from custom_components.energa_mobile.settlement import fifo_dual_zone_kwh_bank
+
+        # As of June 30, 2026: L1 had 752 kWh in warehouse, L2 had 606 kWh
+        # Modeled as June exports: 752 / 0.8 = 940 kWh for L1, 606 / 0.8 = 757.5 kWh for L2
+        flows_l1 = [
+            (2026, 6, 0.0, 940.0),       # Initial 752.0 kWh deposit
+            (2026, 7, 40.0, 500.0),      # July: import 40, export 500
+            (2026, 8, 43.0, 561.0),      # Aug: import 43, export 561 (total imp 83, exp 1061)
+        ]
+        flows_l2 = [
+            (2026, 6, 0.0, 757.5),       # Initial 606.0 kWh deposit
+            (2026, 7, 170.0, 400.0),     # July: import 170, export 400
+            (2026, 8, 172.0, 443.0),     # Aug: import 172, export 443 (total imp 342, exp 843)
+        ]
+
+        total_bank, detail = fifo_dual_zone_kwh_bank(
+            flows_l1, flows_l2, coefficient=0.8, today=date(2026, 8, 31)
+        )
+
+        # L1: 752 - 83 consumed = 669 + (1061 * 0.8 = 848.8) = 1517.8 kWh
+        assert detail["bank_kwh_l1"] == 1517.8
+        # L2: 606 - 342 consumed = 264 + (843 * 0.8 = 674.4) = 938.4 kWh
+        assert detail["bank_kwh_l2"] == 938.4
+        # Total bank = 1517.8 + 938.4 = 2456.2 kWh (matching ~2456 kWh from invoice)
+        assert total_bank == 2456.2
+        assert detail["uncovered_kwh"] == 0.0
+        assert detail["expired_kwh"] == 0.0
+        assert detail["bank_l1_share_pct"] == round((1517.8 / 2456.2) * 100.0, 1)
+        assert detail["bank_l2_share_pct"] == round((938.4 / 2456.2) * 100.0, 1)
+
+    def test_zone_isolation_no_cross_subsidy(self):
+        """Verify that deficit in L2 does NOT consume credits from L1."""
+        from datetime import date
+        from custom_components.energa_mobile.settlement import fifo_dual_zone_kwh_bank
+
+        flows_l1 = [(2026, 1, 0.0, 1000.0)]  # 800 kWh credit in L1
+        flows_l2 = [(2026, 1, 500.0, 0.0)]   # 500 kWh deficit in L2
+
+        total_bank, detail = fifo_dual_zone_kwh_bank(
+            flows_l1, flows_l2, coefficient=0.8, today=date(2026, 2, 1)
+        )
+
+        assert detail["bank_kwh_l1"] == 800.0
+        assert detail["bank_kwh_l2"] == 0.0
+        assert total_bank == 800.0
+        assert detail["uncovered_kwh"] == 500.0
+
+    def test_empty_dual_zone_handling(self):
+        """Empty flows return 0.0 and valid detail dict."""
+        from custom_components.energa_mobile.settlement import fifo_dual_zone_kwh_bank
+
+        total_bank, detail = fifo_dual_zone_kwh_bank([], [], coefficient=0.8)
+        assert total_bank == 0.0
+        assert detail["bank_kwh_l1"] == 0.0
+        assert detail["bank_kwh_l2"] == 0.0
+        assert detail["bank_l1_share_pct"] == 0.0
+        assert detail["bank_l2_share_pct"] == 0.0
+

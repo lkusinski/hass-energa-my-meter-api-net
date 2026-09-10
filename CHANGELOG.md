@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.4.0 (2026-09-10) — Podwójny Wirtualny Magazyn Energii L1/L2 (Dual-Zone Net-Metering FIFO)
+
+### 🏭 Izolacja Stref Rozliczeniowych L1 (Dzień) i L2 (Noc) w Net-Meteringu (`settlement.py`, `sensor.py`)
+- **Faktyczne odwzorowanie zasad OSD Energa:** Potwierdzono na podstawie rzeczywistej faktury rozliczeniowej (`FES/00042`), że w taryfach wielostrefowych (G12, G12w) depozyt energii w starym systemie (net-metering / opusty 0.8) prowadzony jest w dwóch całkowicie odrębnych magazynach:
+  - **L1 (Dzień / Szczyt):** Nadwyżki z generacji dziennej zasilają wyłącznie pulę L1 i kompensują jedynie pobór w strefie dziennej.
+  - **L2 (Noc / Poza szczytem):** Nadwyżki generacji poza szczytem (np. weekendy G12w) zasilają wyłącznie pulę L2 i kompensują jedynie pobór nocny/weekendowy.
+  - Brak wzajemnego subsydiowania stref (brak transferu energii między L1 i L2 przy deficycie w jednej ze stref).
+- **Nowy silnik rozliczeniowy `fifo_dual_zone_kwh_bank` & `run_dual_zone_fifo_net_metering`:**
+  - Niezależne kolejki FIFO ze ścisłą datą ważności (12 miesięcy dla każdego depozytu strefowego).
+  - Obliczanie sumarycznego salda banku oraz precyzyjnych składowych `bank_kwh_l1` i `bank_kwh_l2`.
+
+### 📊 Dedykowane Sensory i Atrybuty Home Assistant
+- **Nowe encje strefowe:**
+  - `sensor.energa_[meter_id]_bank_wirtualny_l1_dzien_kwh` — saldo magazynu w strefie dziennej / szczytowej.
+  - `sensor.energa_[meter_id]_bank_wirtualny_l2_noc_kwh` — saldo magazynu w strefie nocnej / pozaszczytowej.
+- **Wzbogacone atrybuty encji głównej `sensor.energa_[meter_id]_bank_wirtualny_kwh`:**
+  - Dodano `bank_kwh_l1`, `bank_kwh_l2`, `bank_l1_share_pct`, `bank_l2_share_pct`, informujące o strukturze zmagazynowanej energii.
+
+### ⚙️ Konfiguracja Początkowa dla Nowych Użytkowników (`config_flow.py`, `const.py`)
+- W opcjach integracji (`OptionsFlow`) dla taryf strefowych dodano dedykowane pola:
+  - `bank_initial_kwh_l1` (Stan początkowy magazynu L1 z faktury)
+  - `bank_initial_kwh_l2` (Stan początkowy magazynu L2 z faktury)
+  - Automatyczne sumowanie do ogólnego `bank_initial_kwh` z pełną kompatybilnością wsteczną.
+
+### 🧪 Testy Jednostkowe (`tests/test_settlement.py`, `tests/test_settlement_pure.py`)
+- Test przejścia i rozliczenia zgodnego z fakturą Wiśniowa FES/00042 (1358 kWh -> 2456.2 kWh).
+- Test izolacji strefowej (brak transferu nadwyżek L1 do deficytu L2).
+- Test czystego silnika domenowego `run_dual_zone_fifo_net_metering`.
+
 ## v1.3.4 (2026-09-10) — Częściowe Pokrycie Historii Magazynu (Graceful FIFO Partial Coverage)
 
 ### 🔋 Poziom Napełnienia Magazynu dla Krótszej Historii (`const.py`, `sensor.py`)
