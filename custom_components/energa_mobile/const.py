@@ -99,7 +99,7 @@ DEFAULT_SETTLEMENT_DATE = ""  # empty = anniversary derived from baselines/invoi
 DEFAULT_ENABLE_AUTO_SETTLEMENT = False
 DEFAULT_USE_ROLLING_365D = False
 ROLLING_MIN_COVERAGE_DAYS = 300  # minimum statistics coverage to trust rolling 365d mode
-FIFO_MIN_COVERAGE_MONTHS = 11  # minimum months with flows to trust FIFO 12m bank (v0.2.20)
+FIFO_MIN_COVERAGE_MONTHS = 3  # minimum months with flows for graceful estimation (v1.3.4, formerly 11)
 
 
 def get_price_for_key(

@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.3.4 (2026-09-10) — Częściowe Pokrycie Historii Magazynu (Graceful FIFO Partial Coverage)
+
+### 🔋 Poziom Napełnienia Magazynu dla Krótszej Historii (`const.py`, `sensor.py`)
+- **Obniżenie progu wymaganej historii:** Zmniejszono stałą `FIFO_MIN_COVERAGE_MONTHS` z 11 do 3 miesięcy.
+- **Odblokowanie kafelka `sensor.energa_[serial]_magazyn_poziom`:** Encja poziomu napełnienia magazynu (%) wylicza się i jest w pełni aktywna dla świeżych importów (np. od wiosny bieżącego roku), cesji umów oraz instalacji działających krócej niż rok, eliminując stan `unknown`.
+- **Nowy atrybut telemetrii `coverage_status`:** Informuje o skali pokrycia rocznego horyzontu bilansowania (np. `partial (7/12m)` lub `full (12m)`).
+- **Zaktualizowana nota `fifo_note`:** Wyjaśnia minimalny wymagany okres 3 miesięcy do wiarygodnej estymacji wkładów i salda.
+
+### 🧪 Testy Jednostkowe (`tests/test_settlement.py`, `tests/test_sensor.py`)
+- Dodano test `test_graceful_partial_coverage` sprawdzający estymację poziomu magazynu dla częściowego horyzontu (4 miesiące).
+- Dodano test `test_fifo_bank_from_monthly_partial_coverage` weryfikujący próg graniczny (2 miesiące -> None, 3 miesiące -> estymacja aktywna).
+
+## v1.3.3 (2026-09-10) — Wsparcie Wariantów Prefiksów PPE i Poprawki Autokonsumpcji
+
+### ☀️ Odporność Identyfikatorów Odczytów (`autoconsumption.py`)
+- Dodano elastyczną obsługę prefiksów PPE (`PL_...` vs numeryczne) oraz fallback do `meter_id` w silniku zapytań `get_readings`, zapobiegając pustym seriom danych autokonsumpcji przy specyficznych formatach bilingowych OSD.
+
 ## v1.3.2 (2026-09-09) — Silnik Autokonsumpcji PV i Realnego Zużycia Domu (Hour-by-Hour Alignment)
 
 ### ☀️ Asynchroniczny Bilans Autokonsumpcji i Domu (`autoconsumption.py`)
