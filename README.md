@@ -22,6 +22,7 @@
 * 📊 **Pełna Integracja z Panelem Energia:** Dedykowane sensory statystyk godzinowych (`Panel Energia`) bez fałszywych skoków i resetów.
 * 🔋 **Wirtualny Magazyn Energii (Stary System — Net-Metering):**
   * Rachunkowość FIFO z 12-miesięcznym okresem ważności energii (zgodnie z art. 4 ust. 11 ustawy o OZE).
+  * Dualne bilansowanie strefowe (L1 dzień / L2 noc) dla taryf wielostrefowych (G12, G12w).
   * Natywne przepływy wirtualnej baterii (`Bank Ładowanie` i `Bank Rozładowanie`) do sekcji Magazyn Energii w Panelu Energia.
   * Sensor poziomu napełnienia magazynu (`Poziom Magazynu %`).
 * 💰 **Depozyt Prosumencki (Nowy System — Net-Billing):**
