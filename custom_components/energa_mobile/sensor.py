@@ -1489,24 +1489,42 @@ class EnergaCoordinator(DataUpdateCoordinator):
             # Fallback to coordinator's _hourly_stats if storage yielded no readings
             if not readings and meter_id in self._hourly_stats:
                 h_stats = self._hourly_stats[meter_id]
-                imp_pts = h_stats.get("import", []) or []
-                if not imp_pts and (h_stats.get("import_1") or h_stats.get("import_2")):
-                    z1 = dict(h_stats.get("import_1", []))
-                    z2 = dict(h_stats.get("import_2", []))
-                    all_times = sorted(set(z1.keys()).union(z2.keys()))
-                    imp_pts = [(t, z1.get(t, 0.0) + z2.get(t, 0.0)) for t in all_times]
 
-                exp_pts = h_stats.get("export", []) or []
-                if not exp_pts and (h_stats.get("export_1") or h_stats.get("export_2")):
-                    z1 = dict(h_stats.get("export_1", []))
-                    z2 = dict(h_stats.get("export_2", []))
-                    all_times = sorted(set(z1.keys()).union(z2.keys()))
-                    exp_pts = [(t, z1.get(t, 0.0) + z2.get(t, 0.0)) for t in all_times]
+                def _parse_pts(items):
+                    d = {}
+                    for it in items or []:
+                        if isinstance(it, dict):
+                            t = it.get("start")
+                            v = it.get("state", 0.0)
+                        elif isinstance(it, (tuple, list)) and len(it) >= 2:
+                            t, v = it[0], it[1]
+                        else:
+                            continue
+                        if hasattr(t, "tzinfo"):
+                            d[t] = float(v or 0.0)
+                    return d
 
-                exp_dict = dict(exp_pts)
-                for dt_pt, imp_val in imp_pts:
-                    exp_val = exp_dict.get(dt_pt, 0.0)
-                    utc_dt = dt_pt if dt_pt.tzinfo else dt_pt.replace(tzinfo=timezone.utc)
+                imp_z1 = _parse_pts(h_stats.get("import_1"))
+                imp_z2 = _parse_pts(h_stats.get("import_2"))
+                imp_tot = _parse_pts(h_stats.get("import"))
+
+                exp_z1 = _parse_pts(h_stats.get("export_1"))
+                exp_z2 = _parse_pts(h_stats.get("export_2"))
+                exp_tot = _parse_pts(h_stats.get("export"))
+
+                if not imp_tot and (imp_z1 or imp_z2):
+                    for t in set(imp_z1.keys()).union(imp_z2.keys()):
+                        imp_tot[t] = imp_z1.get(t, 0.0) + imp_z2.get(t, 0.0)
+
+                if not exp_tot and (exp_z1 or exp_z2):
+                    for t in set(exp_z1.keys()).union(exp_z2.keys()):
+                        exp_tot[t] = exp_z1.get(t, 0.0) + exp_z2.get(t, 0.0)
+
+                all_times = sorted(set(imp_tot.keys()).union(exp_tot.keys()))
+                for dt_pt in all_times:
+                    imp_val = imp_tot.get(dt_pt, 0.0)
+                    exp_val = exp_tot.get(dt_pt, 0.0)
+                    utc_dt = dt_pt if dt_pt.tzinfo is not None else dt_pt.replace(tzinfo=timezone.utc)
                     readings.append(
                         IntervalReading(
                             ppe_id=ppe_id,
