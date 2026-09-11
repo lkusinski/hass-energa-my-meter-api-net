@@ -254,6 +254,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         "icon": view_icon,
         "badges": badges,
         "cards": cards,
+        "meter_serial": str(serial),
     }
 
 
@@ -321,6 +322,51 @@ async def async_provision_dashboard(
 
         # 2. Save dashboard views to .storage/lovelace.<url_path>
         store_view = storage.Store(hass, 1, f"lovelace.{storage_key_suffix}")
+        existing_data = await store_view.async_load()
+        if existing_data and isinstance(existing_data, dict):
+            existing_views = existing_data.get("config", {}).get("views", [])
+            new_views = ui_config.get("views", [])
+
+            def _extract_serial(v: dict[str, Any]) -> str | None:
+                if "meter_serial" in v:
+                    return str(v["meter_serial"])
+                for b in v.get("badges", []):
+                    ent = b.get("entity", "") if isinstance(b, dict) else str(b)
+                    if "sensor.energa_" in ent:
+                        parts = ent.replace("sensor.energa_", "").split("_")
+                        if parts:
+                            return parts[0]
+                for c in v.get("cards", []):
+                    for ent_item in c.get("entities", []):
+                        ent = ent_item.get("entity", "") if isinstance(ent_item, dict) else str(ent_item)
+                        if "sensor.energa_" in ent:
+                            parts = ent.replace("sensor.energa_", "").split("_")
+                            if parts:
+                                return parts[0]
+                return None
+
+            new_serials = {_extract_serial(v) for v in new_views}
+            new_serials.discard(None)
+
+            # Keep existing views from other meters
+            merged_views = [ev for ev in existing_views if _extract_serial(ev) not in new_serials]
+            merged_views.extend(new_views)
+
+            # Ensure the first view has path 'glowny', subsequent views have unique paths
+            seen_paths = set()
+            for idx, v in enumerate(merged_views):
+                ser = _extract_serial(v)
+                if idx == 0:
+                    v["path"] = "glowny"
+                    seen_paths.add("glowny")
+                else:
+                    pref = f"licznik-{ser}" if ser else f"widok-{idx+1}"
+                    if pref in seen_paths:
+                        pref = f"{pref}-{idx+1}"
+                    v["path"] = pref
+                    seen_paths.add(pref)
+            ui_config["views"] = merged_views
+
         await store_view.async_save({"config": ui_config})
         _LOGGER.info("Saved view configuration to lovelace.%s", storage_key_suffix)
 

@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-328_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-330_passed-brightgreen)
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
@@ -27,6 +27,9 @@
 ## ✨ Główne Możliwości Wersji PRO
 
 * 📡 **Natywne API REST:** Bezpośrednia, stabilna komunikacja JSON z platformą Energa Mój Licznik (bez podatnego na awarie scrapingu HTML).
+* 🤖 **Automatyczny Wirtualny Magazyn Energii (Zero-Config FIFO z API Energa):**
+  * **Zero ręcznej konfiguracji:** Integracja pobiera roczne agregacje miesięczne bezpośrednio z API Energi (`/resources/mchart`) i automatycznie wylicza stan banku oraz podział L1/L2 wg zasad FIFO bez konieczności wpisywania żadnych danych początkowych!
+  * **Opcjonalna kalibracja datą faktury:** Jeśli chcesz skalibrować bank idealnie pod fakturę, podajesz wyłącznie datę z faktury (np. `2024-05-31`) oraz stany L1/L2 z tej faktury — nie musisz spisywać wielocyfrowych stanów licznika!
 * 🔋 **Podwójny Wirtualny Magazyn Energii (Net-Metering FIFO — stary system):**
   * **Potwierdzona na fakturach OSD izolacja strefowa (L1/L2):** Zgodnie z zasadami Energi w taryfach wielostrefowych (G12, G12w) magazyn dzienny (L1) kompensuje wyłącznie zużycie dzienne, a magazyn nocny (L2) wyłącznie zużycie pozaszczytowe (brak niedozwolonego transferu energii między strefami).
   * Ścisła rachunkowość FIFO z 12-miesięcznym okresem ważności energii (art. 4 ust. 11 ustawy o OZE).

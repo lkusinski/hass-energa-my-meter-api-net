@@ -237,6 +237,82 @@ class EnergaAPI:
 
         return result
 
+    async def async_get_monthly_history(
+        self, meter_point_id: str, years: list[int] | None = None
+    ) -> dict[tuple[int, int], dict[str, float]]:
+        """Fetch monthly consumption and production flows from YEAR charts for FIFO calculation (v1.5.0).
+
+        Returns:
+            {(year, month): {
+                'import': float, 'export': float,
+                'import_1': float, 'import_2': float,
+                'export_1': float, 'export_2': float,
+            }}
+        """
+        meter = next(
+            (m for m in self._meters_data if str(m.get("meter_point_id")) == str(meter_point_id)),
+            None,
+        )
+        if not meter:
+            await self.async_get_data()
+            meter = next(
+                (m for m in self._meters_data if str(m.get("meter_point_id")) == str(meter_point_id)),
+                None,
+            )
+            if not meter:
+                return {}
+
+        tz = ZoneInfo("Europe/Warsaw")
+        now = datetime.now(tz)
+        if years is None:
+            years = [now.year - 1, now.year]
+
+        obis_plus = meter.get("obis_plus")
+        obis_minus = meter.get("obis_minus")
+
+        out: dict[tuple[int, int], dict[str, float]] = {}
+
+        for yr in sorted(years):
+            ts = int(datetime(yr, 6, 1, 0, 0, 0, tzinfo=tz).timestamp() * 1000)
+
+            for obis, prefix in [(obis_plus, "import"), (obis_minus, "export")]:
+                if not obis:
+                    continue
+                params = {
+                    "meterPoint": str(meter_point_id),
+                    "type": "YEAR",
+                    "meterObject": obis,
+                    "mainChartDate": str(ts),
+                }
+                try:
+                    res = await self._api_get(CHART_ENDPOINT, params=params)
+                    chart = (res or {}).get("response", {}).get("mainChart", [])
+                    for pt in chart:
+                        tm_ms = int(pt.get("tm", 0))
+                        if not tm_ms:
+                            continue
+                        pt_dt = datetime.fromtimestamp(tm_ms / 1000, tz=tz)
+                        ym = (pt_dt.year, pt_dt.month)
+                        zones = pt.get("zones", [])
+                        z1 = float(zones[0] or 0.0) if len(zones) > 0 else 0.0
+                        z2 = float(zones[1] or 0.0) if len(zones) > 1 else 0.0
+                        total = sum(float(z or 0.0) for z in zones)
+
+                        m_entry = out.setdefault(ym, {
+                            "import": 0.0, "export": 0.0,
+                            "import_1": 0.0, "import_2": 0.0,
+                            "export_1": 0.0, "export_2": 0.0,
+                        })
+                        m_entry[prefix] = round(total, 3)
+                        m_entry[f"{prefix}_1"] = round(z1, 3)
+                        m_entry[f"{prefix}_2"] = round(z2, 3)
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Failed to fetch %s YEAR chart for meter %s, year %d: %s",
+                        prefix, meter_point_id, yr, err
+                    )
+        return out
+
     async def async_fetch_rcem(self, month: int = None, year: int = None) -> float | None:
         """Fetch RCEm (monthly average RCE) from PSE API.
 
