@@ -121,14 +121,20 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     if is_net_metering:
         storage_entities = [
             {"entity": f"sensor.energa_{serial}_magazyn_poziom", "name": "Poziom napełnienia magazynu"},
-            {"entity": f"sensor.energa_{serial}_bank_wirtualny_kwh", "name": "Dostępne saldo w magazynie"},
+            {"entity": f"sensor.energa_{serial}_bank_wirtualny_kwh", "name": "Dostępne saldo w magazynie (Łącznie)"},
         ]
         if has_zones:
             storage_entities.append(
-                {"entity": f"sensor.energa_{serial}_pokrycie_z_magazynu_dzien_mtd", "name": "Pobranie z magazynu (Dzień T1)"}
+                {"entity": f"sensor.energa_{serial}_bank_wirtualny_l1_dzien_kwh", "name": "Magazyn Strefa 1 / Dzień (T1)"}
             )
             storage_entities.append(
-                {"entity": f"sensor.energa_{serial}_pokrycie_z_magazynu_noc_mtd", "name": "Pobranie z magazynu (Noc T2)"}
+                {"entity": f"sensor.energa_{serial}_bank_wirtualny_l2_noc_kwh", "name": "Magazyn Strefa 2 / Noc (T2)"}
+            )
+            storage_entities.append(
+                {"entity": f"sensor.energa_{serial}_pokrycie_z_magazynu_dzien_mtd", "name": "Pobranie z magazynu (Dzień T1 MTD)"}
+            )
+            storage_entities.append(
+                {"entity": f"sensor.energa_{serial}_pokrycie_z_magazynu_noc_mtd", "name": "Pobranie z magazynu (Noc T2 MTD)"}
             )
         storage_entities.append(
             {"entity": f"sensor.energa_{serial}_wspolczynnik_prosumencki", "name": "Współczynnik opustu"}

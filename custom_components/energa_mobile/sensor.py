@@ -2046,12 +2046,13 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             net_exp2 = exp2 - be2
             bilans2 = (net_exp2 * coeff) - net_imp2
             bank_2 = round(max(0.0, bilans2) + init_l2, 2)
+            bank = round(bank_1 + bank_2, 2)
+            bilans = round(bilans1 + bilans2, 2)
         else:
             net_imp = float(totals.get("import", 0)) - bi
             net_exp = float(totals.get("export", 0)) - be
-
-        bilans = (net_exp * coeff) - net_imp
-        bank = max(0, bilans) + initial
+            bilans = (net_exp * coeff) - net_imp
+            bank = max(0, bilans) + initial
         mode = "baseline"
         source_desc = "net-metering 0.8 roczny (old) — faktury FES"
         formula_desc = "max(0, (export-baseline)*coeff - (import-baseline)) + initial"
@@ -2248,7 +2249,7 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
         # 2. Check FIFO mode (v1.5.0: automatic when no baselines or initial entered)
         bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
         be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
-        if (bi == 0.0 and be == 0.0 and initial == 0.0 and not init_l1 and not init_l2) or opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
+        if bi == 0.0 and be == 0.0 and initial == 0.0 and not init_l1 and not init_l2:
             if monthly:
                 _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff, has_zones=True)
                 if _fifo_bank is not None and fifo_detail is not None:

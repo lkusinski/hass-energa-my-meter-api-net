@@ -81,6 +81,8 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
     # Specific entities in storage card
     storage_card = next(c for c in view["cards"] if "Net-Metering" in c["title"])
     storage_entities = [e["entity"] for e in storage_card["entities"]]
+    assert "sensor.energa_00069839_bank_wirtualny_l1_dzien_kwh" in storage_entities
+    assert "sensor.energa_00069839_bank_wirtualny_l2_noc_kwh" in storage_entities
     assert "sensor.energa_00069839_pokrycie_z_magazynu_dzien_mtd" in storage_entities
     assert "sensor.energa_00069839_pokrycie_z_magazynu_noc_mtd" in storage_entities
     assert not any("bank_ladowanie" in e for e in storage_entities)
