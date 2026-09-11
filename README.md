@@ -2,55 +2,77 @@
   <img src="logo.png" alt="Energa My Meter API Logo" width="300"/>
 </div>
 
-<h1 align="center">Energa My Meter API Integration for Home Assistant</h1>
+<h1 align="center">Energa My Meter API PRO (Mój Licznik) for Home Assistant</h1>
 
 ![GitHub Release](https://img.shields.io/github/v/release/lkusinski/hass-energa-my-meter-api-net)
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-256_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-328_passed-brightgreen)
 
 > [!NOTE]
-> Zaawansowana integracja dla klientów **Energa Operator** w Home Assistant, łącząca się bezpośrednio z **natywnym REST API** portalu *Mój Licznik* (bez scrapingu www). Posiada natywne wsparcie dla taryf **G11, G12, G12w, G12r**, pełną obsługę obu systemów prosumenckich (**Stary: Net-metering 0.8/0.7 z wirtualnym magazynem FIFO 12 miesięcy** oraz **Nowy: Net-billing z depozytem PLN i automatycznym cennikiem RCEm z PSE**), autonomiczną prognozę faktury brutto, 1-klikowy generator dedykowanych pulpitów rozliczeń oraz bezbłędną integrację ze statystykami **Panelu Energia (Energy Dashboard)**.
+> ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
+> 
+> Ten projekt to niezależna, wysoce zaawansowana integracja (wersja **PRO**) dla użytkowników platformy **Energa Mój Licznik** w Home Assistant. 
+> 
+> Jeśli zależy Ci jedynie na szybkim i prostym odczycie bieżących wskazań licznika, znakomitą i sprawdzoną opcją jest integracja stworzona przez **ergo5** ([`home-assistant-energa-operator`](https://github.com/ergo5/home-assistant-energa-operator)). Jej wielkim plusem jest to, że znajduje się już **oficjalnie w domyślnym katalogu HACS**, dzięki czemu instaluje się ją bezpośrednio z wyszukiwarki jednym kliknięciem.
+> 
+> **Skąd wzięła się ta wersja i dlaczego jest samodzielnym bytem?**
+> - **Ewolucja projektu:** Przede wszystkim od początku wcale nie wiedziałem, że ten projekt aż tak się rozbuduje. Miało to być proste rozwiązanie, ale w miarę analizy rzeczywistych faktur OSD i kolejnych zawiłości rozliczeniowych (izolacja stref L1/L2 w magazynie energii, ścisłe kolejki FIFO z 12-miesięcznym horyzontem ważności, depozyty wartościowe Net-billing z oficjalnymi stawkami PSE RCEm, predykcje rachunku brutto uwzględniające komplet opłat stałych i zmiennych, asynchroniczna autokonsumpcja PV eliminująca lagi OSD czy 730-dniowy backfill historii) powstał kompletny kombajn analityczno-rozliczeniowy.
+> - **Dlaczego to NIE jest „nakładka” na inną integrację?** Nie należy traktować tego rozwiązania jako układu *„podstawa + nakładka”*. Nakładka nie działa bez podstawy, a przy dwóch spiętych integracjach odpytujących to samo konto OSD **moim zdaniem po prostu więcej rzeczy może się rozjechać** (konflikty sesji, dublowanie requestów, niespójności stanów w bazie Recorder). Najlepiej po prostu wybrać od razu: albo idziesz w wersję podstawową (od ergo5), albo decydujesz się na to samodzielne, rozbudowane środowisko PRO.
+> - **Status HACS:** Wersja PRO ze względu na swój zaawansowany i bezkompromisowy charakter **nigdy nie trafi do oficjalnego domyślnego sklepu HACS**. Dodaje się ją w HACS w 10 sekund jako **Repozytorium Niestandardowe (Custom Repository)**.
 
 ---
 
-## ✨ Główne Możliwości (Architektura V1.0)
+## ✨ Główne Możliwości Wersji PRO
 
-* 📡 **Natywne API REST:** Bezpośrednia, stabilna komunikacja JSON z platformą Energa Mój Licznik.
-* 🚀 **1-Click Generator Pulpitów Lovelace:** Natywny przycisk urządzenia *„Utwórz Pulpit Rozliczeń”* (`button`) oraz serwis `energa_mobile.generate_dashboard` budujący kompletny pulpit `/energa-rachunek` zintegrowany z bocznym paskiem HA (bez restartu).
-* 📊 **Pełna Integracja z Panelem Energia:** Dedykowane sensory statystyk godzinowych (`Panel Energia`) bez fałszywych skoków i resetów.
-* 🔋 **Wirtualny Magazyn Energii (Stary System — Net-Metering):**
-  * Rachunkowość FIFO z 12-miesięcznym okresem ważności energii (zgodnie z art. 4 ust. 11 ustawy o OZE).
-  * Dualne bilansowanie strefowe (L1 dzień / L2 noc) dla taryf wielostrefowych (G12, G12w).
-  * Natywne przepływy wirtualnej baterii (`Bank Ładowanie` i `Bank Rozładowanie`) do sekcji Magazyn Energii w Panelu Energia.
-  * Sensor poziomu napełnienia magazynu (`Poziom Magazynu %`).
-* 💰 **Depozyt Prosumencki (Nowy System — Net-Billing):**
+* 📡 **Natywne API REST:** Bezpośrednia, stabilna komunikacja JSON z platformą Energa Mój Licznik (bez podatnego na awarie scrapingu HTML).
+* 🔋 **Podwójny Wirtualny Magazyn Energii (Net-Metering FIFO — stary system):**
+  * **Potwierdzona na fakturach OSD izolacja strefowa (L1/L2):** Zgodnie z zasadami Energi w taryfach wielostrefowych (G12, G12w) magazyn dzienny (L1) kompensuje wyłącznie zużycie dzienne, a magazyn nocny (L2) wyłącznie zużycie pozaszczytowe (brak niedozwolonego transferu energii między strefami).
+  * Ścisła rachunkowość FIFO z 12-miesięcznym okresem ważności energii (art. 4 ust. 11 ustawy o OZE).
+  * Natywne encje wirtualnej baterii (`Bank Ładowanie` i `Bank Rozładowanie`) dla sekcji Magazyn Energii w oficjalnym Panelu Energia HA.
+  * Sensor poziomu napełnienia magazynu (`Poziom Magazynu %`) działający już od 3 miesięcy zebranej historii.
+* 💰 **Depozyt Prosumencki (Net-Billing — nowy system):**
   * Miesięczne rozliczenie wartościowe w PLN.
   * Automatyczne pobieranie oficjalnych cen rynkowych **RCEm** publikowanych przez **PSE** (~11. dnia każdego miesiąca).
   * Wyliczanie salda depozytu z uwzględnieniem noweli ustawy o OZE (mnożnik 1.23).
-* 📑 **Autonomiczna Prognoza Rachunku (`Prognoza Rachunku`):**
-  * Dokładna kalkulacja bieżącej faktury brutto (energia czynna, opłata handlowa, akcyza, stawki dystrybucyjne zmienne i stałe, opłata jakościowa, mocowa, OZE, kogeneracyjna + VAT 23%).
-  * Osobne, zweryfikowane z fakturami tabele opłat dla taryf **G11** oraz **G12w**.
-* 🔄 **Automatyczny Backfill Historii (2 lata):**
-  * Bezpośrednio po pierwszym logowaniu integracja asynchronicznie pobiera do 730 dni historii godzinowej w tle (bez blokowania interfejsu).
+* ☀️ **Silnik Autokonsumpcji PV i Realnego Zużycia Domu (Hour-by-Hour Alignment):**
+  * Eliminacja pozornej „100% autokonsumpcji” wynikającej z opóźnień OSD Mój Licznik (3–24h) względem falownika PV.
+  * Precyzyjne dopasowanie godzinowe produkcji PV i wskazań licznika w zamkniętych interwałach czasowych.
+  * Wyliczanie realnego zużycia energii przez budynek oraz oszczędności finansowych **BRUTTO (z 23% VAT)**.
+* 📑 **Autonomiczna Prognoza Rachunku (`Prognoza Rachunku Brutto`):**
+  * Kompletna kalkulacja bieżącej faktury brutto: energia czynna, opłata handlowa, akcyza, stawki dystrybucyjne zmienne i stałe, opłata jakościowa, mocowa, OZE, kogeneracyjna + VAT 23%.
+  * Algorytm wygładzania wczesnomiesięcznego (`smoothed_blend_7d`) eliminujący anomalie w pierwszych dniach miesiąca.
+* 🔄 **Odporny Auto-Backfill Historii (do 730 dni / 2 lata):**
+  * Asynchroniczny import danych godzinowych bezpośrednio do długoterminowych statystyk Home Assistant w tle.
+  * Pełna odporność na restarty HA podczas importu (weryfikacja okna historycznego zamiast pojedynczego punktu, trwały znacznik w konfiguracji).
+  * Powiadomienia w HA co 30 przetworzonych dni z % postępu i estymacją czasu.
+* 🚀 **Automatyczny Pulpit Lovelace (`/energa-rachunek`):**
+  * Integracja automatycznie tworzy i rejestruje dedykowany pulpit w menu bocznym Home Assistant natychmiast po instalacji.
+  * Możliwość ponownego wygenerowania jednym kliknięciem przyciskiem urządzenia lub usługą `energa_mobile.generate_dashboard`.
 * 🛡️ **Kanonityczny Magazyn Danych (SQLite WAL):**
-  * Niezmienna, odporna na wymiany liczników baza danych powiązana z logicznym punktem poboru (PPE).
+  * Baza danych powiązana z logicznym punktem poboru (PPE), chroniąca historię przed utratą przy fizycznej wymianie licznika przez monterów OSD.
+* 🏠 **Pełne Wsparcie dla Konsumentów bez Fotowoltaiki:**
+  * Opcja wyboru zwykłego odbiorcy (współczynnik `0.0`), precyzyjne rozliczenia taryf G11, G12, G12w bez narzucania mechanizmów prosumenckich.
 
 ---
 
 ## 📦 Instalacja
 
-### Metoda 1: HACS (Niestandardowe repozytorium)
-1. W Home Assistant przejdź do **HACS** → **Integracje** → menu w prawym górnym rogu (3 kropki) → **Repozytoria niestandardowe**.
-2. Wklej adres URL: `https://github.com/lkusinski/hass-energa-my-meter-api-net`
-3. Kategoria: **Integracja**.
-4. Kliknij **Dodaj**, znajdź integrację i wybierz **Pobierz**.
-5. Zrestartuj Home Assistant.
+### Metoda 1: HACS (Repozytorium Niestandardowe — Zalecana)
+1. W Home Assistant przejdź do **HACS** → **Integracje**.
+2. W prawym górnym rogu kliknij menu (3 kropki) → **Repozytoria niestandardowe** (*Custom repositories*).
+3. Wklej adres URL repozytorium:
+   ```text
+   https://github.com/lkusinski/hass-energa-my-meter-api-net
+   ```
+4. Kategoria: **Integracja** (*Integration*).
+5. Kliknij **Dodaj**, a następnie znajdź na liście **Energa My Meter API PRO** i wybierz **Pobierz**.
+6. Zrestartuj Home Assistant.
 
 ### Metoda 2: Instalacja ręczna
-1. Pobierz archiwum z [GitHub Releases](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases).
-2. Skopiuj katalog `custom_components/energa_mobile` do folderu `/config/custom_components/` na Twoim Home Assistant.
+1. Pobierz archiwum z najnowszego wydania [GitHub Releases](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases).
+2. Skopiuj katalog `custom_components/energa_mobile` do folderu `/config/custom_components/` w swoim Home Assistant.
 3. Zrestartuj Home Assistant.
 
 ---
@@ -59,153 +81,84 @@
 
 1. Przejdź do **Ustawienia** → **Urządzenia oraz usługi** → **Dodaj integrację**.
 2. Wyszukaj **Energa My Meter**.
-3. Podaj dane logowania do portalu *Mój Licznik* (login/email i hasło).
-4. Jeśli Twoje konto posiada licznik dwukierunkowy (instalację PV), kreator zapyta o **System rozliczeń**:
-   * **Nowe zasady:** Net-billing (rozliczenie miesięczne w PLN, depozyt, RCEm) — instalacje od 01.04.2022.
-   * **Stare zasady:** Net-metering (magazyn kWh 0.8 lub 0.7, roczny okres rozliczeniowy) — instalacje zgłoszone do 31.03.2022.
-5. Kliknij **Zatwierdź**. Integracja utworzy urządzenia i encje, a w tle rozpocznie pobieranie historii pomiarów z ostatnich 2 lat.
+3. Podaj login i hasło do portalu *Mój Licznik*.
+4. Wybierz Twój profil rozliczeniowy:
+   * **Stary system (Net-metering):** Magazyn kWh z opustem 0.8 lub 0.7, roczny okres rozliczeniowy (instalacje zgłoszone do 31.03.2022).
+   * **Nowy system (Net-billing):** Depozyt wartościowy w PLN, oficjalne rynkowe stawki RCEm z PSE (instalacje od 01.04.2022).
+   * **Nie posiadam fotowoltaiki (zwykły odbiorca):** Standardowy pobór z sieci wg taryfy G11 / G12 / G12w.
+5. Kliknij **Zatwierdź**. Integracja utworzy encje, przypnie gotowy pulpit `/energa-rachunek` do bocznego paska HA, a w tle rozpocznie import do 730 dni historii.
 
 ---
 
 ## 📊 Konfiguracja Panelu Energia (Energy Dashboard)
 
-Przejdź do **Ustawienia** → **Pulpity** → **Energia**. Skonfiguruj panel zgodnie z Twoim profilem:
+Przejdź do **Ustawienia** → **Pulpity** → **Energia**:
 
 ### 🌞 Wariant 1: Stary System (Net-metering, opust 0.8/0.7)
-
-W starym systemie nadwyżka energii nie jest sprzedawana za pieniądze, lecz magazynowana w sieci (ze współczynnikiem 0.8 lub 0.7):
-
 1. **Sieć elektryczna — Zużycie (Pobór):**
-   * Kliknij **Dodaj zużycie**:
-     * Dla taryfy dwustrefowej G12w dodaj osobno:
-       * Encja energii: `sensor.energa_<numer>_panel_energia_strefa_1`
-         * Koszt: wybierz **Użyj encji śledzącej całkowity koszt** → `sensor.energa_<numer>_panel_energia_strefa_1_cost`
-       * Encja energii: `sensor.energa_<numer>_panel_energia_strefa_2`
-         * Koszt: wybierz **Użyj encji śledzącej całkowity koszt** → `sensor.energa_<numer>_panel_energia_strefa_2_cost`
-     * Dla taryfy jednostrefowej G11:
-       * Encja energii: `sensor.energa_<numer>_panel_energia_zuzycie`
-       * Koszt: **Użyj encji śledzącej całkowity koszt** → `sensor.energa_<numer>_panel_energia_zuzycie_cost`
+   * Taryfa G12 / G12w:
+     * Strefa 1 (Dzień): `sensor.energa_<numer>_panel_energia_strefa_1` z kosztem `sensor.energa_<numer>_panel_energia_strefa_1_cost`
+     * Strefa 2 (Noc): `sensor.energa_<numer>_panel_energia_strefa_2` z kosztem `sensor.energa_<numer>_panel_energia_strefa_2_cost`
+   * Taryfa G11:
+     * `sensor.energa_<numer>_panel_energia_zuzycie` z kosztem `sensor.energa_<numer>_panel_energia_zuzycie_cost`
 2. **Sieć elektryczna — Oddawanie do sieci (Zwrot):**
-   * Kliknij **Dodaj oddawanie energii**:
-     * Wybierz `sensor.energa_<numer>_panel_energia_produkcja_strefa_1` (oraz strefę 2)
-     * Rekompensata: **Nie śledź kosztów** (energia trafia do magazynu kWh, a nie do wypłaty).
+   * Dodaj strefę 1 i strefę 2: `sensor.energa_<numer>_panel_energia_produkcja_strefa_*` (rekompensata: **Nie śledź kosztów**, energia zasila magazyn kWh).
 3. **Magazyny energii (Baterie wirtualne):**
-   * Kliknij **Dodaj system baterii**:
-     * Energia wpływająca do baterii: `sensor.energa_<numer>_bank_ladowanie`
-     * Energia wypływająca z baterii: `sensor.energa_<numer>_bank_rozladowanie`
+   * Energia wpływająca do baterii: `sensor.energa_<numer>_bank_ladowanie`
+   * Energia wypływająca z baterii: `sensor.energa_<numer>_bank_rozladowanie`
 4. **Panele słoneczne (Fotowoltaika):**
-   * ⚠️ **Ważne:** Do sekcji paneli słonecznych dodawaj **wyłącznie encje z Twojego falownika** (np. SolarEdge, Huawei, Fronius, Deye, GoodWe). **Nigdy nie dodawaj eksportu z licznika Energi jako produkcji PV!** Licznik widzi jedynie nadwyżkę po autokonsumpcji, a nie całkowitą produkcję.
-
----
+   * ⚠️ **Ważne:** Dodawaj **wyłącznie encje z falownika PV** (SolarEdge, Huawei, Fronius itp.). Nie dodawaj eksportu z licznika Energi – licznik widzi jedynie nadwyżkę po autokonsumpcji.
 
 ### 💰 Wariant 2: Nowy System (Net-billing, RCEm w PLN)
+1. **Sieć elektryczna — Zużycie:** Dodaj strefy `panel_energia_strefa_*` z przypisanymi encjami `..._cost`.
+2. **Sieć elektryczna — Oddawanie:** Dodaj strefy produkcji `panel_energia_produkcja_strefa_*`.
+3. **Magazyn energii:** W Net-billingu depozyt jest wartościowy (PLN), więc sekcja baterii kWh pozostaje pusta. Stan depozytu prezentowany jest na dedykowanym pulpicie Lovelace.
 
-W nowym systemie energia oddana do sieci jest wyceniana według rynkowej ceny energii elektrycznej (RCEm × 1.23) i zasila depozyt w PLN:
-
-1. **Sieć elektryczna — Zużycie (Pobór):**
-   * Kliknij **Dodaj zużycie**:
-     * Dodaj strefy `panel_energia_strefa_1` oraz `strefa_2` (lub `panel_energia_zuzycie` dla G11) z wyborem **Użyj encji śledzącej całkowity koszt** (`..._cost`).
-2. **Sieć elektryczna — Oddawanie do sieci (Zwrot):**
-   * Kliknij **Dodaj oddawanie energii**:
-     * Dodaj `sensor.energa_<numer>_panel_energia_produkcja_strefa_1` (oraz strefę 2).
-3. **Magazyn energii:**
-   * W net-billingu magazyn jest pieniężny (w PLN), więc sekcja baterii w Panelu Energia pozostaje pusta. Stan depozytu oraz prognozę rachunku prezentuje dedykowana karta Lovelace.
-
----
-
-### 🏠 Wariant 3: Konsument bez fotowoltaiki (G11 / G12w)
-
-1. **Sieć elektryczna — Zużycie (Pobór):**
-   * Taryfa G11: Dodaj `sensor.energa_<numer>_panel_energia_zuzycie` z kosztem `sensor.energa_<numer>_panel_energia_zuzycie_cost`.
-   * Taryfa G12w: Dodaj strefę 1 i strefę 2 wraz z ich encjami `_cost`.
+### 🏠 Wariant 3: Konsument bez fotowoltaiki
+1. Dodaj encje poboru `sensor.energa_<numer>_panel_energia_*` wraz z ich encjami kosztów `_cost`.
 
 ---
 
 ## 🎛️ Pulpity Rozliczeń i Karty Lovelace
- 
-### Opcja 1: Automatyczny Generator (Zalecana — 1 kliknięcie)
-Każdy licznik posiada natywną encję przycisku:
-`button.energa_<numer_licznika>_utworz_pulpit_rozliczen` (**„Utwórz Pulpit Rozliczeń”**).
-Kliknięcie przycisku na kafelku urządzenia automatycznie utworzy dedykowany pulpit `/energa-rachunek` zintegrowany z bocznym paskiem nawigacji Home Assistant. Pulpit dobiera karty i odznaki indywidualnie dla każdego licznika (magazyn kWh FIFO dla Net-meteringu, depozyt PLN i ceny RCEm dla Net-billingu, czysty widok zużycia dla zwykłego konsumenta).
 
-Możesz też wywołać tę akcję za pomocą usługi `energa_mobile.generate_dashboard`.
-
-### Opcja 2: Samodzielna Karta YAML (Ręczna konfiguracja)
-Jeśli wolisz zbudować widok samodzielnie, wklej poniższy kod do wybranego pulpitu (**Pulpity** → **Edytuj** → **+ Dodaj kartę** → **Ręcznie / YAML**):
-
-```yaml
-type: vertical-stack
-cards:
-  # KARTA DLA STAREGO SYSTEMU (Net-metering 0.8)
-  - type: entities
-    title: 🔋 Magazyn Energii (Net-Metering 0.8)
-    entities:
-      - entity: sensor.energa_<numer_licznika>_bank_wirtualny_kwh
-        name: Dostępna energia w magazynie
-        icon: mdi:battery-charging-80
-      - entity: sensor.energa_<numer_licznika>_magazyn_poziom
-        name: Poziom zapełnienia magazynu
-      - entity: sensor.energa_<numer_licznika>_dotychczasowy_rachunek
-        name: Dotychczas do zapłaty (MTD)
-        icon: mdi:cash-clock
-      - entity: sensor.energa_<numer_licznika>_prognoza_rachunku
-        name: Prognoza rachunku brutto (koniec miesiąca)
-        icon: mdi:invoice-text-outline
-      - entity: sensor.energa_<numer_licznika>_zuzycie_dzis
-        name: Pobór dzisiaj
-      - entity: sensor.energa_<numer_licznika>_produkcja_dzis
-        name: Oddanie dzisiaj
-
-  # KARTA DLA NOWEGO SYSTEMU (Net-Billing PLN)
-  - type: entities
-    title: 💰 Rozliczenie Net-Billing (PLN)
-    entities:
-      - entity: sensor.energa_<numer_licznika>_bank_wirtualny_pln
-        name: Saldo depozytu netto
-        icon: mdi:cash-multiple
-      - entity: sensor.energa_<numer_licznika>_rcem_auto
-        name: Bieżąca cena RCEm (PSE)
-        icon: mdi:chart-line
-      - entity: sensor.energa_<numer_licznika>_dotychczasowy_rachunek
-        name: Dotychczas do zapłaty (MTD)
-        icon: mdi:cash-clock
-      - entity: sensor.energa_<numer_licznika>_prognoza_rachunku
-        name: Prognoza rachunku brutto
-        icon: mdi:invoice-text-outline
-```
+### Automatyczny Dedykowany Pulpit
+Pulpit `/energa-rachunek` jest generowany i rejestrowany automatycznie w menu bocznym HA. Jeśli zechcesz wygenerować go ponownie, wystarczy kliknąć encję:
+`button.energa_<numer_licznika>_utworz_pulpit_rozliczen` lub wywołać akcję `energa_mobile.generate_dashboard`.
 
 ---
 
-## 📋 Zestawienie Encji
+## 📋 Zestawienie Kluczowych Encji
 
 | Nazwa encji | Klasa / Jednostka | Opis |
 |---|---|---|
-| `sensor.energa_<numer>_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (posiada stan liczbowy ostatniej sumy, pełna zgodność z walidacją `energy/validate`). |
+| `sensor.energa_<numer>_panel_energia_*` | `energy` / `kWh` | Statystyki godzinowe dla Panelu Energia (pełna zgodność z walidacją `energy/validate`). |
 | `sensor.energa_<numer>_panel_energia_*_cost` | `monetary` / `PLN` | Skumulowany koszt zużycia energii w danej strefie dla Panelu Energia. |
-| `sensor.energa_<numer>_bank_wirtualny_kwh` | `energy` / `kWh` | Dostępny zapas energii w magazynie wirtualnym (FIFO 12 miesięcy, tylko Net-metering). |
-| `sensor.energa_<numer>_bank_wirtualny_pln` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (wartość nieujemna). |
-| `sensor.energa_<numer>_magazyn_poziom` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (tylko Net-metering). |
-| `sensor.energa_<numer>_dotychczasowy_rachunek` | `PLN` | Kwota rachunku MTD od początku miesiąca do chwili obecnej. |
-| `sensor.energa_<numer>_prognoza_rachunku` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec bieżącego miesiąca z wygładzaniem wczesnomiesięcznym. |
-| `sensor.energa_<numer>_rcem_auto` | `PLN/kWh` | Oficjalna rynkowa cena RCEm z tabeli PSE. |
-| `sensor.energa_<numer>_bank_ladowanie` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla sekcji Bateria w Net-metering). |
-| `sensor.energa_<numer>_bank_rozladowanie` | `energy` / `kWh` | Skumulowana energia pobrana z magazynu (dla sekcji Bateria w Net-metering). |
-| `sensor.energa_<numer>_zuzycie_dzis` | `energy` / `kWh` | Dzisiejsze zużycie energii. |
-| `sensor.energa_<numer>_produkcja_dzis` | `energy` / `kWh` | Dzisiejsza produkcja oddana do sieci. |
-| `sensor.energa_<numer>_stan_licznika_*` | `energy` / `kWh` | Oficjalne stany liczydła (import / eksport / strefy L1 i L2). |
+| `sensor.energa_<numer>_bank_wirtualny_kwh` | `energy` / `kWh` | Sumaryczny zapas energii w magazynie wirtualnym (FIFO 12m, Net-metering). |
+| `sensor.energa_<numer>_bank_wirtualny_l1_dzien_kwh` | `energy` / `kWh` | Zapas energii w strefie dziennej L1 (izolacja strefowa). |
+| `sensor.energa_<numer>_bank_wirtualny_l2_noc_kwh` | `energy` / `kWh` | Zapas energii w strefie nocnej/weekendowej L2 (izolacja strefowa). |
+| `sensor.energa_<numer>_bank_wirtualny_pln` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (Net-billing). |
+| `sensor.energa_<numer>_magazyn_poziom` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (od 3 miesięcy historii). |
+| `sensor.energa_<numer>_autokonsumpcja_dzis` | `energy` / `kWh` | Autokonsumpcja PV z precyzyjną godzinową synchronizacją. |
+| `sensor.energa_<numer>_zuzycie_domu_dzis` | `energy` / `kWh` | Rzeczywiste łączne zużycie energii przez budynek (pobór + autokonsumpcja). |
+| `sensor.energa_<numer>_dotychczasowy_rachunek` | `PLN` | Kwota rachunku MTD brutto od początku miesiąca do chwili obecnej. |
+| `sensor.energa_<numer>_prognoza_rachunku` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec miesiąca z wygładzaniem wczesnomiesięcznym. |
+| `sensor.energa_<numer>_rcem_auto` | `PLN/kWh` | Oficjalna rynkowa cena RCEm pobierana automatycznie z PSE. |
+| `sensor.energa_<numer>_bank_ladowanie` | `energy` / `kWh` | Skumulowana energia wprowadzona do magazynu (dla baterii w Panelu Energia). |
+| `sensor.energa_<numer>_bank_rozladowanie` | `energy` / `kWh` | Skumulowana energia odebrana z magazynu (dla baterii w Panelu Energia). |
+| `sensor.energa_<numer>_stan_licznika_*` | `energy` / `kWh` | Oficjalne stany liczydła OSD (import / eksport / strefy L1 i L2). |
 
 ---
 
 ## ❓ Najczęstsze Pytania (FAQ)
 
-### Dlaczego w Net-billingu nie ma encji wirtualnego magazynu ani baterii?
-W systemie Net-billing (instalacje od 1 kwietnia 2022 r.) prosument nie rozlicza się bezgotówkowo w kilowatogodzinach (kWh) w stosunku 0.8/0.7, lecz wartościowo w PLN. Wartość energii oddanej do sieci zasila depozyt prosumencki (`sensor.bank_wirtualny_pln_*`). Tworzenie sztucznej „baterii wirtualnej” w Panelu Energia fałszowałoby bilans energetyczny domu. Bateria wirtualna jest aktywna wyłącznie dla starego systemu (Net-metering).
+### Dlaczego ta integracja nie jest w oficjalnym sklepie HACS?
+Integracja od ergo5 jest znakomitym, oficjalnym pakietem bazowym dla każdego. Ta integracja jest zaawansowanym projektem specjalistycznym (wersja PRO z własną bazą SQLite, dwustrefowym FIFO, predykcjami taryfowymi, autokonsumpcją i auto-provisioningiem). Aby zachować pełną elastyczność rozwoju i zaawansowaną architekturę, projekt jest dystrybuowany jako Repozytorium Niestandardowe w HACS.
 
-### Jak działa wygładzanie wczesnomiesięczne prognozy rachunku?
-W pierwszych dniach miesiąca kilka godzin poboru mogłoby prowadzić do nierealistycznie zawyżonej prognozy na koniec miesiąca. Algorytm `smoothed_blend_7d` przez pierwsze 7 dni miesiąca płynnie łączy bieżące zużycie MTD ze średnią dobową kroczącą z ostatnich 30 dni (lub 365 dni), zapewniając stabilne i wiarygodne szacunki od 1. dnia miesiąca.
+### Dlaczego nie zainstalować obu integracji naraz (ergo5 + ta integracja)?
+Nie rekomendujemy łączenia obu integracji na tym samym koncie. To nie jest relacja „podstawa + nakładka”. Przy równoległym odpytywaniu tego samego API Energi przez dwie integracje rośnie ryzyko blokad sesji, niespójności danych oraz konfliktów w statystykach długoterminowych Recorder. Zalecamy wybór jednego rozwiązania: wersja podstawowa od ergo5 albo samodzielna wersja PRO.
 
-### Kiedy aktualizowana jest cena RCEm?
-PSE publikuje oficjalną stawkę RCEm około 11. dnia każdego miesiąca za miesiąc poprzedni. Integracja pobiera ją automatycznie raz na dobę bezpośrednio z oficjalnej tabeli PSE i aktualizuje kalkulacje.
+### Jak działa izolacja stref L1 i L2 w magazynie energii?
+Zgodnie z rzeczywistymi rozliczeniami OSD Energa (zweryfikowanymi na fakturach rozliczeniowych), w taryfach wielostrefowych nadwyżka wyprodukowana w dzień zasila wyłącznie magazyn L1, a nadwyżka poza szczytem wyłącznie magazyn L2. Jeśli w nocy zabraknie energii w magazynie L2, pobór nocny zostanie zafakturowany, nawet jeśli w magazynie L1 pozostał duży zapas. Integracja ściśle odwzorowuje tę zasadę.
 
 ---
 
