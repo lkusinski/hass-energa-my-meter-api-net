@@ -71,6 +71,7 @@ from .const import (
 )
 from .settlement import (
     FlowAccumulator,
+    bank_from_invoice_date,
     days_to_settlement,
     deposit_valid_until,
     fifo_dual_zone_kwh_bank,
@@ -539,13 +540,11 @@ async def async_setup_entry(
             )
         )
 
-        # === BILL FORECAST (v0.2.17: every meter, needs history) ===
+        # === BILL FORECAST (v0.2.17 / v1.5.0: every meter, active by default) ===
         # New net-billing: deposit lowers the payable. Old net-metering:
         # warehouse coverage lowers the energy charge. Plain consumers:
         # full import bill (export 0, cover 0) — same compute_bill math.
-        if entry.options.get(
-            CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT
-        ):
+        if entry.options.get(CONF_ENABLE_AUTO_SETTLEMENT, True) is not False:
             sensors.append(
                 EnergaBillForecastSensor(
                     coordinator=coordinator,
@@ -1410,9 +1409,30 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 except (ValueError, TypeError):
                     _coeff_now = DEFAULT_PROSUMER_COEFFICIENT
                 if _coeff_now >= 0.7:
+                    # Fetch from API if empty or first run (v1.5.0)
+                    for meter in (self.api._meters_data or []):
+                        mid_str = str(meter.get("meter_point_id", ""))
+                        if not mid_str:
+                            continue
+                        if mid_str not in self._monthly or not self._monthly[mid_str]:
+                            try:
+                                api_monthly = await self.api.async_get_monthly_history(mid_str)
+                                if api_monthly:
+                                    self._monthly[mid_str] = api_monthly
+                                    _LOGGER.info(
+                                        "Energa: Loaded %d monthly flows directly from API for meter %s",
+                                        len(api_monthly), mid_str,
+                                    )
+                            except Exception as api_err:
+                                _LOGGER.debug("API monthly history fetch failed for %s: %s", mid_str, api_err)
+
                     _monthly = await self._async_compute_monthly_sums(_now)
                     if _monthly:
-                        self._monthly = _monthly
+                        for mid_str, m_data in _monthly.items():
+                            if mid_str in self._monthly:
+                                self._monthly[mid_str].update(m_data)
+                            else:
+                                self._monthly[mid_str] = m_data
                 if notify:
                     self.async_update_listeners()
         except Exception as cal_err:
@@ -2015,17 +2035,61 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         bilans = (net_exp * coeff) - net_imp
         bank = max(0, bilans) + initial
         mode = "baseline"
+        source_desc = "net-metering 0.8 roczny (old) — faktury FES"
+        formula_desc = "max(0, (export-baseline)*coeff - (import-baseline)) + initial"
 
         _LOGGER.debug(
             "BankKwh %s: imp=%.2f exp=%.2f coeff=%.2f bilans=%.2f initial=%.2f bank=%.2f",
             mid, net_imp, net_exp, coeff, bilans, initial, bank,
         )
 
-        # v0.2.11 rolling FIFO mode: energy older than 12 months expires, so
-        # only trailing-365-day flows count (needs Download History).
-        # A plain Jan-1 reset would NOT comply (rolling window, not calendar).
-        coverage = 0
-        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT) and opts.get(
+        monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
+        settle_str = str(opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)).strip()
+        fifo_detail = None
+        inv_detail = None
+
+        # v1.5.0 Priority 1: Invoice cut-off date mode
+        if settle_str and monthly and (initial > 0 or init_l1 > 0 or init_l2 > 0):
+            inv_bank, inv_detail = bank_from_invoice_date(
+                settle_str, monthly, init_1=init_l1 or initial, init_2=init_l2, coeff=coeff
+            )
+            if inv_bank is not None and inv_detail:
+                bank = inv_bank
+                bank_1 = inv_detail.get("bank_kwh_l1")
+                bank_2 = inv_detail.get("bank_kwh_l2")
+                mode = "invoice_date"
+                source_desc = f"rozliczenie od daty faktury {settle_str}"
+                formula_desc = f"stan_faktury({settle_str}) + net_export_od_faktury*coeff - net_import_od_faktury"
+                net_imp = inv_detail.get("net_import_kwh", 0.0)
+                net_exp = inv_detail.get("net_export_kwh", 0.0)
+                bilans = inv_detail.get("bilans_kwh", 0.0)
+
+        # v1.5.0 Priority 2: Automatic FIFO mode from API (Zero config out-of-the-box!)
+        elif bi == 0.0 and be == 0.0 and initial == 0.0 and (not init_l1 and not init_l2):
+            if monthly:
+                try:
+                    coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+                except (ValueError, TypeError):
+                    coeff_f = DEFAULT_PROSUMER_COEFFICIENT
+                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f, has_zones=self._has_zones)
+                if _fifo_bank is not None and fifo_detail is not None:
+                    bank = _fifo_bank
+                    mode = "fifo_12m_api"
+                    source_desc = "automatyczne rozliczenie FIFO 12m z API Energa"
+                    formula_desc = "FIFO 12 m-cy wg art. 4 ust. 11 ustawy o OZE"
+                    if "bank_kwh_l1" in fifo_detail:
+                        bank_1 = fifo_detail["bank_kwh_l1"]
+                    if "bank_kwh_l2" in fifo_detail:
+                        bank_2 = fifo_detail["bank_kwh_l2"]
+                    _LOGGER.debug(
+                        "BankKwh %s fifo: bank=%.2f (L1=%s, L2=%s) expired=%.2f uncovered=%.2f",
+                        mid, bank, bank_1, bank_2,
+                        fifo_detail.get("expired_kwh", 0),
+                        fifo_detail.get("uncovered_kwh", 0),
+                    )
+
+        # v0.2.11 Priority 3: Rolling 365d if enabled and baseline mode
+        elif opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT) and opts.get(
             CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D
         ):
             rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(mid), {})
@@ -2041,37 +2105,6 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
                 )
                 bank = rolling_kwh_bank(exp365, imp365, coeff)
                 mode = "rolling_365d"
-                _LOGGER.debug(
-                    "BankKwh %s rolling: exp365=%.2f imp365=%.2f bank=%.2f",
-                    mid, exp365, imp365, bank,
-                )
-
-        # v0.2.20 FIFO mode: warehouse reconstructed from monthly flows
-        # (no invoice typing). Wins over rolling/baseline when >=3 months
-        # of statistics exist (needs Download History once).
-        # Shared helper with the Level (%) sensor (v0.3.0, dual-zone v1.4.0).
-        fifo_detail = None
-        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
-            monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
-            if monthly:
-                try:
-                    coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-                except (ValueError, TypeError):
-                    coeff_f = DEFAULT_PROSUMER_COEFFICIENT
-                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f, has_zones=self._has_zones)
-                if _fifo_bank is not None and fifo_detail is not None:
-                    bank = _fifo_bank
-                    mode = "fifo_12m"
-                    if "bank_kwh_l1" in fifo_detail:
-                        bank_1 = fifo_detail["bank_kwh_l1"]
-                    if "bank_kwh_l2" in fifo_detail:
-                        bank_2 = fifo_detail["bank_kwh_l2"]
-                    _LOGGER.debug(
-                        "BankKwh %s fifo: bank=%.2f (L1=%s, L2=%s) expired=%.2f uncovered=%.2f",
-                        mid, bank, bank_1, bank_2,
-                        fifo_detail.get("expired_kwh", 0),
-                        fifo_detail.get("uncovered_kwh", 0),
-                    )
 
         # Build rich attributes for Lovelace visibility
         attrs = {
@@ -2080,14 +2113,25 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             "coefficient": coeff,
             "bilans_kwh": round(bilans, 2),
             "initial_kwh": initial,
-            "source": "net-metering 0.8 roczny (old) — faktury FES",
-            "formula": "max(0, (export-baseline)*coeff - (import-baseline)) + initial",
+            "source": source_desc,
+            "formula": formula_desc,
             "unit": "kWh — ile energii możesz jeszcze odebrać za darmo",
             "settlement_mode": mode,
             "rule_version": "net_metering_fifo_12m_v1",
             "settlement_type": "net_metering",
             "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if mode == "invoice_date" and inv_detail:
+            attrs["invoice_date"] = settle_str
+            attrs["months_since_invoice"] = inv_detail.get("months_since_invoice", 0)
+        elif mode in ("fifo_12m", "fifo_12m_api") and fifo_detail:
+            attrs["fifo_expired_kwh"] = fifo_detail.get("expired_kwh")
+            attrs["fifo_uncovered_kwh"] = fifo_detail.get("uncovered_kwh")
+            attrs["fifo_deposits_kwh"] = fifo_detail.get("deposits_kwh")
+            attrs["fifo_note"] = (
+                "Magazyn odtworzony z miesięcznych przepływów (FIFO 12 m-cy, "
+                "bez przepisywania z faktury). Wymaga historii min. 3 mies."
+            )
         if mode == "rolling_365d":
             attrs["coverage_days"] = coverage
         if mode == "fifo_12m" and fifo_detail:
@@ -2169,9 +2213,24 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
         mid = self._meter_id
         coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
 
-        # Check FIFO mode first
-        if opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
-            monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
+        # 1. Invoice date mode (v1.5.0)
+        settle_str = str(opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)).strip()
+        monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
+        init_l1 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
+        init_l2 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
+        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        if settle_str and monthly and (init_l1 > 0 or init_l2 > 0 or initial > 0):
+            inv_bank, inv_detail = bank_from_invoice_date(
+                settle_str, monthly, init_1=init_l1 or initial, init_2=init_l2, coeff=coeff
+            )
+            if inv_bank is not None and inv_detail:
+                key = "bank_kwh_l1" if self._zone == 1 else "bank_kwh_l2"
+                return round(inv_detail.get(key, 0.0), 2)
+
+        # 2. Check FIFO mode (v1.5.0: automatic when no baselines or initial entered)
+        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        if (bi == 0.0 and be == 0.0 and initial == 0.0 and not init_l1 and not init_l2) or opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT):
             if monthly:
                 _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff, has_zones=True)
                 if _fifo_bank is not None and fifo_detail is not None:

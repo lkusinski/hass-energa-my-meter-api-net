@@ -295,6 +295,87 @@ def fifo_dual_zone_kwh_bank(
     return (total_bank, combined_detail)
 
 
+def bank_from_invoice_date(
+    settle_date_str: str,
+    monthly: dict,
+    init_1: float = 0.0,
+    init_2: float = 0.0,
+    coeff: float = 0.8,
+) -> tuple[float, dict] | tuple[None, None]:
+    """Compute virtual bank starting from a known invoice date & initial balance (v1.5.0).
+
+    Eliminates the need for manual lifetime meter baselines (e.g. 46279.293 kWh).
+    The user specifies the date of the invoice (e.g. '2024-05-31') and the bank
+    balances on that date. Monthly flows strictly following that invoice date
+    are netted (export * coeff - import) and added to the initial balances.
+
+    Args:
+        settle_date_str: Invoice cut-off date YYYY-MM-DD.
+        monthly: dict of {(year, month): {suffix: kWh}}.
+        init_1: initial bank L1 from invoice.
+        init_2: initial bank L2 from invoice.
+        coeff: prosumer factor (0.8 / 0.7).
+
+    Returns:
+        (total_bank, detail) or (None, None) if inputs invalid.
+    """
+    base = parse_settlement_date(settle_date_str)
+    if not base or not monthly:
+        return (None, None)
+
+    base_ym = (base.year, base.month)
+    imp1_since = 0.0
+    imp2_since = 0.0
+    exp1_since = 0.0
+    exp2_since = 0.0
+    months_counted = 0
+
+    for (y, m), d in sorted(monthly.items()):
+        if (y, m) <= base_ym:
+            continue
+        months_counted += 1
+        i1 = float(d.get("import_1", 0.0))
+        i2 = float(d.get("import_2", 0.0))
+        e1 = float(d.get("export_1", 0.0))
+        e2 = float(d.get("export_2", 0.0))
+        if i1 == 0 and i2 == 0 and "import" in d:
+            i1 = float(d.get("import", 0.0))
+        if e1 == 0 and e2 == 0 and "export" in d:
+            e1 = float(d.get("export", 0.0))
+
+        imp1_since += i1
+        imp2_since += i2
+        exp1_since += e1
+        exp2_since += e2
+
+    init_1_f = max(0.0, float(init_1 or 0.0))
+    init_2_f = max(0.0, float(init_2 or 0.0))
+
+    bilans1 = (exp1_since * coeff) - imp1_since
+    bilans2 = (exp2_since * coeff) - imp2_since
+
+    bank_1 = round(max(0.0, bilans1 + init_1_f), 2)
+    bank_2 = round(max(0.0, bilans2 + init_2_f), 2)
+    total_bank = round(bank_1 + bank_2, 2)
+
+    l1_share = round((bank_1 / total_bank * 100.0), 1) if total_bank > 0 else 0.0
+    l2_share = round((bank_2 / total_bank * 100.0), 1) if total_bank > 0 else 0.0
+
+    detail = {
+        "bank_kwh_l1": bank_1,
+        "bank_kwh_l2": bank_2,
+        "bank_l1_share_pct": l1_share,
+        "bank_l2_share_pct": l2_share,
+        "net_import_kwh": round(imp1_since + imp2_since, 2),
+        "net_export_kwh": round(exp1_since + exp2_since, 2),
+        "bilans_kwh": round((bilans1 + bilans2), 2),
+        "initial_kwh": round(init_1_f + init_2_f, 2),
+        "invoice_date": str(base),
+        "months_since_invoice": months_counted,
+    }
+    return (total_bank, detail)
+
+
 
 def anchor_flow_series(cums, base: float = 0.0) -> list:
     """Anchor a cumulative flow series on an existing sum (v0.3.4).

@@ -187,3 +187,44 @@ class TestNetBillingPureFIFO:
         )
         assert summary.total_active_balance == Decimal("0.00")
         assert summary.total_expired == Decimal("1000.00")
+
+
+class TestBankFromInvoiceDate:
+    def test_bank_from_invoice_date_calculation(self):
+        from custom_components.energa_mobile.settlement import bank_from_invoice_date
+
+        monthly = {
+            (2024, 5): {"import_1": 100, "export_1": 200, "import_2": 50, "export_2": 100},
+            (2024, 6): {"import_1": 50, "export_1": 200, "import_2": 30, "export_2": 100},
+            (2024, 7): {"import_1": 40, "export_1": 150, "import_2": 20, "export_2": 80},
+        }
+
+        # Settle date is 2024-05-31 -> (2024, 5) skipped, (2024, 6) and (2024, 7) counted
+        # L1: export = 350, import = 90 -> bilans1 = 350 * 0.8 - 90 = 280 - 90 = 190. init_1 = 500 -> bank_1 = 690.
+        # L2: export = 180, import = 50 -> bilans2 = 180 * 0.8 - 50 = 144 - 50 = 94. init_2 = 300 -> bank_2 = 394.
+        # Total = 690 + 394 = 1084.
+        total, detail = bank_from_invoice_date(
+            settle_date_str="2024-05-31",
+            monthly=monthly,
+            init_1=500.0,
+            init_2=300.0,
+            coeff=0.8,
+        )
+
+        assert total == 1084.0
+        assert detail["bank_kwh_l1"] == 690.0
+        assert detail["bank_kwh_l2"] == 394.0
+        assert detail["months_since_invoice"] == 2
+        assert detail["invoice_date"] == "2024-05-31"
+
+    def test_bank_from_invoice_date_invalid(self):
+        from custom_components.energa_mobile.settlement import bank_from_invoice_date
+
+        total, detail = bank_from_invoice_date("", {})
+        assert total is None
+        assert detail is None
+
+        total, detail = bank_from_invoice_date("invalid-date", {(2024, 1): {}})
+        assert total is None
+        assert detail is None
+

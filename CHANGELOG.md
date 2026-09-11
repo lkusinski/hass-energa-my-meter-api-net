@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.5.0 (2026-09-11) — Automatyczny Bank Energii (Zero-Config FIFO) & Kalibracja Datą Faktury
+
+### 🤖 Automatyczny Wirtualny Magazyn Energii z API Energa (Zero-Config Out-of-the-Box)
+- **Koniec z ręczną konfiguracją banku dla nowych użytkowników:** Integracja automatycznie pobiera agregacje miesięczne (`type="YEAR"` z `/resources/mchart`) z oficjalnego API Energi dla ostatnich 12–14 miesięcy.
+- **Natychmiastowe saldo magazynu:** Silnik FIFO oblicza realny stan magazynu wirtualnego oraz podział na strefy L1 (Dzień) i L2 (Noc) natychmiast po instalacji, bez konieczności wpisywania jakichkolwiek stanów początkowych czy poszukiwania faktury.
+- **Priorytetyzacja źródeł:** Integracja używa następującej hierarchii:
+  1. Tryb daty faktury (`settlement_date` + stan początkowy z faktury).
+  2. Tryb automatyczny FIFO z API Energi (`fifo_12m_api`) – zero-config!
+  3. Tryb bazowych odczytów licznika (`balance_baseline_import/export`).
+
+### 📅 Uproszczona Kalibracja Datą Faktury (`settlement_date`)
+- **Brak konieczności spisywania 5-cyfrowych stanów licznika:** Użytkownik, który chce dokładnie skalibrować magazyn pod ostatnią fakturę, podaje jedynie datę odcięcia z faktury (np. `2024-05-31`) oraz wykazany na niej stan magazynu (L1 i L2).
+- **Automatyczne zbilansowanie okresu po fakturze:** Integracja sumuje pobór i oddanie wyłącznie z miesięcy następujących po dacie faktury i powiększa o nie stan z faktury.
+
+### 📊 Dashboard Lovelace `/energa-rachunek` & Multimeter Support
+- **Wsparcie dla wielu liczników:** Pulpit rozliczeniowy automatycznie łączy widoki z wielu liczników/punktów PPE w zakładkach bez wzajemnego nadpisywania plików konfiguracyjnych Lovelace.
+- **Aktywne prognozy rachunków od pierwszego uruchomienia:** Domyślne włączenie flagi `enable_auto_settlement: True` zapewnia dostępność encji prognoz (`prognoza_rachunku`, `dotychczasowy_rachunek`, `koszt_brutto_mtd`) i eliminuje błędy "Nie znaleziono encji" na kafelkach dashboardu.
+
+### 🧪 Testy Jednostkowe
+- 330 przechodzących testów jednostkowych, w tym dedykowane testy silnika `bank_from_invoice_date` i fuzji dashboardów.
+
 ## v1.4.1 (2026-09-11) — Odporność Onboardingu i Auto-Backfillu (Resilient Onboarding & Provisioning)
 
 ### 🔄 Odporność na Przerwanie i Restart HA podczas 730-dniowego Auto-Backfillu (`__init__.py`)

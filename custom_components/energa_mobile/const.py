@@ -100,7 +100,7 @@ CONF_SETTLEMENT_DATE = "settlement_date"  # YYYY-MM-DD: annual settlement annive
 CONF_ENABLE_AUTO_SETTLEMENT = "enable_auto_settlement"  # Show settlement/expiry calibration attributes
 CONF_USE_ROLLING_365D = "use_rolling_365d"  # Old system: compute bank from last 365d of statistics (FIFO) instead of lifetime baseline
 DEFAULT_SETTLEMENT_DATE = ""  # empty = anniversary derived from baselines/invoice not set; attributes show validity note only
-DEFAULT_ENABLE_AUTO_SETTLEMENT = False
+DEFAULT_ENABLE_AUTO_SETTLEMENT = True
 DEFAULT_USE_ROLLING_365D = False
 ROLLING_MIN_COVERAGE_DAYS = 300  # minimum statistics coverage to trust rolling 365d mode
 FIFO_MIN_COVERAGE_MONTHS = 3  # minimum months with flows for graceful estimation (v1.3.4, formerly 11)
