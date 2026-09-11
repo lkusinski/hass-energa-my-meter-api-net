@@ -16,6 +16,13 @@
           "system": "System rozliczeń"
         }
       },
+      "system_fallback": {
+        "title": "System rozliczeń",
+        "description": "Nie udało się automatycznie ustalić statusu fotowoltaiki z serwerów Energa. Wybierz sposób rozliczenia Twojego punktu poboru.",
+        "data": {
+          "system": "System rozliczeń"
+        }
+      },
       "reauth_confirm": {
         "title": "Wymagana aktualizacja hasła",
         "description": "Zaloguj się ponownie dla konta {username}.",

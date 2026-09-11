@@ -404,9 +404,9 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> None:
     """Schedule the blind 730-day history import for fresh entries.
 
-    Idempotent: runs only when none of the entry meters has Panel
-    Energia statistics yet. Any failure is fully defensive — the user
-    can always trigger Options → Pobierz Historię manually.
+    Idempotent: runs only when history has not been backfilled yet.
+    Any failure is fully defensive — the user can always trigger
+    Options → Pobierz Historię manually.
     """
     try:
         try:
@@ -420,14 +420,40 @@ async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> 
         ]
         if not active:
             return
-        if await _has_any_panel_statistics(hass, active):
-            _LOGGER.debug("Auto-backfill: statistics already present, skipping")
+
+        # 1. Auto-provision Lovelace dashboard so user has ready-to-use views in sidebar
+        try:
+            coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            await async_provision_dashboard(hass, meters, coeff=coeff)
+            persistent_notification.async_create(
+                hass,
+                f"Pulpit Energa został utworzony w menu bocznym: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})\n\n"
+                "Pobieranie historii z ostatnich 2 lat wystartowało w tle. Dane wypełnią się automatycznie.",
+                title="Energa: Gotowe!",
+                notification_id="energa_dashboard_ready",
+            )
+        except Exception as d_err:
+            _LOGGER.debug("Auto-provision dashboard skipped: %s", d_err)
+
+        # 2. Check if auto-backfill was already completed according to entry data
+        if (entry.data or {}).get("auto_backfill_completed"):
+            _LOGGER.debug("Auto-backfill: already completed according to entry data, skipping")
             return
+
         try:
             start_str = (entry.data or {}).get("auto_history_start")
             start_date = datetime.strptime(start_str, "%Y-%m-%d")
         except (ValueError, TypeError):
             start_date = datetime.now(TIMEZONE) - timedelta(days=AUTO_HISTORY_DAYS)
+
+        # 3. Check if statistics already extend back near target_start
+        if await _has_history_statistics(hass, active, start_date):
+            _LOGGER.debug("Auto-backfill: historical statistics already present near start_date, skipping")
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, "auto_backfill_completed": True}
+            )
+            return
+
         days = (datetime.now(TIMEZONE).date() - start_date.date()).days + 1
         days = max(1, min(days, AUTO_HISTORY_DAYS + 1))
         persistent_notification.async_create(
@@ -444,6 +470,12 @@ async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> 
         )
         for meter in active:
             await _import_meter_history(hass, api, meter, start_date, days, entry)
+
+        # Mark completed upon successful backfill
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "auto_backfill_completed": True}
+        )
+        _LOGGER.info("Auto-backfill: successfully completed for all active meters")
     except Exception as err:
         _LOGGER.debug("Auto-backfill skipped: %s", err)
 
@@ -493,12 +525,15 @@ async def _stat_sum_before(
     return 0.0
 
 
-async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
-    """True when any meter already has Panel Energia statistics."""
+async def _has_history_statistics(
+    hass: HomeAssistant, meters: list, target_start: datetime
+) -> bool:
+    """True when statistics already extend back to near target_start."""
     try:
+        import functools
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder.statistics import (
-            get_last_statistics,
+            statistics_during_period,
         )
         from homeassistant.helpers import entity_registry as er
     except Exception:
@@ -517,14 +552,35 @@ async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
                     break
         if not wanted:
             return False
+
+        # Check if statistics exist in the first 60 days from target_start
+        check_start = target_start
+        if check_start.tzinfo is None:
+            check_start = check_start.replace(tzinfo=TIMEZONE)
+        check_end = check_start + timedelta(days=60)
         stats = await get_instance(hass).async_add_executor_job(
-            get_last_statistics, hass, 1, wanted[0], True, {"sum"}
+            functools.partial(
+                statistics_during_period,
+                hass,
+                check_start,
+                check_end,
+                wanted[:1],
+                "day",
+                None,
+                {"sum"},
+            )
         )
         rows = (stats or {}).get(wanted[0]) or []
-        return bool(rows and rows[0].get("sum") is not None)
+        return len(rows) > 0
     except Exception as err:
-        _LOGGER.debug("Auto-backfill statistics check failed: %s", err)
-        return True
+        _LOGGER.debug("History statistics check failed: %s", err)
+        return False
+
+
+async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
+    """Deprecated alias: True when statistics already extend back to near target_start."""
+    start_date = datetime.now(TIMEZONE) - timedelta(days=AUTO_HISTORY_DAYS)
+    return await _has_history_statistics(hass, meters, start_date)
 
 
 async def _import_meter_history(
@@ -587,6 +643,21 @@ async def _import_meter_history(
             except Exception as err:
                 _LOGGER.warning("Failed to fetch day %s: %s", target_day.date(), err)
                 continue
+
+            # Periodic progress update every 30 days or on final day
+            if (day_offset + 1) % 30 == 0 or day_offset == days - 1:
+                pct = int(((day_offset + 1) / max(1, days)) * 100)
+                remaining_days = max(0, days - (day_offset + 1))
+                est_min = max(1, int(remaining_days * 0.8 / 60))
+                persistent_notification.async_create(
+                    hass,
+                    f"Pobieranie historii dla licznika {serial} w toku...\n\n"
+                    f"- Postęp: **{day_offset + 1} / {days} dni ({pct}%)**\n"
+                    f"- Przetwarzany dzień: {target_day.date()}\n"
+                    f"- Szacowany pozostały czas: ~{est_min} min",
+                    title="Energa: Import Historii",
+                    notification_id=f"energa_import_{meter_id}",
+                )
 
             # Process import data (total) — use API timestamps (#26)
             for item in day_data.get("import", []):
@@ -1011,13 +1082,21 @@ async def _import_meter_history(
             count_exp2 = await _build_anchored(export_2_points, "export_2")
             total_count = count_1 + count_2 + count_exp1 + count_exp2
 
+            panel_hint = (
+                "\n\n⚙️ **Konfiguracja Panelu Energia w Home Assistant:**\n"
+                f"- Zużycie z sieci (dzień): `sensor.energa_{meter_id}_panel_energia_strefa_1`\n"
+                f"- Zużycie z sieci (noc): `sensor.energa_{meter_id}_panel_energia_strefa_2`\n"
+                f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja_strefa_1` i `...strefa_2`"
+            )
+
             persistent_notification.async_create(
                 hass,
-                f"Zakończono import dla licznika {serial}\n"
-                f"Zaimportowano {total_count} punktów danych\n"
-                f"(Import S1: {count_1}, S2: {count_2}, "
-                f"Export S1: {count_exp1}, S2: {count_exp2})",
-                title="Energa: Sukces",
+                f"Zakończono import historii dla licznika {serial}.\n"
+                f"Zaimportowano {total_count} punktów danych (Import S1: {count_1}, S2: {count_2}, "
+                f"Export S1: {count_exp1}, S2: {count_exp2}).\n\n"
+                f"📊 Pulpit dostępny pod adresem: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})"
+                + panel_hint,
+                title="Energa: Sukces importu historii",
                 notification_id=f"energa_import_{meter_id}",
             )
         else:
@@ -1025,12 +1104,19 @@ async def _import_meter_history(
             count_export = await _build_anchored(export_points, "export")
             total_count = count_import + count_export
 
+            panel_hint = (
+                "\n\n⚙️ **Konfiguracja Panelu Energia w Home Assistant:**\n"
+                f"- Zużycie z sieci: `sensor.energa_{meter_id}_panel_energia_zuzycie`\n"
+                f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja`"
+            )
+
             persistent_notification.async_create(
                 hass,
-                f"Zakończono import dla licznika {serial}\n"
-                f"Zaimportowano {total_count} punktów danych\n"
-                f"(Import: {count_import}, Export: {count_export})",
-                title="Energa: Sukces",
+                f"Zakończono import historii dla licznika {serial}.\n"
+                f"Zaimportowano {total_count} punktów danych (Import: {count_import}, Export: {count_export}).\n\n"
+                f"📊 Pulpit dostępny pod adresem: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})"
+                + panel_hint,
+                title="Energa: Sukces importu historii",
                 notification_id=f"energa_import_{meter_id}",
             )
 

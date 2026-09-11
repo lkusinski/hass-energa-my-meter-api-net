@@ -16,6 +16,13 @@
           "system": "Settlement system"
         }
       },
+      "system_fallback": {
+        "title": "Settlement system",
+        "description": "Could not auto-detect solar status from Energa API. Pick how your account is billed.",
+        "data": {
+          "system": "Settlement system"
+        }
+      },
       "reauth_confirm": {
         "title": "Update Password",
         "description": "Re-login for account {username}.",
