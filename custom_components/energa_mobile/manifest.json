@@ -1,6 +1,6 @@
 {
   "domain": "energa_mobile",
-  "name": "Energa My Meter API (M\u00f3j Licznik API)",
+  "name": "Energa My Meter API (M\u00f3j Licznik) PRO",
   "after_dependencies": [
     "recorder"
   ],
