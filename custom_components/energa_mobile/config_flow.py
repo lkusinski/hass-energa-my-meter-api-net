@@ -159,18 +159,30 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     # net-billing (activation date is the app date,
                     # dealer.start the supply contract). One bounded
                     # meter fetch; fail-open to the old direct create.
+                    _prosumer = False
+                    _fetch_failed = False
                     try:
                         async with asyncio.timeout(20):
                             _meters = await api._fetch_all_meters()
                         _prosumer = any(
                             is_export_prosumer(m) for m in (_meters or [])
                         )
-                    except Exception:
-                        _prosumer = False
+                    except Exception as ex:
+                        _LOGGER.warning(
+                            "Could not auto-detect prosumer status from Energa API (%s), presenting fallback step",
+                            ex,
+                        )
+                        _fetch_failed = True
+
                     if _prosumer:
                         self._pending_title = attempt_username
                         self._pending_data = entry_data
                         return await self.async_step_system()
+                    elif _fetch_failed:
+                        self._pending_title = attempt_username
+                        self._pending_data = entry_data
+                        return await self.async_step_system_fallback()
+
                     return self.async_create_entry(
                         title=attempt_username,
                         data=entry_data,
@@ -209,11 +221,14 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         (still changeable later in Options → Ceny).
         """
         if user_input is not None:
-            coeff = system_choice_coefficient(user_input.get("system"))
+            choice = user_input.get("system")
+            options = {}
+            if choice != "brak":
+                options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
             return self.async_create_entry(
                 title=getattr(self, "_pending_title", "Energa My Meter"),
                 data=getattr(self, "_pending_data", {}),
-                options={CONF_PROSUMER_COEFFICIENT: coeff},
+                options=options,
             )
         return self.async_show_form(
             step_id="system",
@@ -223,6 +238,34 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         {
                             "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
                             "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+                            "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
+                        }
+                    )
+                }
+            ),
+        )
+
+    async def async_step_system_fallback(self, user_input=None):
+        """Prompt user for prosumer system when auto-detection timed out."""
+        if user_input is not None:
+            choice = user_input.get("system")
+            options = {}
+            if choice != "brak":
+                options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
+            return self.async_create_entry(
+                title=getattr(self, "_pending_title", "Energa My Meter"),
+                data=getattr(self, "_pending_data", {}),
+                options=options,
+            )
+        return self.async_show_form(
+            step_id="system_fallback",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("system", default="nowe"): vol.In(
+                        {
+                            "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
+                            "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+                            "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
                         }
                     )
                 }

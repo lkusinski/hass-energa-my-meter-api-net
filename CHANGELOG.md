@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.4.1 (2026-09-11) — Odporność Onboardingu i Auto-Backfillu (Resilient Onboarding & Provisioning)
+
+### 🔄 Odporność na Przerwanie i Restart HA podczas 730-dniowego Auto-Backfillu (`__init__.py`)
+- **Eliminacja błędu pomijania historii:** Wcześniejsza funkcja `_has_any_panel_statistics` sprawdzała jedynie ostatni punkt telemetryczny (`get_last_statistics`), który po pierwszym odświeżeniu koordynatora zawierał bieżący dzień. W efekcie każdy restart Home Assistanta w trakcie lub przed backfillem trwale blokował import 730 dni historii.
+- **Weryfikacja okna historycznego `_has_history_statistics`:** Sprawdzanie obecności danych w oknie `[target_start, target_start + 60 dni]` zamiast pojedynczego najnowszego punktu.
+- **Trwały znacznik `auto_backfill_completed`:** Zapis stanu w `entry.data`, zapobiegający zbędnym zapytaniom do bazy po pełnym zaimportowaniu.
+
+### 📢 Notyfikacje Postępu i Gotowości (`__init__.py`)
+- **Pasek postępu importu:** Informowanie użytkownika co 30 przetworzonych dni o postępie procentowym i szacowanym pozostałym czasie.
+- **Ściągawka konfiguracji Panelu Energia:** Powiadomienie końcowe zawiera gotowe identyfikatory encji sumarycznych (`sensor.energa_[meter_id]_pobor_energia_suma_kwh`, `sensor.energa_[meter_id]_oddanie_energia_suma_kwh`) oraz bezpośredni odnośnik do pulpitu Lovelace.
+
+### 📊 Automatyczne Dodanie Pulpitu Lovelace do Paska HA (`__init__.py`, `dashboard.py`)
+- Wywołanie `async_provision_dashboard(hass, entry)` natychmiast przy konfiguracji i ładowaniu integracji, dzięki czemu dashboard `/energa-rachunek` pojawia się w menu bocznym bez konieczności ręcznych akcji użytkownika.
+
+### 🛡️ Odporność Kreatora Konfiguracji na Timeouty API i Opcja Braku PV (`config_flow.py`, `settlement.py`, translacje)
+- **Krok awaryjny `system_fallback`:** W przypadku powolnej odpowiedzi lub błędu API Energi podczas wykrywania liczników, użytkownik otrzymuje czytelny formularz awaryjny zamiast błędu konfiguracji lub nieprawidłowej domyślnej autokonfiguracji.
+- **Opcja "Nie posiadam fotowoltaiki":** Dodano opcję `brak` (współczynnik `0.0`) w kreatorze, chroniąc zwykłych odbiorców przed automatycznym przypisaniem do net-meteringu (współczynnik 0.8).
+
+### 🧪 Nowe Testy Jednostkowe (`tests/test_onboarding_resilience.py`)
+- 10 nowych testów jednostkowych pokrywających współczynnik `brak`, fallback w config flow, mechanizm weryfikacji okna statystyk oraz proces wznowienia auto-backfillu.
+- Łącznie 328 testów jednostkowych przechodzi pomyślnie.
+
 ## v1.4.0 (2026-09-10) — Podwójny Wirtualny Magazyn Energii L1/L2 (Dual-Zone Net-Metering FIFO)
 
 ### 🏭 Izolacja Stref Rozliczeniowych L1 (Dzień) i L2 (Noc) w Net-Meteringu (`settlement.py`, `sensor.py`)

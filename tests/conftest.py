@@ -51,8 +51,20 @@ class _AbortFlow(Exception):
 
 sys.modules["homeassistant.data_entry_flow"].AbortFlow = _AbortFlow
 
+class _ConfigFlow:
+    def __init_subclass__(cls, **kwargs):
+        pass
+
+class _OptionsFlow:
+    def __init_subclass__(cls, **kwargs):
+        pass
+
+config_entries_mod = sys.modules["homeassistant.config_entries"]
+config_entries_mod.ConfigFlow = _ConfigFlow
+config_entries_mod.OptionsFlow = _OptionsFlow
+
 # Ensure config_entries has the FlowResult type
-sys.modules["homeassistant"].config_entries = sys.modules["homeassistant.config_entries"]
+sys.modules["homeassistant"].config_entries = config_entries_mod
 
 # Provide SensorDeviceClass, SensorStateClass, SensorEntity as mock enums
 sensor_mod = sys.modules["homeassistant.components.sensor"]

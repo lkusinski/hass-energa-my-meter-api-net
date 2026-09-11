@@ -512,11 +512,12 @@ def month_to_date_forecast(
 def system_choice_coefficient(choice) -> float:
     """Prosumer coefficient for the setup-wizard system choice (v0.3.8).
 
-    "nowe" (net-billing) → 0.0, anything else → 0.8 (opusty default).
+    "nowe" (net-billing) → 0.0, "brak" (no solar) → 0.0, anything else → 0.8 (opusty default).
     Pure function, unit-tested.
     """
     try:
-        if str(choice).strip().lower() == "nowe":
+        s = str(choice).strip().lower()
+        if s in ("nowe", "brak"):
             return 0.0
     except (ValueError, TypeError, AttributeError):
         pass
