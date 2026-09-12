@@ -337,6 +337,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         new_prefs["energy_sources"] = kept_sources
         await manager.async_update(new_prefs)
 
+        if enable_synth:
+            try:
+                from .synthetic_storage import async_synthesize_storage_from_recorder
+                await async_synthesize_storage_from_recorder(self.hass, self._entry, self._meter)
+            except Exception as synth_err:
+                _LOGGER.debug("Immediate synthetic backfill during button press skipped: %s", synth_err)
+
         try:
             from homeassistant.components import persistent_notification
             mode_name = (

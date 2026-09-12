@@ -217,3 +217,66 @@ class TestSyntheticSensor:
         assert val is not None
         assert val == (2000.0 * 0.8) - 1000.0  # 1600 - 1000 = 600
 
+    @pytest.mark.asyncio
+    async def test_async_synthesize_storage_from_recorder(self, monkeypatch):
+        from custom_components.energa_mobile.synthetic_storage import async_synthesize_storage_from_recorder
+
+        hass = MagicMock()
+        entry = MagicMock()
+        entry.options = {
+            CONF_ENABLE_SYNTHETIC_STORAGE: True,
+            CONF_PROSUMER_COEFFICIENT: 0.8,
+        }
+
+        meter = {
+            "meter_point_id": "30910672",
+            "meter_serial": "30910672",
+            "zone_count": 1,
+            "tariff": "G11",
+            "is_prosumer": True,
+        }
+
+        # Mock recorder get_instance and statistics_during_period
+        imported_stats = []
+
+        def mock_async_import_statistics(h, meta, stats):
+            imported_stats.append((meta.statistic_id, stats))
+
+        import sys
+        rec_stat_mod = sys.modules["homeassistant.components.recorder.statistics"]
+        rec_stat_mod.async_import_statistics = mock_async_import_statistics
+
+        mock_recorder = MagicMock()
+
+        def mock_executor_job(func, *args):
+            stat_ids = func.args[3] if hasattr(func, "args") and len(func.args) > 3 else []
+            if "sensor.energa_30910672_syntetyczny_magazyn_ladowanie" in stat_ids:
+                return {}
+            # raw stats
+            ts1 = 1725487200.0
+            ts2 = 1725490800.0
+            return {
+                "sensor.energa_30910672_panel_energia_zuzycie": [
+                    {"start": ts1, "state": 1.5},
+                    {"start": ts2, "state": 0.5},
+                ],
+                "sensor.energa_30910672_panel_energia_produkcja": [
+                    {"start": ts1, "state": 2.0},
+                    {"start": ts2, "state": 0.0},
+                ],
+            }
+
+        import sys
+        rec_mod = sys.modules["homeassistant.components.recorder"]
+        rec_instance = rec_mod.get_instance.return_value
+        rec_instance.async_add_executor_job = AsyncMock(side_effect=mock_executor_job)
+
+        res = await async_synthesize_storage_from_recorder(hass, entry, meter)
+        assert res is True
+        assert len(imported_stats) == 4
+        stat_ids = [s[0] for s in imported_stats]
+        assert "sensor.energa_30910672_syntetyczny_magazyn_ladowanie" in stat_ids
+        assert "sensor.energa_30910672_syntetyczny_magazyn_rozladowanie" in stat_ids
+        assert "sensor.energa_30910672_syntetyczna_siec_oddanie" in stat_ids
+        assert "sensor.energa_30910672_syntetyczna_siec_pobor" in stat_ids
+
