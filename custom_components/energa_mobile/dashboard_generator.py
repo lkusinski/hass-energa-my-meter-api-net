@@ -46,6 +46,13 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     is_net_billing = is_prosumer and coeff < 0.7
     is_net_metering = is_prosumer and not is_net_billing
 
+    label = (
+        str(meter.get("customer_label", "")).strip()
+        or str(meter.get("address", "")).strip()
+        or str(meter.get("custom_title", "")).strip()
+        or f"Licznik {serial}"
+    )
+
     if meter.get("customer_label"):
         title = str(meter["customer_label"]).strip()
     elif meter.get("custom_title"):
@@ -59,6 +66,15 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     else:
         title = f"{tariff} — Profil Konsumencki"
 
+    if is_net_metering:
+        system_desc = f"Net-metering (Opust {coeff} — Magazyn kWh)"
+    elif is_net_billing:
+        system_desc = "Net-billing (Depozyt Prosumencki PLN)"
+    elif is_prosumer:
+        system_desc = "Fotowoltaika (Prosumencki)"
+    else:
+        system_desc = "Standardowy (Konsument)"
+
     view_icon = (
         "mdi:battery-charging-high"
         if is_net_metering
@@ -67,15 +83,15 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         else "mdi:transmission-tower"
     )
 
-    # 1. Badges
+    # 1. Badges (Agrestowa 4 style)
     badges = [
         {
             "entity": f"sensor.energa_{serial}_dotychczasowy_rachunek",
-            "name": "Dotychczas do zapłaty",
+            "name": "Dotychczas brutto",
         },
         {
             "entity": f"sensor.energa_{serial}_prognoza_rachunku",
-            "name": "Prognoza miesiąca",
+            "name": "Prognoza brutto",
         },
     ]
 
@@ -84,7 +100,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
             0,
             {
                 "entity": f"sensor.energa_{serial}_bank_wirtualny_kwh",
-                "name": "Dostępny Magazyn",
+                "name": "Magazyn kWh",
             },
         )
         badges.insert(
@@ -98,7 +114,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         badges.append(
             {
                 "entity": f"sensor.energa_{serial}_bank_wirtualny_pln",
-                "name": "Depozyt PLN",
+                "name": "Magazyn/Depozyt",
             }
         )
         badges.append(
@@ -117,7 +133,51 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
 
     cards: list[dict[str, Any]] = []
 
-    # 2. Card: Storage / Deposit (if prosumer)
+    # 2. Card: Header Card (Markdown, Agrestowa 4 style)
+    cards.append(
+        {
+            "type": "markdown",
+            "title": f"🏡 {label} — Centrum Rozliczeń",
+            "content": (
+                f"## 🏡 {label} — Centrum Rozliczeń\n"
+                f"**Taryfa:** {tariff} | **System:** {system_desc} | **Licznik:** `{serial}`"
+            ),
+        }
+    )
+
+    # 3. Card: Billing breakdown (MTD + Forecast)
+    bill_entities = [
+        {"entity": f"sensor.energa_{serial}_dotychczasowy_rachunek", "name": "Dotychczasowy rachunek (brutto)"},
+        {"entity": f"sensor.energa_{serial}_prognoza_rachunku", "name": "Prognoza na koniec miesiąca (brutto)"},
+        {"entity": f"sensor.energa_{serial}_koszt_brutto_mtd", "name": "Całkowity koszt energii i dystrybucji brutto"},
+        {"entity": f"sensor.energa_{serial}_koszt_energii_czynnej_mtd", "name": "Energia czynna MTD (brutto)"},
+        {"entity": f"sensor.energa_{serial}_koszt_dystrybucji_mtd", "name": "Dystrybucja MTD (brutto)"},
+    ]
+    if is_net_billing:
+        bill_entities.append(
+            {"entity": f"sensor.energa_{serial}_bank_wirtualny_pln", "name": "Stan konta wirtualnego (Depozyt PLN)"}
+        )
+        bill_entities.append(
+            {"entity": f"sensor.energa_{serial}_cena_oddania", "name": "Wycena zasilenia depozytu brutto"}
+        )
+        bill_entities.append(
+            {"entity": f"sensor.energa_{serial}_odzyskano_z_depozytu_mtd", "name": "Potrącenie z depozytu prosumenckiego"}
+        )
+    elif is_net_metering:
+        bill_entities.append(
+            {"entity": f"sensor.energa_{serial}_bank_wirtualny_kwh", "name": "Stan magazynu wirtualnego (kWh)"}
+        )
+
+    cards.append(
+        {
+            "type": "entities",
+            "title": f"⚡ Rozliczenie Finansowe Energa ({label})",
+            "icon": "mdi:receipt-text-outline",
+            "entities": bill_entities,
+        }
+    )
+
+    # 4. Card: Storage / Deposit (if prosumer)
     if is_net_metering:
         storage_entities = [
             {"entity": f"sensor.energa_{serial}_magazyn_poziom", "name": "Poziom napełnienia magazynu"},
@@ -164,29 +224,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
             }
         )
 
-    # 3. Card: Billing breakdown (MTD + Forecast)
-    bill_entities = [
-        {"entity": f"sensor.energa_{serial}_dotychczasowy_rachunek", "name": "Dotychczas do zapłaty (MTD)"},
-        {"entity": f"sensor.energa_{serial}_prognoza_rachunku", "name": "Prognoza dopłaty na koniec miesiąca"},
-        {"entity": f"sensor.energa_{serial}_koszt_brutto_mtd", "name": "Całkowity koszt energii i dystrybucji brutto"},
-        {"entity": f"sensor.energa_{serial}_koszt_energii_czynnej_mtd", "name": "Koszt energii czynnej (sprzedaż)"},
-        {"entity": f"sensor.energa_{serial}_koszt_dystrybucji_mtd", "name": "Koszt dystrybucji i opłat stałych"},
-    ]
-    if is_net_billing:
-        bill_entities.append(
-            {"entity": f"sensor.energa_{serial}_odzyskano_z_depozytu_mtd", "name": "Potrącenie z depozytu prosumenckiego"}
-        )
-
-    cards.append(
-        {
-            "type": "entities",
-            "title": "💳 Rozliczenie Finansowe (Bieżące i Prognoza)",
-            "icon": "mdi:receipt-text-outline",
-            "entities": bill_entities,
-        }
-    )
-
-    # 4. Card: Tariffs and Energy Volumes
+    # 5. Card: Tariffs and Energy Volumes
     tariff_entities: list[dict[str, Any]] = [
         {"entity": f"sensor.energa_{serial}_taryfa", "name": "Aktywna taryfa OSD"},
     ]
@@ -218,6 +256,14 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
                 {"entity": f"sensor.energa_{serial}_oddanie_energii_mtd", "name": "Oddanie energii G11 (MTD)"}
             )
 
+    if is_prosumer:
+        tariff_entities.append(
+            {"entity": f"sensor.energa_{serial}_autokonsumpcja_mtd", "name": "Autokonsumpcja MTD"}
+        )
+        tariff_entities.append(
+            {"entity": f"sensor.energa_{serial}_stopien_autokonsumpcji_mtd", "name": "Stopień autokonsumpcji"}
+        )
+
     cards.append(
         {
             "type": "entities",
@@ -227,7 +273,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         }
     )
 
-    # 5. Card: Physical meter registers
+    # 6. Card: Physical meter registers
     meter_entities: list[dict[str, Any]] = [
         {"entity": f"sensor.energa_{serial}_numer_licznika", "name": "Numer seryjny licznika"},
         {"entity": f"sensor.energa_{serial}_ppe", "name": "Numer PPE"},

@@ -233,3 +233,27 @@ async def test_async_provision_dashboard_storage(mock_meter_net_metering):
         # Check storage save called
         assert mock_store_inst.async_save.call_count >= 2
         mock_reg_panel.assert_called_once()
+
+
+def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
+    mock_meter_net_billing["customer_label"] = "Agrestowa 4"
+    view = build_meter_view(mock_meter_net_billing, coeff=0.0)
+
+    # 1. Header card
+    header_card = view["cards"][0]
+    assert header_card["type"] == "markdown"
+    assert "Agrestowa 4" in header_card["title"]
+    assert "Centrum Rozliczeń" in header_card["title"]
+    assert "Net-billing" in header_card["content"]
+    assert "11685328" in header_card["content"]
+
+    # 2. Badges in Agrestowa style
+    badge_names = {b["name"]: b["entity"] for b in view["badges"]}
+    assert "Dotychczas brutto" in badge_names
+    assert "Prognoza brutto" in badge_names
+    assert "Magazyn/Depozyt" in badge_names
+
+    # 3. Financial card title
+    financial_card = view["cards"][1]
+    assert "Rozliczenie Finansowe Energa (Agrestowa 4)" in financial_card["title"]
+
