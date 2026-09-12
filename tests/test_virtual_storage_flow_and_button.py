@@ -96,14 +96,15 @@ class TestConfigureEnergyDashboardButton:
         saved_prefs = mock_manager.async_update.call_args[0][0]
         sources = saved_prefs["energy_sources"]
 
-        # Check grid source
-        grid = next(s for s in sources if s.get("type") == "grid")
-        assert len(grid["flow_from"]) == 2
-        assert grid["flow_from"][0]["stat_energy_from"] == "sensor.energa_11685328_syntetyczna_siec_pobor_strefa_1"
-        assert grid["flow_from"][1]["stat_energy_from"] == "sensor.energa_11685328_syntetyczna_siec_pobor_strefa_2"
-        assert len(grid["flow_to"]) == 2
-        assert grid["flow_to"][0]["stat_energy_to"] == "sensor.energa_11685328_syntetyczna_siec_oddanie_strefa_1"
-        assert grid["flow_to"][0]["number_energy_price"] == 0.0
+        # Check grid sources (modern flat GridSourceType format)
+        grid_sources = [s for s in sources if s.get("type") == "grid"]
+        assert len(grid_sources) == 2
+        assert grid_sources[0]["stat_energy_from"] == "sensor.energa_11685328_syntetyczna_siec_pobor_strefa_1"
+        assert grid_sources[0]["stat_energy_to"] == "sensor.energa_11685328_syntetyczna_siec_oddanie_strefa_1"
+        assert grid_sources[0]["number_energy_price_export"] == 0.0
+        assert grid_sources[1]["stat_energy_from"] == "sensor.energa_11685328_syntetyczna_siec_pobor_strefa_2"
+        assert grid_sources[1]["stat_energy_to"] == "sensor.energa_11685328_syntetyczna_siec_oddanie_strefa_2"
+        assert grid_sources[1]["number_energy_price_export"] == 0.0
 
         # Check battery sources (L1 and L2)
         batteries = [s for s in sources if s.get("type") == "battery"]
@@ -134,6 +135,7 @@ class TestConfigureEnergyDashboardButton:
             "ppe": "PPE30910672",
             "zone_count": 1,
             "tariff": "G11",
+            "obis_minus": "1.8.0",
         }
 
         button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
@@ -149,12 +151,11 @@ class TestConfigureEnergyDashboardButton:
         batteries = [s for s in sources if s.get("type") == "battery"]
         assert len(batteries) == 0
 
-        # Physical grid flows
-        grid = next(s for s in sources if s.get("type") == "grid")
-        assert len(grid["flow_from"]) == 1
-        assert grid["flow_from"][0]["stat_energy_from"] == "sensor.energa_30910672_panel_energia_zuzycie"
-        assert len(grid["flow_to"]) == 1
-        assert grid["flow_to"][0]["stat_energy_to"] == "sensor.energa_30910672_panel_energia_produkcja"
+        # Physical grid flows (modern flat GridSourceType)
+        grid_sources = [s for s in sources if s.get("type") == "grid"]
+        assert len(grid_sources) == 1
+        assert grid_sources[0]["stat_energy_from"] == "sensor.energa_30910672_panel_energia_zuzycie"
+        assert grid_sources[0]["stat_energy_to"] == "sensor.energa_30910672_panel_energia_produkcja"
 
 
 class TestSyntheticSensor:

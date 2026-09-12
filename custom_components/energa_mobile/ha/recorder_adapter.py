@@ -110,6 +110,15 @@ class RecorderAdapter:
     def __init__(self, hass: Any) -> None:
         """Initialize recorder adapter."""
         self.hass = hass
+        self._highest_sums: dict[str, float] = {}
+
+    def seed_last_sum(self, statistic_id: str, last_sum: float) -> None:
+        """Seed or update the highest known sum for a statistic ID."""
+        if last_sum is not None:
+            val = float(last_sum)
+            current = self._highest_sums.get(statistic_id, 0.0)
+            if val > current:
+                self._highest_sums[statistic_id] = val
 
     def build_metadata(
         self,
@@ -151,14 +160,19 @@ class RecorderAdapter:
         if not statistics:
             return 0
 
+        cached_highest = self._highest_sums.get(stat_id, 0.0)
+        effective_last_sum = max(float(last_known_sum or 0.0), cached_highest)
+
         clean_stats = validate_and_clean_statistics(
             statistics,
             max_value=max_hourly,
-            last_known_sum=last_known_sum,
+            last_known_sum=effective_last_sum,
         )
         if not clean_stats:
             _LOGGER.debug("No valid statistics to import for %s after cleaning", stat_id)
             return 0
+
+        self._highest_sums[stat_id] = max(effective_last_sum, clean_stats[-1]["sum"])
 
         try:
             async_import_statistics(self.hass, metadata, clean_stats)

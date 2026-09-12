@@ -1,6 +1,26 @@
 # Changelog
 
-## v1.6.1 (2026-09-12) — Natychmiastowa Synteza Magazynu z Recorder DB, Poprawka G11 i Autokonfigurator
+## v1.6.2 (2026-09-12) — Płaski Format Źródeł Sieci (GridSourceType), Zabezpieczenie przed Resetem Sum i Ochrona Spadków
+
+### ⚡ Nowości i Usprawnienia (Features & Improvements)
+- **Nowoczesny, płaski format źródeł sieci w Panelu Energia (`button.py`):**
+  Zaktualizowano generator konfiguracji Panelu Energia z przestarzałego schematu zagnieżdżonego (`LegacyGridSourceType` z tablicami `flow_from` / `flow_to`) na obowiązujący w nowszych wersjach Home Assistant format płaski (`GridSourceType`). Każde przyłącze i strefa taryfowa (np. Strefa 1 / Dzień oraz Strefa 2 / Noc w G12/G12w) stanowi teraz samodzielny obiekt z bezpośrednio przypisanym `stat_energy_from` oraz `stat_energy_to`. Rozwiązuje to całkowicie problem komunikatu **"Brak sieci"** pojawiającego się na frontendzie `/energy`.
+- **Kotwiczenie sum w `EnergaDataUpdater` (`data_updater.py`):**
+  Metoda `gather_stats_for_sensor` przyjmuje teraz parametr `last_known_sum`. W przypadku braku pobranych wcześniej statystyk z bazy w pamięci podręcznej (np. przy pierwszym odświeżeniu po starcie systemu, zanim recorder zakończy inicjalizację), koordynator nie resetuje obliczeń do zera, lecz kotwiczy sumę na najwyższej znanej wartości sensora.
+- **Twarda ochrona przed spadkami sum w `RecorderAdapter` (`recorder_adapter.py`):**
+  Dodano bufor `_highest_sums` oraz metodę `seed_last_sum`. `RecorderAdapter` weryfikuje każdą importowaną paczkę statystyk — jeśli którakolwiek suma miałaby spaść poniżej dotychczasowej najwyższej zarejestrowanej wartości, suma jest automatycznie klamrowana w górę (`running_sum = max(running_sum, cand_sum)`). Gwarantuje to absolutną monotoniczność i uniemożliwia powstanie ujemnych pików energii (np. -13.7 MWh) na wykresach.
+
+### 🐛 Poprawki Błędów (Bug Fixes)
+- **Naprawa błędu `NameError: name 'recorder_adapter' is not defined` (`__init__.py`):**
+  Zmienna `recorder_adapter` została przeniesiona do zakresu zewnętrznego funkcji `_import_meter_history`, naprawiając błąd asynchronicznego generowania historii magazynu dla niektórych liczników.
+- **Pobieranie znacznika czasu w `_get_smart_start_date` (`sensor.py`):**
+  W zapytaniach `get_last_statistics` dodano wymagany parametr `"start"` do zbioru `types`, co umożliwia poprawną detekcję daty ostatniego rekordu i płynne pobieranie tylko nowych godzin bez luk czasowych.
+- **Aktualizacja pamięci podręcznej statystyk w sensorze (`sensor.py`):**
+  Po każdym pomyślnym zaimportowaniu statystyk przez `EnergaStatisticsSensor`, słownik koordynatora `_pre_fetched_stats` oraz adapter rekordera są natychmiast uaktualniane o najnowszą wartość sumy i znacznika czasu.
+
+### 🧪 Testy Jednostkowe
+- 344 w pełni przechodzące testy jednostkowe (dodano testy kotwiczenia `last_known_sum` oraz klamrowania spadków sum w `RecorderAdapter`).
+
 
 ### ⚡ Nowości i Usprawnienia (Features & Improvements)
 - **Błyskawiczna synteza statystyk magazynu z bazy Recorder (`synthetic_storage.py`):** Dodano funkcję `async_synthesize_storage_from_recorder`. Dla istniejących instalacji aktualizowanych do v1.6.0+ (gdzie pobieranie historii było już wcześniej oznaczone jako zakończone) integracja natychmiast generuje 730 dni historii wirtualnego magazynu bezpośrednio z lokalnej bazy danych Home Assistant w ułamku sekundy, bez konieczności wykonywania setek zapytań HTTP do API Energi.

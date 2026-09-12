@@ -169,3 +169,55 @@ def test_bank_flow_sensor_native_value_is_none():
     )
     assert sensor.native_value is None
 
+
+def test_gather_stats_anchors_with_last_known_sum():
+    """Verify gather_stats_for_sensor does not reset to zero when last_known_sum is provided."""
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.options = {}
+
+    updater = EnergaDataUpdater(hass, entry, pre_fetched_stats={})
+
+    hourly_data = [
+        {"dt": datetime(2026, 9, 12, 10, 0, tzinfo=timezone.utc), "value": 0.5},
+        {"dt": datetime(2026, 9, 12, 11, 0, tzinfo=timezone.utc), "value": 0.3},
+    ]
+
+    energy_stats, cost_stats = updater.gather_stats_for_sensor(
+        meter_id="12345",
+        data_key="import",
+        hourly_data=hourly_data,
+        entity_id="sensor.energa_12345_panel_energia_zuzycie",
+        last_known_sum=13847.7,
+    )
+
+    assert len(energy_stats) == 2
+    assert energy_stats[0]["sum"] == pytest.approx(13848.2)
+    assert energy_stats[1]["sum"] == pytest.approx(13848.5)
+
+
+def test_recorder_adapter_prevents_sum_drops():
+    """Verify RecorderAdapter clamps any incoming sum drop against cached highest sum."""
+    from custom_components.energa_mobile.ha.recorder_adapter import RecorderAdapter
+
+    hass = MagicMock()
+    adapter = RecorderAdapter(hass)
+    stat_id = "sensor.energa_12345_panel_energia_zuzycie"
+
+    # Seed with 13847.7
+    adapter.seed_last_sum(stat_id, 13847.7)
+
+    # Even if statistics with small sum are passed, it must clamp to >= 13847.7
+    corrupted_batch = [
+        {"start": datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc), "state": 0.4, "sum": 135.0}
+    ]
+
+    meta = adapter.build_metadata(stat_id)
+    with patch("custom_components.energa_mobile.ha.recorder_adapter.async_import_statistics") as mock_import:
+        count = adapter.import_statistics(meta, corrupted_batch, last_known_sum=0.0)
+        assert count == 1
+        imported_stats = mock_import.call_args[0][2]
+        # Sum must be clamped to at least 13847.7, NEVER drop to 135.0
+        assert imported_stats[0]["sum"] >= 13847.7
+
+
