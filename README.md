@@ -15,7 +15,7 @@
 > 
 > Ten projekt to niezależna, wysoce zaawansowana integracja (wersja **PRO**) dla użytkowników platformy **Energa Mój Licznik** w Home Assistant. 
 > 
-> Jeśli zależy Ci jedynie na szybkim i prostym odczycie bieżących wskazań licznika, znakomitą i sprawdzoną opcją jest integracja stworzona przez **ergo5** ([`home-assistant-energa-operator`](https://github.com/ergo5/home-assistant-energa-operator)). Jej wielkim plusem jest to, że znajduje się już **oficjalnie w domyślnym katalogu HACS**, dzięki czemu instaluje się ją bezpośrednio z wyszukiwarki jednym kliknięciem.
+> Jeśli zależy Ci jedynie na szybkim i prostym odczycie bieżących wskazań licznika, znakomitą i sprawdzoną opcją jest integracja stworzona przez **ergo5** ([`hass-energa-my-meter-api`](https://github.com/ergo5/hass-energa-my-meter-api)). Jej wielkim plusem jest to, że znajduje się już **oficjalnie w domyślnym katalogu HACS**, dzięki czemu instaluje się ją bezpośrednio z wyszukiwarki jednym kliknięciem.
 > 
 > **Skąd wzięła się ta wersja i dlaczego jest samodzielnym bytem?**
 > - **Ewolucja projektu:** Miało to być proste rozwiązanie, ale w miarę analizy rzeczywistych faktur OSD i kolejnych zawiłości rozliczeniowych (izolacja stref L1/L2 w magazynie energii, ścisłe kolejki FIFO z 12-miesięcznym horyzontem ważności, depozyty wartościowe Net-billing z oficjalnymi stawkami PSE RCEm, predykcje rachunku brutto uwzględniające komplet opłat stałych i zmiennych, asynchroniczna autokonsumpcja PV eliminująca lagi OSD czy 730-dniowy backfill historii) powstał kompletny kombajn analityczno-rozliczeniowy.
