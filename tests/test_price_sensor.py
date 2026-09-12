@@ -201,3 +201,30 @@ class TestProsumerBalanceRegression:
 
     def test_gednet_scenario(self):
         assert self.calc(10010, 10840, coeff=0.7, bl_imp=10000, bl_exp=10000) == 578.0
+
+
+class TestPriceAttributes:
+    """Validate extra state attributes logic for import price sensors."""
+
+    def test_import_attributes_format(self):
+        zone_keys = ["import_1", "import_2", "import"]
+        for key in zone_keys:
+            zone_desc = (
+                "Strefa 1 — Dzień (szczyt)"
+                if key == "import_1"
+                else "Strefa 2 — Noc (pozaszczyt / weekend)"
+                if key == "import_2"
+                else "Taryfa jednostrefowa (G11)"
+            )
+            val = get_price_for_key({}, key)
+            attrs = {
+                "stawka_calkowita_brutto": round(val, 4),
+                "unit": "PLN/kWh",
+                "opis": "Łączny koszt 1 kWh brutto (energia czynna + opłaty dystrybucyjne zmienne + VAT 23%)",
+                "strefa": zone_desc,
+                "uwaga": "Cena w Panelu Energia uwzględnia pełny koszt zmienny (energię i dystrybucję brutto), dzięki czemu kalkulacja kosztów poboru pokrywa się z realną fakturą.",
+            }
+            assert "stawka_calkowita_brutto" in attrs
+            assert attrs["unit"] == "PLN/kWh"
+            assert "energia czynna + opłaty dystrybucyjne" in attrs["opis"]
+

@@ -60,11 +60,11 @@
       },
       "prices": {
         "title": "Ceny Energii",
-        "description": "Ustaw ceny energii do kalkulacji kosztów w Panelu Energia.",
+        "description": "Ustaw pełne ceny energii do kalkulacji kosztów w Panelu Energia. WAŻNE: Podaj całkowity koszt zmienny 1 kWh brutto (cena energii czynnej + opłaty dystrybucyjne zmienne + VAT 23%), aby wykresy w Panelu Energia prawidłowo odzwierciedlały realne rachunki.",
         "data": {
-          "import_price": "Cena za kWh (zużycie) [PLN]",
-          "import_price_1": "Cena za kWh strefa 1 (droga) [PLN]",
-          "import_price_2": "Cena za kWh strefa 2 (tania) [PLN]",
+          "import_price": "Pełna cena za kWh brutto (energia czynna + dystrybucja zmienna + VAT) [PLN]",
+          "import_price_1": "Pełna cena za kWh strefa 1 (Dzień / szczyt — energia + dystrybucja brutto) [PLN]",
+          "import_price_2": "Pełna cena za kWh strefa 2 (Noc / pozaszczyt — energia + dystrybucja brutto) [PLN]",
           "export_price": "Stawka za kWh (produkcja) [PLN]",
           "prosumer_coefficient": "Współczynnik prosumencki (0-1)",
           "balance_baseline_import": "Bazowy odczyt licznika import [kWh] (zaawansowane, niepotrzebne przy podaniu daty faktury)",

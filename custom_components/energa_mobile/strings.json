@@ -60,11 +60,11 @@
       },
       "prices": {
         "title": "Energy Prices",
-        "description": "Set energy prices for cost calculation in Energy Panel.",
+        "description": "Set full energy prices for cost calculation in Energy Panel. IMPORTANT: Enter total variable cost per 1 kWh gross (active energy + variable distribution + taxes/VAT), so Energy Panel accurately tracks invoice costs.",
         "data": {
-          "import_price": "Price per kWh (consumption) [PLN]",
-          "import_price_1": "Zone 1 price per kWh (peak) [PLN]",
-          "import_price_2": "Zone 2 price per kWh (off-peak) [PLN]",
+          "import_price": "Total gross price per kWh (active energy + variable distribution + VAT) [PLN]",
+          "import_price_1": "Total gross price per kWh Zone 1 (Peak / Day — active + distribution) [PLN]",
+          "import_price_2": "Total gross price per kWh Zone 2 (Off-peak / Night — active + distribution) [PLN]",
           "export_price": "Rate per kWh (production) [PLN]",
           "prosumer_coefficient": "Prosumer coefficient (0-1)",
           "balance_baseline_import": "Prosumer baseline meter import [kWh] (advanced, not needed when invoice date is set)",
