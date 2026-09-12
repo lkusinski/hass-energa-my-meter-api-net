@@ -957,8 +957,17 @@ async def async_setup_entry(
                 f"energa_{_mid}_mtd_energy_export": f"sensor.energa_{_serial}_oddanie_energii_mtd",
                 f"energa_{_mid}_mtd_energy_import_1": f"sensor.energa_{_serial}_pobor_energii_strefa_1_mtd",
                 f"energa_{_mid}_mtd_energy_import_2": f"sensor.energa_{_serial}_pobor_energii_strefa_2_mtd",
-                f"energa_{_mid}_mtd_energy_export_1": f"sensor.energa_{_serial}_oddanie_energii_strefa_1_mtd",
-                f"energa_{_mid}_mtd_energy_export_2": f"sensor.energa_{_serial}_oddanie_energii_strefa_2_mtd",
+                f"energa_{_mid}_bank_kwh_l1": f"sensor.energa_{_serial}_bank_wirtualny_l1_dzien_kwh",
+                f"energa_{_mid}_bank_kwh_l2": f"sensor.energa_{_serial}_bank_wirtualny_l2_noc_kwh",
+                f"energa_{_mid}_autoconsumption_today_kwh": f"sensor.energa_{_serial}_autokonsumpcja_dzis",
+                f"energa_{_mid}_autoconsumption_yesterday_kwh": f"sensor.energa_{_serial}_autokonsumpcja_wczoraj",
+                f"energa_{_mid}_autoconsumption_mtd_kwh": f"sensor.energa_{_serial}_autokonsumpcja_mtd",
+                f"energa_{_mid}_autoconsumption_autoconsumption_ratio_mtd": f"sensor.energa_{_serial}_stopien_autokonsumpcji_mtd",
+                f"energa_{_mid}_autoconsumption_self_sufficiency_ratio_mtd": f"sensor.energa_{_serial}_samowystarczalnosc_energetyczna_mtd",
+                f"energa_{_mid}_autoconsumption_today_home_consumption_kwh": f"sensor.energa_{_serial}_realne_zuzycie_domu_dzis",
+                f"energa_{_mid}_autoconsumption_mtd_home_consumption_kwh": f"sensor.energa_{_serial}_realne_zuzycie_domu_mtd",
+                f"energa_{_mid}_autoconsumption_savings_mtd_pln": f"sensor.energa_{_serial}_oszczednosc_autokonsumpcja_mtd",
+                f"energa_{_serial}_create_dashboard": f"button.energa_{_serial}_utworz_pulpit_rozliczen",
             })
 
         for _ent in list(_ent_reg.entities.values()):

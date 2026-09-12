@@ -132,7 +132,7 @@ def test_arbitrage_binary_sensors(mock_entry):
                 interval_start_utc=st,
                 interval_end_utc=en,
                 resolution="1H",
-                business_date=st.date(),
+                business_date=now_utc.date(),
             )
         )
 
