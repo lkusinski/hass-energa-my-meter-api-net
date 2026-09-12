@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.6.3 (2026-09-12) — Stabilne Wydanie Produkcyjne (Natywny Magazyn Wirtualny, Nowy Format Panelu Energia, Ochrona Bazy Danych)
+
+### 🌟 Oficjalne Wydanie Stabilne (Production Release)
+- **Kompletna stabilizacja i weryfikacja wielośrodowiskowa:** Wydanie v1.6.3 zostało w 100% przetestowane, zweryfikowane i wdrożone zarówno na instancjach laboratoryjnych, jak i na produkcyjnym Home Assistant.
+- **Pełne wsparcie dla net-meteringu (opusty 0.8 / 0.7) i net-billingu:** Wirtualny magazyn energii jako natywna bateria w oficjalnym Panelu Energia Home Assistant (`/energy`), syntetyczna sieć rozliczana zgodnie z przepisami OZE, bez podwajania kosztów poboru z opustu.
+- **Automatyczna ochrona przed spadkami sum (Anti-Spike Protection):** Wbudowane klamrowanie monotoniczności w `RecorderAdapter` oraz kotwiczenie w `EnergaDataUpdater` gwarantujące brak ujemnych anomalii i pików na wykresach długoterminowych.
+- **Nowy format źródeł sieciowych (GridSourceType):** Bezbłędna integracja z najnowszymi wersjami Home Assistant bez błędów "Brak sieci".
+- **Zaproszenie społeczności do testów:** Dodano sekcję w dokumentacji dotyczącą testowania pozostałych taryf (G13 trójstrefowa, G12, C, instalacje > 10 kWp).
+
 ## v1.6.2 (2026-09-12) — Płaski Format Źródeł Sieci (GridSourceType), Zabezpieczenie przed Resetem Sum i Ochrona Spadków
 
 ### ⚡ Nowości i Usprawnienia (Features & Improvements)
