@@ -185,6 +185,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         )
         has_zones = self._meter.get("zone_count", 1) > 1
         serial = self._serial
+        s_slug = str(serial).lower()
 
         inverter_entity = self._entry.options.get(
             CONF_INVERTER_ENERGY_ENTITY,
@@ -206,11 +207,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_1",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_1",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczna_siec_pobor_strefa_1",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie_strefa_1",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -219,11 +220,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                     },
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_2",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_2",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczna_siec_pobor_strefa_2",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie_strefa_2",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -233,13 +234,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 ]
                 battery_sources = [
                     {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_l1_rozladowanie",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_l1_ladowanie",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczny_magazyn_l1_rozladowanie",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczny_magazyn_l1_ladowanie",
                         "name": f"Wirtualny Magazyn Energa {serial} - Strefa 1 (Opust {coeff})",
                     },
                     {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_l2_rozladowanie",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_l2_ladowanie",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczny_magazyn_l2_rozladowanie",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczny_magazyn_l2_ladowanie",
                         "name": f"Wirtualny Magazyn Energa {serial} - Strefa 2 (Opust {coeff})",
                     },
                 ]
@@ -247,11 +248,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczna_siec_pobor",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -261,8 +262,8 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 ]
                 battery_sources = [
                     {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_rozladowanie",
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_ladowanie",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_syntetyczny_magazyn_rozladowanie",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczny_magazyn_ladowanie",
                         "name": f"Wirtualny Magazyn Energa {serial} (Opust {coeff})",
                     },
                 ]
@@ -271,26 +272,26 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_1",
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_strefa_1",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_1",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial} - Strefa 1",
                     },
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_2",
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_strefa_2",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_2",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial} - Strefa 2",
@@ -300,13 +301,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_zuzycie",
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja",
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_zuzycie",
+                        "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial}",
@@ -318,11 +319,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_1",
-                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1" if is_producer else None),
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_strefa_1",
+                        "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_1" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),
@@ -331,11 +332,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                     },
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_2",
-                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2" if is_producer else None),
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_strefa_2",
+                        "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_2" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),
@@ -347,11 +348,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                 grid_sources = [
                     {
                         "type": "grid",
-                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_zuzycie",
-                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja" if is_producer else None),
+                        "stat_energy_from": f"sensor.energa_{s_slug}_panel_energia_zuzycie",
+                        "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
+                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),

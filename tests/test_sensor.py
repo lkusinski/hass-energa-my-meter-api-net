@@ -489,4 +489,56 @@ def test_fifo_bank_from_monthly_partial_coverage():
     assert detail_3m["months_used"] == 3
 
 
+def test_live_sensor_export_defaults_zero_for_null_prosumer():
+    """Verify that EnergaLiveSensor returns 0.0 instead of None for missing prosumer export data."""
+    from unittest.mock import MagicMock
+    from custom_components.energa_mobile.sensor import EnergaLiveSensor
+
+    coord = MagicMock()
+    coord.data = [
+        {
+            "meter_point_id": "V705048953698419",
+            "meter_serial": "V705048953698419",
+            "is_prosumer": True,
+            "total_plus": 224110.0,
+            "total_minus": None,
+            "total_minus_1": None,
+            "total_minus_2": None,
+            "daily_produkcja": None,
+        }
+    ]
+
+    dev_info = MagicMock()
+    sensor_total_exp = EnergaLiveSensor(
+        coordinator=coord,
+        meter_id="V705048953698419",
+        data_key="total_minus",
+        name="Stan Licznika Export",
+        icon="mdi:solar-power",
+        device_info=dev_info,
+    )
+    assert sensor_total_exp.native_value == 0.0
+
+    sensor_daily_prod = EnergaLiveSensor(
+        coordinator=coord,
+        meter_id="V705048953698419",
+        data_key="daily_produkcja",
+        name="Produkcja Dziś",
+        icon="mdi:solar-power",
+        device_info=dev_info,
+    )
+    assert sensor_daily_prod.native_value == 0.0
+
+    sensor_total_imp = EnergaLiveSensor(
+        coordinator=coord,
+        meter_id="V705048953698419",
+        data_key="total_plus",
+        name="Stan Licznika Import",
+        icon="mdi:transmission-tower",
+        device_info=dev_info,
+    )
+    assert sensor_total_imp.native_value == 224110.0
+
+
+
 

@@ -275,7 +275,7 @@ async def async_synthesize_storage_from_recorder(
         return False
 
     meter_point_id = meter["meter_point_id"]
-    serial = str(meter.get("meter_serial", meter_point_id))
+    serial = str(meter.get("meter_serial", meter_point_id)).lower()
     has_zones = meter.get("zone_count", 1) > 1
 
     if has_zones:
