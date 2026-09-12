@@ -121,3 +121,29 @@ logger:
   logs:
     custom_components.energa_mobile: debug
 ```
+
+---
+
+## 6. Procedura Czystej Reinstalacji (Clean Wipe) i Porządkowania Encji
+
+### Kiedy stosować:
+- Zmiana taryfy lub typu instalacji z pozostającymi osieroconymi encjami po starym profilu.
+- Chęć wyzerowania bazy Canonical Storage (`energa_canonical.db`) i zaimportowania historii od zera z serwerów OSD.
+- Usunięcie zniekształconych lub testowych encji po wersjach deweloperskich.
+
+### Procedura krok po kroku:
+1. **Usunięcie integracji z UI Home Assistant:**
+   `Ustawienia → Urządzenia oraz usługi → Energa My Meter API PRO` → menu (3 kropki) → **Usuń**.
+2. **Usunięcie bazy Canonical Storage:**
+   W terminalu Home Assistant wykonaj:
+   ```bash
+   rm -f /config/.storage/energa_canonical.db*
+   ```
+3. **Uporządkowanie osieroconych encji w Entity Registry:**
+   `Ustawienia → Urządzenia oraz usługi → Encje` → wpisz w filtrze `energa` → zaznacz encje oznaczone statusem *"Przywrócona"* lub z ikoną ostrzeżenia (brak urządzenia) → kliknij **Usuń wybrane**.
+4. **Wyczyszczenie statystyk długoterminowych w Recorderze (Opcjonalnie):**
+   `Narzędzia deweloperskie → Statystyki` → wyszukaj `energa` → kliknij **Napraw problem** lub wybierz usunięcie danych statystycznych.
+5. **Ponowna instalacja i autokonfiguracja:**
+   - Zainstaluj integrację ponownie z poziomu kreatora konfiguracji.
+   - Na karcie urządzenia licznika kliknij przycisk **`Skonfiguruj Panel Energia`** (`button.energa_{serial}_skonfiguruj_panel_energia`).
+   - W menu bocznym kliknij **Energa Rozliczenia** — nowy pulpit w standardzie *Centrum Rozliczeń* zostanie natychmiast utworzony.
