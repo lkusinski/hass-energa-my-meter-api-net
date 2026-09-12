@@ -1088,7 +1088,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="Energa My Meter",
-            update_interval=timedelta(hours=1),  # Hourly updates
+            update_interval=timedelta(minutes=15),  # 15-minute polling for fresh metering data
         )
         self.api = api
         self.entry = entry

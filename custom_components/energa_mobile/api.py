@@ -1,4 +1,5 @@
 """API interface for Energa My Meter."""
+from __future__ import annotations
 
 import asyncio
 import logging
