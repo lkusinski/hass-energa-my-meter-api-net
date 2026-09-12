@@ -191,134 +191,133 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
             self._entry.options.get(f"meter_{serial}_{CONF_INVERTER_ENERGY_ENTITY}", "")
         )
 
+        is_producer = is_export_prosumer(self._meter) or bool(self._meter.get("obis_minus"))
+        grid_sources = []
         battery_sources = []
-        flow_from = []
-        flow_to = []
 
         if enable_synth:
+            try:
+                coeff = float(self._entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            except (ValueError, TypeError):
+                coeff = DEFAULT_PROSUMER_COEFFICIENT
+
             if has_zones:
+                grid_sources = [
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_1",
+                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_1",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": 0.0,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 1 (Dzień / Prowizja 20%)",
+                    },
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_2",
+                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_2",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": 0.0,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 2 (Noc / Prowizja 20%)",
+                    },
+                ]
                 battery_sources = [
                     {
                         "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_l1_rozladowanie",
                         "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_l1_ladowanie",
+                        "name": f"Wirtualny Magazyn Energa {serial} - Strefa 1 (Opust {coeff})",
                     },
                     {
                         "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_l2_rozladowanie",
                         "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_l2_ladowanie",
-                    },
-                ]
-                flow_from = [
-                    {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_1",
-                        "stat_cost": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
-                        "number_energy_price": None,
-                    },
-                    {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor_strefa_2",
-                        "stat_cost": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
-                        "number_energy_price": None,
-                    },
-                ]
-                flow_to = [
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_1",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
-                    },
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie_strefa_2",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
+                        "name": f"Wirtualny Magazyn Energa {serial} - Strefa 2 (Opust {coeff})",
                     },
                 ]
             else:
+                grid_sources = [
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor",
+                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": 0.0,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} (Prowizja 20%)",
+                    },
+                ]
                 battery_sources = [
                     {
                         "stat_energy_from": f"sensor.energa_{serial}_syntetyczny_magazyn_rozladowanie",
                         "stat_energy_to": f"sensor.energa_{serial}_syntetyczny_magazyn_ladowanie",
-                    },
-                ]
-                flow_from = [
-                    {
-                        "stat_energy_from": f"sensor.energa_{serial}_syntetyczna_siec_pobor",
-                        "stat_cost": None,
-                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
-                        "number_energy_price": None,
-                    },
-                ]
-                flow_to = [
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_syntetyczna_siec_oddanie",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
+                        "name": f"Wirtualny Magazyn Energa {serial} (Opust {coeff})",
                     },
                 ]
         else:
             if has_zones:
-                flow_from = [
+                grid_sources = [
                     {
+                        "type": "grid",
                         "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_1",
+                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1" if is_producer else None),
                         "stat_cost": None,
+                        "stat_compensation": None,
                         "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
                         "number_energy_price": None,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": (0.0 if is_producer else None),
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 1",
                     },
                     {
+                        "type": "grid",
                         "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_2",
+                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2" if is_producer else None),
                         "stat_cost": None,
+                        "stat_compensation": None,
                         "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
                         "number_energy_price": None,
-                    },
-                ]
-                flow_to = [
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
-                    },
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": (0.0 if is_producer else None),
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 2",
                     },
                 ]
             else:
-                flow_from = [
+                grid_sources = [
                     {
+                        "type": "grid",
                         "stat_energy_from": f"sensor.energa_{serial}_panel_energia_zuzycie",
+                        "stat_energy_to": (f"sensor.energa_{serial}_panel_energia_produkcja" if is_producer else None),
                         "stat_cost": None,
+                        "stat_compensation": None,
                         "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
                         "number_energy_price": None,
+                        "entity_energy_price_export": None,
+                        "number_energy_price_export": (0.0 if is_producer else None),
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial}",
                     },
                 ]
-                flow_to = [
-                    {
-                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja",
-                        "stat_compensation": None,
-                        "entity_energy_price": None,
-                        "number_energy_price": 0.0,
-                    },
-                ]
-
-        grid_source = {
-            "type": "grid",
-            "flow_from": flow_from,
-            "flow_to": flow_to,
-            "cost_adjustment_day": 0.0,
-        }
 
         existing_sources = list(new_prefs.get("energy_sources", []))
         kept_sources = [
             s for s in existing_sources
             if s.get("type") not in ("grid", "battery")
         ]
-        kept_sources.append(grid_source)
+        kept_sources.extend(grid_sources)
         for b in battery_sources:
             kept_sources.append({"type": "battery", **b})
 

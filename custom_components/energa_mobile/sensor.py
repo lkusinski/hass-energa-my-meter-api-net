@@ -1297,7 +1297,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
             candidate_id = f"sensor.energa_{meter_id}_{'panel_energia_strefa_1' if has_zones else 'panel_energia_zuzycie'}"
             try:
                 last_stats = await get_instance(self.hass).async_add_executor_job(
-                    get_last_statistics, self.hass, 1, candidate_id, True, {"sum"}
+                    get_last_statistics, self.hass, 1, candidate_id, True, {"sum", "start"}
                 )
                 if candidate_id in last_stats and last_stats[candidate_id]:
                     last_ts = last_stats[candidate_id][0].get("start")
@@ -1327,7 +1327,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         # Query last statistic
         try:
             last_stats = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, entity_id, True, {"sum"}
+                get_last_statistics, self.hass, 1, entity_id, True, {"sum", "start"}
             )
 
             if entity_id in last_stats and last_stats[entity_id]:
@@ -2785,6 +2785,13 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             if self.entity_id in last_stats and last_stats[self.entity_id]:
                 self._last_sum = last_stats[self.entity_id][0].get("sum")
                 self.coordinator._pre_fetched_stats[self.entity_id] = last_stats[self.entity_id][0]
+                adapter = (
+                    self.hass.data.get(DOMAIN, {})
+                    .get(self._entry.entry_id, {})
+                    .get("recorder_adapter")
+                )
+                if adapter and self._last_sum:
+                    adapter.seed_last_sum(self.entity_id, float(self._last_sum))
                 _LOGGER.debug("EnergaStatisticsSensor %s seeded sum=%.3f", self.entity_id, self._last_sum or 0.0)
         except Exception as err:
             _LOGGER.debug("Could not seed stats for %s: %s", self.entity_id, err)
@@ -2860,6 +2867,7 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             data_key=self._data_key,
             hourly_data=hourly_data,
             entity_id=self.entity_id,
+            last_known_sum=float(self._last_sum or 0.0),
         )
 
         if not energy_stats:
@@ -2896,6 +2904,10 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
 
         if energy_stats and "sum" in energy_stats[-1]:
             self._last_sum = energy_stats[-1]["sum"]
+            self.coordinator._pre_fetched_stats[self.entity_id] = {
+                "sum": energy_stats[-1]["sum"],
+                "start": energy_stats[-1]["start"],
+            }
 
         # === IMPORT COST STATISTICS (v0.3.0: import only) ===
         if cost_stats and not self._data_key.startswith("export"):

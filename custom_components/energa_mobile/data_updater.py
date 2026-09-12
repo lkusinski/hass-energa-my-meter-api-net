@@ -49,6 +49,7 @@ class EnergaDataUpdater:
         data_key: str,
         hourly_data: list[dict],
         entity_id: str,
+        last_known_sum: float | None = None,
     ) -> tuple[list, list]:
         """Build statistics for import into recorder.
 
@@ -74,6 +75,13 @@ class EnergaDataUpdater:
                 if k.split(".")[-1] == suffix:
                     pre_fetched = v
                     break
+
+        # Ensure last_known_sum anchors pre_fetched
+        if last_known_sum is not None and float(last_known_sum) > 0:
+            if not pre_fetched:
+                pre_fetched = {"sum": float(last_known_sum), "start": None}
+            elif pre_fetched.get("sum") is not None and float(pre_fetched["sum"]) < float(last_known_sum):
+                pre_fetched["sum"] = float(last_known_sum)
 
         if pre_fetched and pre_fetched.get("sum") is not None:
             energy_stats = self._forward_calculation(

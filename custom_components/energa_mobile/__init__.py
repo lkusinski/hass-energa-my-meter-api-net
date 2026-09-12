@@ -858,6 +858,12 @@ async def _import_meter_history(
             else "",
         )
 
+        recorder_adapter = (
+            hass.data.get(DOMAIN, {})
+            .get(entry.entry_id, {})
+            .get("recorder_adapter")
+        )
+
         # Map entity suffix to sensor name (shared by the anchored caller below)
         suffix_to_name = {
             "import": "panel_energia_zuzycie",

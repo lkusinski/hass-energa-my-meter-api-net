@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-342_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-344_passed-brightgreen)
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
