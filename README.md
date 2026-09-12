@@ -72,6 +72,27 @@
 
 ---
 
+## 🤝 Szukamy testerów dla niestandardowych taryf i liczników!
+
+Integracja w wersji **v1.6.3** jest w 100% przetestowana i działa stabilnie w środowiskach produkcyjnych na następujących profilach:
+* ✅ **G12w** + PV (opust 0.8) z falownikiem spiętym w Home Assistant (np. Solis)
+* ✅ **G12w** + PV (opust 0.8) bez integracji falownika w HA (pełny bilans z licznika Energi)
+* ✅ **G11** + PV (opust 0.8)
+* ✅ **G11** – standardowy odbiorca bez fotowoltaiki
+
+Chcemy rozszerzyć integrację o kolejne taryfy i warianty instalacji. **Poszukujemy osób, które posiadają:**
+1. 🥇 **Taryfę trójstrefową G13** (przedpołudnie / szczyt popołudniowy / pozostałe godziny) — priorytet, aby dodać obsługę 3 stref w wirtualnym magazynie!
+2. 🥈 **Klasyczną taryfę dwustrefową G12** (dzień / noc bez weekendów) oraz **G12r**.
+3. 🥉 **Mikroinstalację PV powyżej 10 kWp** (współczynnik opustu **0.7** zamiast 0.8).
+4. 🏢 **Taryfy biznesowe z grupy C (C11, C12a)** dla małych firm.
+5. 👥 **Konto z kilkoma licznikami (PPE)** na jednym profilu portalu Mój Licznik.
+6. ☀️ **Net-billing** (nowe zasady po 1 kwietnia 2022 — depozyt wartościowy).
+
+**Jak możesz pomóc?**
+Jeśli posiadasz którąś z powyższych konfiguracji i chcesz pomóc w rozwoju projektu, utwórz zgłoszenie w [GitHub Issues](https://github.com/lkusinski/hass-energa-my-meter-api-net/issues) lub w sekcji [Discussions](https://github.com/lkusinski/hass-energa-my-meter-api-net/discussions). Wystarczy zanonimizowany fragment odpowiedzi z API (np. wycinek JSON z DevTools z wyciętymi danymi osobowymi) lub krótka współpraca przy testach. Kod integracji jest w 100% darmowy, otwarty i bezpieczny!
+
+---
+
 ## 📦 Instalacja
 
 ### Metoda 1: HACS (Repozytorium Niestandardowe — Zalecana)
