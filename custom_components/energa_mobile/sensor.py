@@ -3031,7 +3031,7 @@ class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
             "export_2": "panel_energia_produkcja_strefa_2",
         }
         energy_slug = suffix_to_name.get(data_key, f"panel_{data_key}")
-        self.entity_id = f"sensor.energa_{serial}_{energy_slug}_cost"
+        self.entity_id = f"sensor.energa_{serial}_{energy_slug}_cost".lower()
 
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
@@ -3080,7 +3080,7 @@ class EnergaSyntheticStatisticsSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = f"energa_{self._serial}_{data_key}_stats"
         self._attr_has_entity_name = True
-        self.entity_id = f"sensor.energa_{self._serial}_{data_key}"
+        self.entity_id = f"sensor.energa_{self._serial}_{data_key}".lower()
 
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
