@@ -255,7 +255,7 @@ async def async_setup_entry(
             )
 
         # 2. Total Export (Production to grid - lifetime counter)
-        if meter.get("total_minus"):
+        if meter.get("total_minus") is not None or is_export_prosumer(meter):
             sensors.append(
                 EnergaLiveSensor(
                     coordinator=coordinator,
@@ -268,7 +268,7 @@ async def async_setup_entry(
             )
 
         # 2b. Zone-specific Export totals for G12w prosumers (#29)
-        if has_zones and meter.get("total_minus"):
+        if has_zones and (meter.get("total_minus") is not None or is_export_prosumer(meter)):
             sensors.append(
                 EnergaLiveSensor(
                     coordinator=coordinator,
@@ -1865,6 +1865,8 @@ class EnergaLiveSensor(CoordinatorEntity, SensorEntity):
                         return float(value)
                     except (ValueError, TypeError):
                         return None
+                elif self._data_key in ("total_minus", "total_minus_1", "total_minus_2", "daily_produkcja"):
+                    return 0.0
 
         _LOGGER.debug(
             "LiveSensor %s: Meter %s not found in data", self._attr_name, self._meter_id

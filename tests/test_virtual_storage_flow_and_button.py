@@ -281,3 +281,43 @@ class TestSyntheticSensor:
         assert "sensor.energa_30910672_syntetyczna_siec_oddanie" in stat_ids
         assert "sensor.energa_30910672_syntetyczna_siec_pobor" in stat_ids
 
+    @pytest.mark.asyncio
+    async def test_button_press_uppercase_serial_normalized(self):
+        """Ensure uppercase serials (like V705048953698419) produce lowercase entity IDs."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {"energy_sources": []}
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {
+            CONF_ENABLE_SYNTHETIC_STORAGE: True,
+        }
+        meter = {
+            "meter_point_id": "V705048953698419",
+            "meter_serial": "V705048953698419",
+            "ppe": "PL0037000000000009",
+            "zone_count": 2,
+            "tariff": "G12",
+        }
+
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch("homeassistant.components.energy.data.async_get_manager", AsyncMock(return_value=mock_manager)):
+            await button.async_press()
+
+        assert mock_manager.async_update.called
+        saved_prefs = mock_manager.async_update.call_args[0][0]
+        sources = saved_prefs["energy_sources"]
+
+        grid_sources = [s for s in sources if s.get("type") == "grid"]
+        for gs in grid_sources:
+            assert "v705048953698419" in gs["stat_energy_from"]
+            assert "V705048953698419" not in gs["stat_energy_from"]
+
+        battery_sources = [s for s in sources if s.get("type") == "battery"]
+        for bs in battery_sources:
+            assert "v705048953698419" in bs["stat_energy_to"]
+            assert "V705048953698419" not in bs["stat_energy_to"]
+
+
