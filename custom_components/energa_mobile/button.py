@@ -26,7 +26,7 @@ from .dashboard_generator import (
     DEFAULT_URL_PATH,
     async_provision_dashboard,
 )
-from .settlement import is_export_prosumer
+from .settlement import is_export_prosumer, is_net_metering, is_net_billing
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,12 +195,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         grid_sources = []
         battery_sources = []
 
-        if enable_synth:
-            try:
-                coeff = float(self._entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-            except (ValueError, TypeError):
-                coeff = DEFAULT_PROSUMER_COEFFICIENT
+        try:
+            coeff = float(self._entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        except (ValueError, TypeError):
+            coeff = DEFAULT_PROSUMER_COEFFICIENT
 
+        if coeff >= 0.7 and enable_synth:
+            fee_pct = int(round((1.0 - coeff) * 100))
             if has_zones:
                 grid_sources = [
                     {
@@ -214,7 +215,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
                         "cost_adjustment_day": 0.0,
-                        "name": f"Sieć Energa {serial} - Strefa 1 (Dzień / Prowizja 20%)",
+                        "name": f"Sieć Energa {serial} - Strefa 1 (Dzień / Prowizja {fee_pct}%)",
                     },
                     {
                         "type": "grid",
@@ -227,7 +228,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
                         "cost_adjustment_day": 0.0,
-                        "name": f"Sieć Energa {serial} - Strefa 2 (Noc / Prowizja 20%)",
+                        "name": f"Sieć Energa {serial} - Strefa 2 (Noc / Prowizja {fee_pct}%)",
                     },
                 ]
                 battery_sources = [
@@ -255,7 +256,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
                         "cost_adjustment_day": 0.0,
-                        "name": f"Sieć Energa {serial} (Prowizja 20%)",
+                        "name": f"Sieć Energa {serial} (Prowizja {fee_pct}%)",
                     },
                 ]
                 battery_sources = [
@@ -265,6 +266,53 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "name": f"Wirtualny Magazyn Energa {serial} (Opust {coeff})",
                     },
                 ]
+        elif is_producer and coeff < 0.7:
+            if has_zones:
+                grid_sources = [
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_1",
+                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_1",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "number_energy_price_export": None,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 1",
+                    },
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_strefa_2",
+                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru_strefa_2",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "number_energy_price_export": None,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial} - Strefa 2",
+                    },
+                ]
+            else:
+                grid_sources = [
+                    {
+                        "type": "grid",
+                        "stat_energy_from": f"sensor.energa_{serial}_panel_energia_zuzycie",
+                        "stat_energy_to": f"sensor.energa_{serial}_panel_energia_produkcja",
+                        "stat_cost": None,
+                        "stat_compensation": None,
+                        "entity_energy_price": f"sensor.energa_{serial}_cena_poboru",
+                        "number_energy_price": None,
+                        "entity_energy_price_export": f"sensor.energa_{serial}_cena_oddania",
+                        "number_energy_price_export": None,
+                        "cost_adjustment_day": 0.0,
+                        "name": f"Sieć Energa {serial}",
+                    },
+                ]
+            battery_sources = []
         else:
             if has_zones:
                 grid_sources = [
@@ -311,6 +359,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "name": f"Sieć Energa {serial}",
                     },
                 ]
+            battery_sources = []
 
         existing_sources = list(new_prefs.get("energy_sources", []))
         kept_sources = [

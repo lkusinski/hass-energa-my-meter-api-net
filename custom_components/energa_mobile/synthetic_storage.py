@@ -266,6 +266,14 @@ async def async_synthesize_storage_from_recorder(
     if not enable_synth:
         return False
 
+    try:
+        coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+    except (ValueError, TypeError):
+        coeff = DEFAULT_PROSUMER_COEFFICIENT
+
+    if coeff < 0.7:
+        return False
+
     meter_point_id = meter["meter_point_id"]
     serial = str(meter.get("meter_serial", meter_point_id))
     has_zones = meter.get("zone_count", 1) > 1
@@ -379,6 +387,9 @@ async def async_synthesize_storage_from_recorder(
         coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
     except (ValueError, TypeError):
         coeff = DEFAULT_PROSUMER_COEFFICIENT
+
+    if coeff < 0.7:
+        return False
 
     init_b1 = float(entry.options.get(CONF_BANK_INITIAL_KWH_L1, 0.0) or 0.0)
     init_b2 = float(entry.options.get(CONF_BANK_INITIAL_KWH_L2, 0.0) or 0.0)

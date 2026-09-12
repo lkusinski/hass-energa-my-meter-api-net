@@ -210,14 +210,16 @@ def compute_bill(
     vat = netto * VAT_RATE
     brutto = netto + vat
 
+    sale_energy_gross = round(sale_energy * (1.0 + VAT_RATE), 2)
     sale_gross = round(sale_total * (1.0 + VAT_RATE), 2)
     distr_gross = round(distr_total * (1.0 + VAT_RATE), 2)
 
     if deposit_pln is None:
         deposit_pln = export_kwh * float(rcem) * 1.23
-    # P0 fix (Ustawa o OZE art. 4 ust. 11): deposit is allocated ONLY to eligible
-    # energy sale gross (sale_gross), never to distribution and fixed grid fees.
-    applied = min(max(0.0, float(deposit_pln)), sale_gross)
+    # Ustawa o OZE art. 4 ust. 11 (verified on invoice FAK_4980469971_FES_00027):
+    # Deposit is allocated ONLY to eligible energy sale gross (sale_energy_gross),
+    # never to trade fee (opłata handlowa) and never to distribution/grid fees.
+    applied = min(max(0.0, float(deposit_pln)), sale_energy_gross)
     do_zaplaty = round(brutto - applied, 2)
 
     def _r(x: float) -> float:

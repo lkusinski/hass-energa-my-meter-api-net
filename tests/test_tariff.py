@@ -342,3 +342,33 @@ class TestTariffFamily:
             "cogen": 0.0030, "capacity": 24.05,
         }.items()}
         assert fees_from_options(stale_g11, "G12W")["trade_fee"] == 16.18
+
+    def test_golden_bursztynowa_g11_net_billing_invoice(self):
+        """Reconcile against real invoice FAK_4980469971_FES_00027.pdf (Bursztynowa 7)."""
+        fees = {
+            # 18.16 energy + 0.75 excise = 18.91 PLN netto on 30 kWh netted
+            "energy_day": 18.91 / 30.0,
+            "energy_night": 0.0,
+            "excise_mwh": 5.0,
+            "trade_fee": 20.32,
+            "abonament": 0.74,
+            "grid_fixed": 11.77,
+            "grid_var_day": 0.3485,
+            "grid_var_night": 0.0,
+            "quality": 0.0332,
+            "oze": 0.0073,
+            "cogen": 0.0030,
+            "capacity": 24.05,
+        }
+        res = compute_bill(
+            import_day=30.0,
+            import_night=0.0,
+            export_kwh=192.0,
+            rcem=0.1988,
+            fees=fees,
+            months=1,
+            deposit_pln=129.82,
+        )
+        assert abs(res["brutto"] - 107.70) <= 0.02
+        assert abs(res["deposit_applied"] - 23.26) <= 0.02
+        assert abs(res["do_zaplaty"] - 84.44) <= 0.02
