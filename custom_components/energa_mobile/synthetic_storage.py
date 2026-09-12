@@ -251,7 +251,14 @@ async def async_synthesize_storage_from_recorder(
         )
         from .settlement import is_export_prosumer
         from homeassistant.components.recorder import get_instance
-        from homeassistant.components.recorder.models import StatisticMetaData
+        try:
+            from homeassistant.components.recorder.models import (
+                StatisticMeanType,
+                StatisticMetaData,
+            )
+        except ImportError:
+            from homeassistant.components.recorder.models import StatisticMetaData
+            StatisticMeanType = None
         from homeassistant.components.recorder.statistics import (
             async_import_statistics,
             statistics_during_period,
@@ -423,14 +430,18 @@ async def async_synthesize_storage_from_recorder(
     for k, pts in synth_res.get("series", {}).items():
         prefix = "syntetyczny_" if k.startswith("magazyn") else "syntetyczna_"
         s_eid = f"sensor.energa_{serial}_{prefix}{k}"
-        meta = StatisticMetaData(
-            has_mean=False,
-            has_sum=True,
-            name=names.get(k, s_eid),
-            source="recorder",
-            statistic_id=s_eid,
-            unit_of_measurement="kWh",
-        )
+        meta_kwargs = {
+            "has_mean": False,
+            "has_sum": True,
+            "name": names.get(k, s_eid),
+            "source": "recorder",
+            "statistic_id": s_eid,
+            "unit_of_measurement": "kWh",
+            "unit_class": "energy",
+        }
+        if StatisticMeanType is not None and hasattr(StatisticMeanType, "NONE"):
+            meta_kwargs["mean_type"] = StatisticMeanType.NONE
+        meta = StatisticMetaData(**meta_kwargs)
         stats = [{"start": p["dt"], "state": p["state"], "sum": p["sum"]} for p in pts]
         async_import_statistics(hass, meta, stats)
 
