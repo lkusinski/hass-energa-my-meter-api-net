@@ -157,9 +157,9 @@ async def async_fetch_rce_day(
     url = f"{source_url}?$filter=business_date eq '{target_str}'"
 
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=8, connect=4)) as resp:
             if resp.status != 200:
-                _LOGGER.warning("PSE RCE API returned HTTP %d for %s", resp.status, target_str)
+                _LOGGER.debug("PSE RCE API returned HTTP %d for %s", resp.status, target_str)
                 return []
             data = await resp.json()
             records = parse_rce_api_payload(data, source_url=url)
@@ -170,8 +170,8 @@ async def async_fetch_rce_day(
             )
             return records
     except aiohttp.ClientError as err:
-        _LOGGER.warning("PSE RCE API client error for %s: %s", target_str, err)
+        _LOGGER.debug("PSE RCE API client notice for %s: %s", target_str, err)
         return []
     except Exception as err:
-        _LOGGER.warning("PSE RCE API unexpected error for %s: %s", target_str, err)
+        _LOGGER.debug("PSE RCE API unexpected error for %s: %s", target_str, err)
         return []

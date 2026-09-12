@@ -827,32 +827,33 @@ async def async_setup_entry(
                 )
             )
 
-            # Hour-Synchronized PV Autoconsumption & Microgrid sensors
-            autoconsumption_specs = [
-                ("today_kwh", "Autokonsumpcja Dziś", "mdi:solar-power-variant", "kWh", SensorDeviceClass.ENERGY),
-                ("yesterday_kwh", "Autokonsumpcja Wczoraj", "mdi:solar-power", "kWh", SensorDeviceClass.ENERGY),
-                ("mtd_kwh", "Autokonsumpcja MTD", "mdi:home-lightning-bolt", "kWh", SensorDeviceClass.ENERGY),
-                ("autoconsumption_ratio_mtd", "Stopień Autokonsumpcji MTD", "mdi:percent-outline", "%", None),
-                ("self_sufficiency_ratio_mtd", "Samowystarczalność Energetyczna MTD", "mdi:home-battery", "%", None),
-                ("today_home_consumption_kwh", "Realne Zużycie Domu Dziś", "mdi:home-clock", "kWh", SensorDeviceClass.ENERGY),
-                ("mtd_home_consumption_kwh", "Realne Zużycie Domu MTD", "mdi:home-analytics", "kWh", SensorDeviceClass.ENERGY),
-                ("savings_mtd_pln", "Oszczędność Autokonsumpcja MTD", "mdi:piggy-bank-outline", "PLN", SensorDeviceClass.MONETARY),
-            ]
-            for m_key, m_name, m_icon, m_unit, m_devclass in autoconsumption_specs:
-                sensors.append(
-                    EnergaAutoconsumptionSensor(
-                        coordinator=coordinator,
-                        meter_id=meter_id,
-                        device_info=device_info,
-                        entry=entry,
-                        metric_key=m_key,
-                        name=m_name,
-                        icon=m_icon,
-                        unit=m_unit,
-                        device_class=m_devclass,
-                        serial=serial,
+            # Hour-Synchronized PV Autoconsumption & Microgrid sensors (v1.6.9: only when inverter entity configured)
+            if entry.options.get(CONF_INVERTER_ENERGY_ENTITY) and is_export_prosumer(meter):
+                autoconsumption_specs = [
+                    ("today_kwh", "Autokonsumpcja Dziś", "mdi:solar-power-variant", "kWh", SensorDeviceClass.ENERGY),
+                    ("yesterday_kwh", "Autokonsumpcja Wczoraj", "mdi:solar-power", "kWh", SensorDeviceClass.ENERGY),
+                    ("mtd_kwh", "Autokonsumpcja MTD", "mdi:home-lightning-bolt", "kWh", SensorDeviceClass.ENERGY),
+                    ("autoconsumption_ratio_mtd", "Stopień Autokonsumpcji MTD", "mdi:percent-outline", "%", None),
+                    ("self_sufficiency_ratio_mtd", "Samowystarczalność Energetyczna MTD", "mdi:home-battery", "%", None),
+                    ("today_home_consumption_kwh", "Realne Zużycie Domu Dziś", "mdi:home-clock", "kWh", SensorDeviceClass.ENERGY),
+                    ("mtd_home_consumption_kwh", "Realne Zużycie Domu MTD", "mdi:home-analytics", "kWh", SensorDeviceClass.ENERGY),
+                    ("savings_mtd_pln", "Oszczędność Autokonsumpcja MTD", "mdi:piggy-bank-outline", "PLN", SensorDeviceClass.MONETARY),
+                ]
+                for m_key, m_name, m_icon, m_unit, m_devclass in autoconsumption_specs:
+                    sensors.append(
+                        EnergaAutoconsumptionSensor(
+                            coordinator=coordinator,
+                            meter_id=meter_id,
+                            device_info=device_info,
+                            entry=entry,
+                            metric_key=m_key,
+                            name=m_name,
+                            icon=m_icon,
+                            unit=m_unit,
+                            device_class=m_devclass,
+                            serial=serial,
+                        )
                     )
-                )
 
         # === PRICE SENSORS (F1: v4.14) ===
 
@@ -1113,6 +1114,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._monthly: dict = {}  # v0.2.20: {meter_id: {(y, m): {suffix: kWh}}} for FIFO bank
         self._mtd: dict = {}  # v0.2.11: month-to-date sums, same shape
         self._autoconsumption_summary: dict = {}
+        self._profile_forecast_cache: dict = {}  # {meter_id: HourlyProfileResult}
+        self._rce_records_last_fetch = None
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -1201,30 +1204,41 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 from .adapters.pse.rce_client import async_fetch_rce_day
                 from datetime import date as _date, datetime as _dt
                 today = _date.today()
+                now_local = _dt.now()
                 sess = getattr(self.api, "_session", None)
                 if sess is None or getattr(sess, "closed", True):
                     sess = self.api._create_session_fn()
 
-                records_today = await async_fetch_rce_day(sess, today)
-                all_rce = list(records_today)
-                now_local = _dt.now()
-                if now_local.hour >= 14:
-                    tomorrow = today + timedelta(days=1)
-                    records_tomorrow = await async_fetch_rce_day(sess, tomorrow)
-                    all_rce.extend(records_tomorrow)
+                need_rce_fetch = False
+                if not self._rce_interval_records or self._rce_records_last_fetch is None:
+                    need_rce_fetch = True
+                elif (now_local - self._rce_records_last_fetch).total_seconds() > 7200:
+                    need_rce_fetch = True
+                elif now_local.hour >= 14 and not any(getattr(r, "business_date", None) == today + timedelta(days=1) for r in self._rce_interval_records):
+                    need_rce_fetch = True
 
-                if all_rce:
-                    self._rce_interval_records = all_rce
-                    if self.storage:
-                        self.storage.save_market_prices(all_rce)
+                if need_rce_fetch:
+                    records_today = await async_fetch_rce_day(sess, today)
+                    all_rce = list(records_today)
+                    if now_local.hour >= 14:
+                        tomorrow = today + timedelta(days=1)
+                        records_tomorrow = await async_fetch_rce_day(sess, tomorrow)
+                        all_rce.extend(records_tomorrow)
 
+                    if all_rce:
+                        self._rce_interval_records = all_rce
+                        self._rce_records_last_fetch = now_local
+                        if self.storage:
+                            self.storage.save_market_prices(all_rce)
+
+                if self._rce_interval_records:
                     now_utc = _dt.now(timezone.utc)
                     curr = next(
-                        (r for r in all_rce if r.interval_start_utc and r.interval_end_utc and r.interval_start_utc <= now_utc < r.interval_end_utc),
+                        (r for r in self._rce_interval_records if r.interval_start_utc and r.interval_end_utc and r.interval_start_utc <= now_utc < r.interval_end_utc),
                         None
                     )
-                    self._rce_current_record = curr or (all_rce[-1] if all_rce else None)
-                    self._arbitrage_plan = self._arbitrage_engine.plan_day(all_rce, target_date=today)
+                    self._rce_current_record = curr or (self._rce_interval_records[-1] if self._rce_interval_records else None)
+                    self._arbitrage_plan = self._arbitrage_engine.plan_day(self._rce_interval_records, target_date=today)
             except Exception as rce_dyn_err:
                 _LOGGER.debug("Dynamic RCE auto-fetch skipped: %s", rce_dyn_err)
 
@@ -1234,6 +1248,9 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
             # === Autoconsumption calculation (hour-synchronized with PV) ===
             await self.async_update_autoconsumption(active_meters)
+
+            # === Hourly Profile WAL Forecasting in worker thread (v1.6.9) ===
+            await self._async_update_profile_forecasts(active_meters)
 
             return active_meters
 
@@ -1605,6 +1622,81 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     summary.savings_mtd_pln,
                 )
 
+    async def _async_update_profile_forecasts(self, active_meters: list[dict]) -> None:
+        """Compute HourlyProfileForecaster projections in executor worker thread to keep MainThread unblocked."""
+        if not self.storage:
+            return
+
+        from datetime import date as _date, datetime, timezone
+        today = _date.today()
+        opts = self.entry.options
+
+        def _calc_profile_in_worker(meter_dict: dict):
+            mid_str = str(meter_dict.get("meter_point_id", ""))
+            serial_str = str(meter_dict.get("meter_serial", mid_str))
+            tariff_code = meter_dict.get("tariff")
+            old_system = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)) >= 0.7
+            coord_rce = self._rce_cache
+            rce = float(coord_rce) if opts.get(CONF_RCE_AUTO_FETCH) and coord_rce is not None else float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+
+            wh_cover = 0.0
+            if old_system:
+                totals = self._meter_totals.get(mid_str)
+                if totals:
+                    try:
+                        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
+                        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+                        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+                        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+                        net_imp = float(totals.get("import", 0)) - bi
+                        net_exp = float(totals.get("export", 0)) - be
+                        wh_cover = max(0.0, net_exp * coeff - net_imp) + max(0.0, initial)
+                    except (ValueError, TypeError):
+                        wh_cover = 0.0
+
+            try:
+                from .projections.forecast import HourlyProfileForecaster
+                canonical_readings = self.storage.get_readings(
+                    ppe_id=mid_str,
+                    meter_id=serial_str,
+                    resolution="1h",
+                )
+                if not canonical_readings:
+                    return mid_str, None
+
+                forecaster = HourlyProfileForecaster(
+                    readings=canonical_readings,
+                    tariff_code=tariff_code,
+                )
+                if forecaster.history_days_count < 7:
+                    return mid_str, None
+
+                month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
+                mtd_readings = [
+                    r for r in canonical_readings
+                    if r.interval_start_utc >= month_start_utc
+                ]
+                profile_res = forecaster.forecast_month(
+                    current_date=today,
+                    mtd_readings=mtd_readings,
+                    tariff_options=opts,
+                    rce_price=rce,
+                    warehouse_kwh=wh_cover if old_system else 0.0,
+                    is_old_system=old_system,
+                )
+                return mid_str, profile_res
+            except Exception as ex:
+                _LOGGER.debug("Worker profile calculation failed for %s: %s", mid_str, ex)
+                return mid_str, None
+
+        for m in active_meters:
+            try:
+                mid_str, res = await self.hass.async_add_executor_job(_calc_profile_in_worker, m)
+                if res is not None:
+                    self._profile_forecast_cache[mid_str] = res
+            except Exception as err:
+                _LOGGER.debug("Async profile forecast failed for meter: %s", err)
+
     def _compute_period_sums_from_memory(self, start, end) -> dict:
         """Fallback: compute period sums directly from coordinator._hourly_stats in memory."""
         out: dict = {}
@@ -1765,6 +1857,24 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     y -= 1
             bounds.reverse()
             for (by, bm) in bounds:
+                # Caching: past closed months never change retroactively (v1.6.9).
+                # If all meters already have this past month in memory, reuse it directly without querying recorder.
+                is_past_closed_month = (by < end.year) or (by == end.year and bm < end.month)
+                all_cached = (
+                    is_past_closed_month
+                    and bool(self._monthly)
+                    and all(
+                        mid_str in self._monthly and (by, bm) in self._monthly[mid_str]
+                        for mid_str in [str(k) for k in self._meter_totals.keys()]
+                    )
+                )
+                if all_cached:
+                    for mid_str in [str(k) for k in self._meter_totals.keys()]:
+                        cached_val = self._monthly[mid_str].get((by, bm))
+                        if cached_val:
+                            out.setdefault(mid_str, {})[(by, bm)] = cached_val
+                    continue
+
                 ms = _dt(by, bm, 1, tzinfo=end.tzinfo)
                 me = _dt(by + 1, 1, 1, tzinfo=end.tzinfo) if bm == 12 else _dt(by, bm + 1, 1, tzinfo=end.tzinfo)
                 if me > end:
@@ -3436,7 +3546,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        from datetime import date as _date
+        from datetime import date as _date, datetime, timezone
 
         mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
         if not mtd:
@@ -3494,38 +3604,39 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             )
         except (ValueError, TypeError):
             bill_mtd = None
-        # Extrapolation of flows to month end, then re-price.
-        # Check if Canonical Storage has historical interval readings for this meter (Etap 5)
-        storage = getattr(self.coordinator, "storage", None)
-        profile_res = None
-        if storage:
-            try:
-                from .projections.forecast import HourlyProfileForecaster
-                canonical_readings = storage.get_readings(
-                    ppe_id=str(self._meter_id),
-                    resolution="1h",
-                )
-                if canonical_readings:
-                    forecaster = HourlyProfileForecaster(
-                        readings=canonical_readings,
-                        tariff_code=self._meter_tariff(),
+        # Pre-computed hourly profile forecast from coordinator's executor thread (v1.6.9)
+        cache = getattr(self.coordinator, "_profile_forecast_cache", None)
+        profile_res = cache.get(str(self._meter_id)) if isinstance(cache, dict) else None
+        if profile_res is None:
+            storage = getattr(self.coordinator, "storage", None)
+            if storage:
+                try:
+                    from .projections.forecast import HourlyProfileForecaster
+                    canonical_readings = storage.get_readings(
+                        ppe_id=str(self._meter_id),
+                        resolution="1h",
                     )
-                    if forecaster.history_days_count >= 7:
-                        month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
-                        mtd_readings = [
-                            r for r in canonical_readings
-                            if r.interval_start_utc >= month_start_utc
-                        ]
-                        profile_res = forecaster.forecast_month(
-                            current_date=today,
-                            mtd_readings=mtd_readings,
-                            tariff_options=opts,
-                            rce_price=rce,
-                            warehouse_kwh=self._warehouse_cover() if old_system else 0.0,
-                            is_old_system=old_system,
+                    if canonical_readings:
+                        forecaster = HourlyProfileForecaster(
+                            readings=canonical_readings,
+                            tariff_code=self._meter_tariff(),
                         )
-            except Exception as pf_err:
-                _LOGGER.debug("Profile forecaster failed, falling back: %s", pf_err)
+                        if forecaster.history_days_count >= 7:
+                            month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
+                            mtd_readings = [
+                                r for r in canonical_readings
+                                if r.interval_start_utc >= month_start_utc
+                            ]
+                            profile_res = forecaster.forecast_month(
+                                current_date=today,
+                                mtd_readings=mtd_readings,
+                                tariff_options=opts,
+                                rce_price=rce,
+                                warehouse_kwh=self._warehouse_cover() if old_system else 0.0,
+                                is_old_system=old_system,
+                            )
+                except Exception as pf_err:
+                    _LOGGER.debug("Profile forecaster fallback failed: %s", pf_err)
 
         days_in_month = _cal.monthrange(today.year, today.month)[1]
         elapsed = min(max(today.day, 1), days_in_month)
