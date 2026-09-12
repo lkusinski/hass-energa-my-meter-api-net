@@ -117,3 +117,84 @@ async def test_async_fetch_rce_day():
     assert records[0].price_kwh == Decimal("0.520")
     assert records[0].business_date == date(2026, 9, 1)
 
+
+REAL_PSE_2026_SNIPPET = """
+<table border="1">
+    <thead>
+        <tr><th colspan="4"><strong>2026</strong></th></tr>
+        <tr><th></th><th>cena [zł/MWh]**</th><th>data publikacji</th><th>różnica skorygowanej RCEm od poprzednio obliczonej ceny [%]</th></tr>
+    </thead>
+    <tbody>
+        <tr><td colspan="4"><strong>styczeń</strong></td></tr>
+        <tr><td>RCEm</td><td align="right">551,96</td><td align="center">11.02.2026</td><td align="right">-</td></tr>
+        <tr><td>skorygowana RCEm*</td><td align="right">-</td><td align="center">-</td><td align="right">-</td></tr>
+        <tr><td colspan="4"><strong>luty</strong></td></tr>
+        <tr><td>RCEm</td><td align="right">339,01</td><td align="center">11.03.2026</td><td align="right">-</td></tr>
+        <tr><td>skorygowana RCEm*</td><td align="right">331,39</td><td align="center">11.06.2026</td><td align="right">- 2,25</td></tr>
+        <tr><td colspan="4"><strong>marzec</strong></td></tr>
+        <tr><td>RCEm</td><td align="right">191,95</td><td align="center">11.04.2026</td><td align="right">-</td></tr>
+        <tr><td>skorygowana RCEm*</td><td align="right">-</td><td align="center">-</td><td align="right">-</td></tr>
+        <tr><td colspan="4"><strong>kwiecień</strong></td></tr>
+        <tr><td>RCEm</td><td align="right">132,92</td><td align="center">11.05.2026</td><td align="right">-</td></tr>
+        <tr><td>skorygowana RCEm*</td><td align="right">-</td><td align="center">-</td><td align="right">-</td></tr>
+        <tr><td colspan="4"><strong>maj</strong></td></tr>
+        <tr><td>RCEm</td><td align="right">191,37</td><td align="center">11.06.2026</td><td align="right">-</td></tr>
+        <tr><td>skorygowana RCEm*</td><td align="right">-</td><td align="center">-</td><td align="right">-</td></tr>
+    </tbody>
+</table>
+"""
+
+
+def test_pse_table_structure_and_corrections():
+    """Verify bugfix for Issue #1:
+    - Tables with year in header
+    - Dedicated month header rows
+    - 'skorygowana RCEm*' recognized as correction
+    - Missing &nbsp; does not jump rows (April != May)
+    - Feb 2026 correction captured
+    """
+    records = parse_rcem_html(REAL_PSE_2026_SNIPPET)
+    # Expected: Jan (1), Feb (2), Mar (1), Apr (1), May (1) = 6 records
+    assert len(records) == 6
+
+    # 1. February initial + correction
+    feb_records = [r for r in records if r.applicable_year == 2026 and r.applicable_month == 2]
+    assert len(feb_records) == 2
+    assert feb_records[0].price_mwh == Decimal("339.01")
+    assert feb_records[0].revision == 1
+    assert feb_records[0].is_correction is False
+
+    assert feb_records[1].price_mwh == Decimal("331.39")
+    assert feb_records[1].revision == 2
+    assert feb_records[1].is_correction is True
+    assert feb_records[1].publication_date == date(2026, 6, 11)
+
+    # 2. April 2026 vs May 2026 isolation
+    apr = next(r for r in records if r.applicable_year == 2026 and r.applicable_month == 4)
+    may = next(r for r in records if r.applicable_year == 2026 and r.applicable_month == 5)
+
+    assert apr.price_mwh == Decimal("132.92")
+    assert apr.price_kwh == Decimal("0.13292")
+    assert apr.publication_date == date(2026, 5, 11)
+
+    assert may.price_mwh == Decimal("191.37")
+    assert may.price_kwh == Decimal("0.19137")
+    assert may.publication_date == date(2026, 6, 11)
+
+
+def test_pse_full_real_page_if_available():
+    import os
+    real_html_path = "/tmp/pse_rcem.html"
+    if not os.path.exists(real_html_path):
+        pytest.skip("Real PSE HTML dump not found")
+    with open(real_html_path, encoding="utf-8") as f:
+        html = f.read()
+    records = parse_rcem_html(html)
+    assert len(records) == 94
+    corrections = [r for r in records if r.is_correction]
+    assert len(corrections) == 43
+    years = {r.applicable_year for r in records}
+    assert years == {2022, 2023, 2024, 2025, 2026}
+
+
+
