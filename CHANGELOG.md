@@ -1,6 +1,43 @@
 # Changelog
 
-## v1.5.1 (2026-09-12) — Transparentne Ceny Energii (Pełny Koszt Zmienny) & Eksperymentalny Model Syntetyczny
+## v1.6.0 (2026-09-12) — Natywny Wirtualny Magazyn Energii (Net-Metering 0.8/0.7), Onboarding Survey & Autokonfigurator Panelu Energia
+
+### 🔋 Natywny Model Wirtualnego Magazynu Energii (Net-metering) w Panelu Energia (`/energy`)
+- **Matematyczny silnik bilansowania (`synthetic_storage.py`):** Zgodnie z polską ustawą o OZE (art. 4 ust. 1 i 11), nadwyżki wprowadzone do sieci dzielone są precyzyjnie na:
+  1. *Ładowanie Wirtualnego Magazynu:* $Export \times 0.8$ (dla instalacji $\le 10$ kW) lub $\times 0.7$ (powyżej 10 kW).
+  2. *Prowizja Rzeczowa OSD:* $Export \times 0.2$ (lub $0.3$) jako bezpłatne oddanie do sieci (0 zł/kWh).
+  3. *Rozładowanie Magazynu:* kompensacja poboru z dostępnego salda banku za 0 zł/kWh opłaty zmiennej.
+  4. *Pobór Netto z Sieci:* wyłącznie nadwyżka poboru ponad stan magazynu, taryfikowana pełną stawką brutto.
+- **Obsługa taryf jednostrefowych (G11) i dwustrefowych (G12/G12w):** W taryfach wielostrefowych zaimplementowano bilansowanie między strefą L1 (Dzień) i L2 (Noc) zgodnie z przepisami OZE (najpierw rozładowanie własnej strefy, następnie dopełnienie z drugiej strefy).
+- **Wyeliminowanie przekłamań Energy Dashboard:** Rozwiązano fundamentalny problem Panelu Energia w Home Assistant, który przy net-meteringu drastycznie zaniżał wskaźniki samowystarczalności oraz zawyżał koszty poboru energii.
+
+### 📋 Ankieta Konfiguracyjna przy Pierwszej Instalacji (Onboarding Survey)
+- **Kreator dodawania integracji (`config_flow.py`):** Przy wyborze starych zasad prosumenckich (net-metering) pojawia się dedykowany krok ankiety z wyjaśnieniem zasad rozliczeń.
+- **Wybór mocy mikroinstalacji:**
+  - $\le 10$ kW (współczynnik 0.8: odbiór 80%, prowizja 20%).
+  - $> 10$ kW (współczynnik 0.7: odbiór 70%, prowizja 30%).
+- **Wybór modelu prezentacji:**
+  - *Wirtualny Magazyn Energii (Rekomendowany)* — syntetyczny magazyn w Panelu Energia, prowizja jako bezpłatny eksport, pobór z magazynu za 0 zł.
+  - *Model Tradycyjny* — surowy licznik fizyczny (całość importu i eksportu w sekcji Sieć).
+- **Zarządzanie z poziomu Opcji:** Użytkownik w dowolnym momencie może zmienić parametry w `Opcje -> Panel Energia i Wirtualny Magazyn`.
+
+### 🔘 Przycisk Automatycznej Konfiguracji Panelu Energia (`button.py`)
+- **Przycisk `Skonfiguruj Panel Energia`:** Dostępny na karcie urządzenia licznika (`button.energa_{serial}_skonfiguruj_panel_energia`).
+- **Zero-click Setup:** Jednym kliknięciem bezpośrednio konfiguruje Home Assistant Energy Preferences (`.storage/energy`) za pośrednictwem natywnego API `EnergyManager.async_update`, bez konieczności restartu Home Assistanta i bez ręcznego wklejania encji.
+- **Automatyczne wiązanie encji:**
+  - Baterie: `syntetyczny_magazyn_l1` / `l2` (lub `syntetyczny_magazyn`).
+  - Sieć: `syntetyczna_siec_pobor` z cennikami oraz `syntetyczna_siec_oddanie` z ceną 0.0 zł.
+  - Fotowoltaika: automatycznie dołącza skonfigurowany falownik (`inverter_energy_entity`).
+  - Powiadomienie systemowe po pomyślnej konfiguracji.
+
+### 📊 Wsteczny Import i Ciągłość Statystyk (`__init__.py`, `sensor.py`)
+- **Automatyczny backfill 730 dni:** Historia wirtualnego magazynu generowana automatycznie podczas początkowego pobierania danych.
+- **Kotwiczenie sum (Anchor-safe):** Nowe odczyty kontynuują skumulowaną sumę bez resetów do zera, chroniąc wykresy słupkowe przed wielomegowatowymi skokami.
+- **Ochrona przed duplikacją:** Właściwość `native_value = None` w `EnergaSyntheticStatisticsSensor` zabezpiecza przed generowaniem konkurencyjnych statystyk przez silnik recorder HA.
+
+### 🧪 Testy Jednostkowe
+- 340 przechodzących testów jednostkowych (w tym 9 dedykowanych testów silnika bilansowania, konfiguratora panelu energia i ankiety onboardingowej).
+
 
 ### 💰 Transparentne Ceny Energii i Rozbicie Składników
 - **Wzbogacone atrybuty cen poboru (`sensor.energa_*_cena_poboru*`):** Dodano atrybuty `stawka_calkowita_brutto`, `strefa`, `opis` oraz szczegółowe wskazówki wyjaśniające, że stawka używana w Panelu Energia powinna zawierać pełny koszt zmienny (energia czynna + opłaty dystrybucyjne zmienne + podatki/VAT 23%).

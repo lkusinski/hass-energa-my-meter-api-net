@@ -23,6 +23,14 @@
           "system": "System rozliczeń"
         }
       },
+      "net_metering_survey": {
+        "title": "Net-metering: Model Prezentacji w Panelu Energia",
+        "description": "W starym systemie prosumenckim (net-metering) nadwyżki energii trafiają do wirtualnego magazynu z opustem 20% lub 30% (prowizja operatora). Standardowy Panel Energia Home Assistant traktuje całą produkcję i pobór jako zwykłą sieć, co zaburza wskaźniki samowystarczalności i koszty.\n\nWybierz moc swojej mikroinstalacji oraz preferowany model prezentacji:",
+        "data": {
+          "prosumer_power_group": "Moc mikroinstalacji fotowoltaicznej",
+          "energy_dashboard_mode": "Model prezentacji w Panelu Energia"
+        }
+      },
       "reauth_confirm": {
         "title": "Wymagana aktualizacja hasła",
         "description": "Zaloguj się ponownie dla konta {username}.",
@@ -47,8 +55,18 @@
         "menu_options": {
           "credentials": "Zmień Login/Hasło",
           "prices": "Ustaw Ceny Energii",
+          "energy_dashboard": "Panel Energia i Wirtualny Magazyn",
           "history": "Pobierz Historię Danych",
           "clear_stats": "Wyczyść Statystyki Panelu Energia"
+        }
+      },
+      "energy_dashboard": {
+        "title": "Panel Energia i Wirtualny Magazyn",
+        "description": "Dostosuj model prezentacji przepływów energii dla net-meteringu w Panelu Energia Home Assistant.",
+        "data": {
+          "energy_dashboard_mode": "Model prezentacji",
+          "prosumer_power_group": "Moc mikroinstalacji fotowoltaicznej",
+          "enable_synthetic_storage": "Włącz generowanie syntetycznych encji magazynu i sieci"
         }
       },
       "credentials": {
@@ -148,6 +166,9 @@
     "button": {
       "create_dashboard": {
         "name": "Utwórz Pulpit Rozliczeń"
+      },
+      "configure_energy_dashboard": {
+        "name": "Skonfiguruj Panel Energia"
       }
     }
   }

@@ -34,10 +34,15 @@ from .api import (
     EnergaTokenExpiredError,
 )
 from .const import (
+    CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_KWH_L1,
+    CONF_BANK_INITIAL_KWH_L2,
     CONF_DEVICE_TOKEN,
+    CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
+    DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
     MAX_HOURLY_KWH,
@@ -1082,12 +1087,21 @@ async def _import_meter_history(
             count_exp2 = await _build_anchored(export_2_points, "export_2")
             total_count = count_1 + count_2 + count_exp1 + count_exp2
 
+            from .settlement import is_export_prosumer
+
             panel_hint = (
                 "\n\n⚙️ **Konfiguracja Panelu Energia w Home Assistant:**\n"
                 f"- Zużycie z sieci (dzień): `sensor.energa_{meter_id}_panel_energia_strefa_1`\n"
                 f"- Zużycie z sieci (noc): `sensor.energa_{meter_id}_panel_energia_strefa_2`\n"
                 f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja_strefa_1` i `...strefa_2`"
             )
+            if is_export_prosumer(meter):
+                panel_hint += (
+                    f"\n\n🔋 **Wirtualny Magazyn Energii (Net-metering):**\n"
+                    f"Wygenerowano bilansowanie i syntetyczny magazyn energii.\n"
+                    f"Możesz skonfigurować Panel Energia jednym kliknięciem za pomocą przycisku:\n"
+                    f"`button.energa_{serial}_skonfiguruj_panel_energia` na karcie urządzenia licznika."
+                )
 
             persistent_notification.async_create(
                 hass,
@@ -1104,11 +1118,20 @@ async def _import_meter_history(
             count_export = await _build_anchored(export_points, "export")
             total_count = count_import + count_export
 
+            from .settlement import is_export_prosumer
+
             panel_hint = (
                 "\n\n⚙️ **Konfiguracja Panelu Energia w Home Assistant:**\n"
                 f"- Zużycie z sieci: `sensor.energa_{meter_id}_panel_energia_zuzycie`\n"
                 f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja`"
             )
+            if is_export_prosumer(meter):
+                panel_hint += (
+                    f"\n\n🔋 **Wirtualny Magazyn Energii (Net-metering):**\n"
+                    f"Wygenerowano bilansowanie i syntetyczny magazyn energii.\n"
+                    f"Możesz skonfigurować Panel Energia jednym kliknięciem za pomocą przycisku:\n"
+                    f"`button.energa_{serial}_skonfiguruj_panel_energia` na karcie urządzenia licznika."
+                )
 
             persistent_notification.async_create(
                 hass,
@@ -1244,6 +1267,144 @@ async def _import_meter_history(
                 _LOGGER.info("Backfilled %d flow statistics for %s", len(_stats), _eid)
         except Exception as err:
             _LOGGER.debug("Flow history backfill skipped for %s: %s", serial, err)
+
+        # === v1.6.0: backfill synthetic virtual storage and grid series ===
+        try:
+            from .settlement import is_export_prosumer
+            from .synthetic_storage import calculate_synthetic_storage
+
+            enable_synth = entry.options.get(
+                CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+            )
+            if enable_synth and is_export_prosumer(meter):
+                try:
+                    _coeff = float(
+                        entry.options.get(
+                            CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                        )
+                    )
+                except (ValueError, TypeError):
+                    _coeff = DEFAULT_PROSUMER_COEFFICIENT
+
+                by_hour: dict = {}
+                if has_zones:
+                    for p in import_1_points:
+                        by_hour.setdefault(p["dt"], {})["import_1"] = p["value"]
+                    for p in import_2_points:
+                        by_hour.setdefault(p["dt"], {})["import_2"] = p["value"]
+                    for p in export_1_points:
+                        by_hour.setdefault(p["dt"], {})["export_1"] = p["value"]
+                    for p in export_2_points:
+                        by_hour.setdefault(p["dt"], {})["export_2"] = p["value"]
+
+                    synth_records = [
+                        {
+                            "dt": dt,
+                            "import_1": vals.get("import_1", 0.0),
+                            "import_2": vals.get("import_2", 0.0),
+                            "export_1": vals.get("export_1", 0.0),
+                            "export_2": vals.get("export_2", 0.0),
+                        }
+                        for dt, vals in sorted(by_hour.items())
+                    ]
+                else:
+                    for p in import_points:
+                        by_hour.setdefault(p["dt"], {})["import"] = p["value"]
+                    for p in export_points:
+                        by_hour.setdefault(p["dt"], {})["export"] = p["value"]
+
+                    synth_records = [
+                        {
+                            "dt": dt,
+                            "import": vals.get("import", 0.0),
+                            "export": vals.get("export", 0.0),
+                        }
+                        for dt, vals in sorted(by_hour.items())
+                    ]
+
+                base_sums = {}
+                first_dt = synth_records[0]["dt"] if synth_records else None
+                if first_dt:
+                    keys_to_check = (
+                        [
+                            "magazyn_l1_ladowanie",
+                            "magazyn_l1_rozladowanie",
+                            "magazyn_l2_ladowanie",
+                            "magazyn_l2_rozladowanie",
+                            "siec_oddanie_strefa_1",
+                            "siec_oddanie_strefa_2",
+                            "siec_pobor_strefa_1",
+                            "siec_pobor_strefa_2",
+                        ]
+                        if has_zones
+                        else [
+                            "magazyn_ladowanie",
+                            "magazyn_rozladowanie",
+                            "siec_oddanie",
+                            "siec_pobor",
+                        ]
+                    )
+                    for k in keys_to_check:
+                        prefix = "syntetyczny_" if k.startswith("magazyn") else "syntetyczna_"
+                        s_eid = f"sensor.energa_{serial}_{prefix}{k}"
+                        b = await _stat_sum_before(hass, s_eid, first_dt)
+                        if b > 0:
+                            base_sums[k] = b
+
+                init_b1 = float(entry.options.get(CONF_BANK_INITIAL_KWH_L1, 0.0) or 0.0)
+                init_b2 = float(entry.options.get(CONF_BANK_INITIAL_KWH_L2, 0.0) or 0.0)
+                if not has_zones and init_b1 == 0.0 and init_b2 == 0.0:
+                    init_b1 = float(entry.options.get(CONF_BANK_INITIAL_KWH, 0.0) or 0.0)
+
+                synth_res = calculate_synthetic_storage(
+                    hourly_records=synth_records,
+                    coeff=_coeff,
+                    has_zones=has_zones,
+                    initial_bank_1=init_b1,
+                    initial_bank_2=init_b2,
+                    base_sums=base_sums,
+                )
+
+                for k, pts in synth_res.get("series", {}).items():
+                    prefix = "syntetyczny_" if k.startswith("magazyn") else "syntetyczna_"
+                    s_eid = f"sensor.energa_{serial}_{prefix}{k}"
+                    stats = [
+                        {"start": p["dt"], "state": p["state"], "sum": p["sum"]}
+                        for p in pts
+                    ]
+                    if not stats:
+                        continue
+                    if recorder_adapter:
+                        recorder_adapter.import_energy_statistics(
+                            statistic_id=s_eid,
+                            statistics=stats,
+                            name=None,
+                            unit="kWh",
+                        )
+                    else:
+                        meta = StatisticMetaData(
+                            source="recorder",
+                            statistic_id=s_eid,
+                            name=None,
+                            unit_of_measurement="kWh",
+                            has_mean=False,
+                            has_sum=True,
+                            mean_type=StatisticMeanType.NONE,
+                            unit_class="energy",
+                        )
+                        async_import_statistics(hass, meta, stats)
+                _LOGGER.info(
+                    "Backfilled %d synthetic storage series for %s",
+                    len(synth_res.get("series", {})),
+                    serial,
+                )
+        except Exception as err:
+            _LOGGER.warning(
+                "Synthetic storage history backfill failed for %s: %s",
+                serial,
+                err,
+                exc_info=True,
+            )
 
     except Exception as err:
         _LOGGER.error("History import failed for %s: %s", serial, err, exc_info=True)

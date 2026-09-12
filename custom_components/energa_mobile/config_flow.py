@@ -48,6 +48,9 @@ from .const import (
     CONF_USERNAME,
     CONF_USE_ROLLING_365D,
     CONF_INVERTER_ENERGY_ENTITY,
+    CONF_ENABLE_SYNTHETIC_STORAGE,
+    CONF_ENERGY_DASHBOARD_MODE,
+    CONF_PROSUMER_POWER_GROUP,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_KWH_L1,
@@ -55,16 +58,23 @@ from .const import (
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
     DEFAULT_ENABLE_AUTO_SETTLEMENT,
+    DEFAULT_ENABLE_SYNTHETIC_STORAGE,
+    DEFAULT_ENERGY_DASHBOARD_MODE,
     DEFAULT_EXPORT_PRICE,
     DEFAULT_IMPORT_PRICE,
     DEFAULT_IMPORT_PRICE_1,
     DEFAULT_IMPORT_PRICE_2,
     DEFAULT_INVERTER_ENERGY_ENTITY,
     DEFAULT_PROSUMER_COEFFICIENT,
+    DEFAULT_PROSUMER_POWER_GROUP,
     DEFAULT_RCE_AUTO_FETCH,
     DEFAULT_SETTLEMENT_DATE,
     DEFAULT_USE_ROLLING_365D,
     DOMAIN,
+    ENERGY_MODE_PHYSICAL_GRID,
+    ENERGY_MODE_VIRTUAL_STORAGE,
+    POWER_GROUP_GT_10KW,
+    POWER_GROUP_LE_10KW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -223,6 +233,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("system")
             options = {}
+            if choice == "stare":
+                self._pending_options = options
+                return await self.async_step_net_metering_survey()
             if choice != "brak":
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
             return self.async_create_entry(
@@ -250,6 +263,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("system")
             options = {}
+            if choice == "stare":
+                self._pending_options = options
+                return await self.async_step_net_metering_survey()
             if choice != "brak":
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
             return self.async_create_entry(
@@ -268,6 +284,55 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
                         }
                     )
+                }
+            ),
+        )
+
+    async def async_step_net_metering_survey(self, user_input=None):
+        """Survey and explanation for Net-metering Energy Dashboard mode."""
+        if user_input is not None:
+            power_group = user_input.get(
+                CONF_PROSUMER_POWER_GROUP, DEFAULT_PROSUMER_POWER_GROUP
+            )
+            dashboard_mode = user_input.get(
+                CONF_ENERGY_DASHBOARD_MODE, DEFAULT_ENERGY_DASHBOARD_MODE
+            )
+
+            coeff = 0.8 if power_group == POWER_GROUP_LE_10KW else 0.7
+            enable_synth = dashboard_mode == ENERGY_MODE_VIRTUAL_STORAGE
+
+            options = getattr(self, "_pending_options", {})
+            options[CONF_PROSUMER_COEFFICIENT] = coeff
+            options[CONF_PROSUMER_POWER_GROUP] = power_group
+            options[CONF_ENERGY_DASHBOARD_MODE] = dashboard_mode
+            options[CONF_ENABLE_SYNTHETIC_STORAGE] = enable_synth
+
+            return self.async_create_entry(
+                title=getattr(self, "_pending_title", "Energa My Meter"),
+                data=getattr(self, "_pending_data", {}),
+                options=options,
+            )
+
+        return self.async_show_form(
+            step_id="net_metering_survey",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_PROSUMER_POWER_GROUP, default=DEFAULT_PROSUMER_POWER_GROUP
+                    ): vol.In(
+                        {
+                            POWER_GROUP_LE_10KW: "Moc do 10 kW (współczynnik 0.8 - odbierasz 80%, operator pobiera 20%)",
+                            POWER_GROUP_GT_10KW: "Moc powyżej 10 kW (współczynnik 0.7 - odbierasz 70%, operator pobiera 30%)",
+                        }
+                    ),
+                    vol.Required(
+                        CONF_ENERGY_DASHBOARD_MODE, default=DEFAULT_ENERGY_DASHBOARD_MODE
+                    ): vol.In(
+                        {
+                            ENERGY_MODE_VIRTUAL_STORAGE: "Wirtualny Magazyn Energii (Rekomendowany) — magazyn w Panelu Energia, prowizja 20% jako oddanie bezpłatne, pobór za 0 zł",
+                            ENERGY_MODE_PHYSICAL_GRID: "Model Tradycyjny — surowy licznik fizyczny (całość importu i eksportu w sekcji Sieć)",
+                        }
+                    ),
                 }
             ),
         )
@@ -335,7 +400,75 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         """Show options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["credentials", "prices", "history", "clear_stats"],
+            menu_options=[
+                "credentials",
+                "prices",
+                "energy_dashboard",
+                "history",
+                "clear_stats",
+            ],
+        )
+
+    async def async_step_energy_dashboard(self, user_input=None):
+        """Manage Energy Dashboard presentation mode and prosumer settings."""
+        if user_input is not None:
+            power_group = user_input.get(
+                CONF_PROSUMER_POWER_GROUP, DEFAULT_PROSUMER_POWER_GROUP
+            )
+            dashboard_mode = user_input.get(
+                CONF_ENERGY_DASHBOARD_MODE, DEFAULT_ENERGY_DASHBOARD_MODE
+            )
+            enable_synth = user_input.get(
+                CONF_ENABLE_SYNTHETIC_STORAGE,
+                dashboard_mode == ENERGY_MODE_VIRTUAL_STORAGE,
+            )
+            coeff = 0.8 if power_group == POWER_GROUP_LE_10KW else 0.7
+
+            new_options = {
+                **dict(self._config_entry.options),
+                CONF_PROSUMER_POWER_GROUP: power_group,
+                CONF_PROSUMER_COEFFICIENT: coeff,
+                CONF_ENERGY_DASHBOARD_MODE: dashboard_mode,
+                CONF_ENABLE_SYNTHETIC_STORAGE: enable_synth,
+            }
+            return self.async_create_entry(title="", data=new_options)
+
+        curr_options = dict(self._config_entry.options)
+        curr_mode = curr_options.get(
+            CONF_ENERGY_DASHBOARD_MODE, DEFAULT_ENERGY_DASHBOARD_MODE
+        )
+        curr_power = curr_options.get(
+            CONF_PROSUMER_POWER_GROUP, DEFAULT_PROSUMER_POWER_GROUP
+        )
+        curr_synth = curr_options.get(
+            CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+        )
+
+        return self.async_show_form(
+            step_id="energy_dashboard",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ENERGY_DASHBOARD_MODE, default=curr_mode
+                    ): vol.In(
+                        {
+                            ENERGY_MODE_VIRTUAL_STORAGE: "Wirtualny Magazyn Energii (Rekomendowany)",
+                            ENERGY_MODE_PHYSICAL_GRID: "Model Tradycyjny (Fizyczny licznik)",
+                        }
+                    ),
+                    vol.Required(
+                        CONF_PROSUMER_POWER_GROUP, default=curr_power
+                    ): vol.In(
+                        {
+                            POWER_GROUP_LE_10KW: "Moc do 10 kW (współczynnik 0.8)",
+                            POWER_GROUP_GT_10KW: "Moc powyżej 10 kW (współczynnik 0.7)",
+                        }
+                    ),
+                    vol.Required(
+                        CONF_ENABLE_SYNTHETIC_STORAGE, default=curr_synth
+                    ): bool,
+                }
+            ),
         )
 
     async def async_step_credentials(self, user_input=None):

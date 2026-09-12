@@ -11,6 +11,13 @@ from custom_components.energa_mobile.const import (
     CONF_USERNAME,
     CONF_PASSWORD,
     DEFAULT_PROSUMER_COEFFICIENT,
+    CONF_PROSUMER_POWER_GROUP,
+    CONF_ENERGY_DASHBOARD_MODE,
+    CONF_ENABLE_SYNTHETIC_STORAGE,
+    POWER_GROUP_LE_10KW,
+    POWER_GROUP_GT_10KW,
+    ENERGY_MODE_VIRTUAL_STORAGE,
+    ENERGY_MODE_PHYSICAL_GRID,
 )
 from custom_components.energa_mobile.config_flow import EnergaConfigFlow
 from custom_components.energa_mobile import (
@@ -71,6 +78,7 @@ class TestConfigFlowProsumerFallback:
         flow._pending_title = "test@example.com"
         flow._pending_data = {CONF_USERNAME: "test@example.com"}
         flow.async_create_entry = MagicMock(side_effect=lambda title, data, options=None: {"type": "create_entry", "title": title, "data": data, "options": options or {}})
+        flow.async_show_form = MagicMock(side_effect=lambda step_id, data_schema=None, errors=None: {"type": "form", "step_id": step_id})
 
         # Choice: brak -> no prosumer coeff set
         res_brak = await flow.async_step_system_fallback({"system": "brak"})
@@ -82,10 +90,30 @@ class TestConfigFlowProsumerFallback:
         assert res_nowe["type"] == "create_entry"
         assert res_nowe["options"][CONF_PROSUMER_COEFFICIENT] == 0.0
 
-        # Choice: stare -> coeff 0.8
+        # Choice: stare -> opens net_metering_survey form
         res_stare = await flow.async_step_system_fallback({"system": "stare"})
-        assert res_stare["type"] == "create_entry"
-        assert res_stare["options"][CONF_PROSUMER_COEFFICIENT] == 0.8
+        assert res_stare["type"] == "form"
+        assert res_stare["step_id"] == "net_metering_survey"
+
+        # Submit survey with <= 10 kW and virtual storage
+        res_survey = await flow.async_step_net_metering_survey({
+            CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+            CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+        })
+        assert res_survey["type"] == "create_entry"
+        assert res_survey["options"][CONF_PROSUMER_COEFFICIENT] == 0.8
+        assert res_survey["options"][CONF_ENABLE_SYNTHETIC_STORAGE] is True
+        assert res_survey["options"][CONF_ENERGY_DASHBOARD_MODE] == ENERGY_MODE_VIRTUAL_STORAGE
+
+        # Submit survey with > 10 kW and physical grid
+        res_survey_gt = await flow.async_step_net_metering_survey({
+            CONF_PROSUMER_POWER_GROUP: POWER_GROUP_GT_10KW,
+            CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_PHYSICAL_GRID,
+        })
+        assert res_survey_gt["type"] == "create_entry"
+        assert res_survey_gt["options"][CONF_PROSUMER_COEFFICIENT] == 0.7
+        assert res_survey_gt["options"][CONF_ENABLE_SYNTHETIC_STORAGE] is False
+        assert res_survey_gt["options"][CONF_ENERGY_DASHBOARD_MODE] == ENERGY_MODE_PHYSICAL_GRID
 
 
 class TestAutoBackfillResilience:
