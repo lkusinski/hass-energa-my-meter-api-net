@@ -53,6 +53,7 @@ from .const import (
     CONF_TARIFF_CAPACITY,
     CONF_USE_ROLLING_365D,
     CONF_INVERTER_ENERGY_ENTITY,
+    CONF_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_BALANCE_BASELINE,
     DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_INITIAL_KWH_L1,
@@ -60,6 +61,7 @@ from .const import (
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
     DEFAULT_ENABLE_AUTO_SETTLEMENT,
+    DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DEFAULT_RCE_AUTO_FETCH,
     DEFAULT_SETTLEMENT_DATE,
@@ -505,6 +507,43 @@ async def async_setup_entry(
                             serial=serial,
                         )
                     )
+
+                # Synthetic virtual storage & grid sensors for Energy Dashboard (v1.6.0)
+                enable_synth = entry.options.get(
+                    CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+                )
+                if enable_synth:
+                    if has_zones:
+                        synth_defs = [
+                            ("syntetyczny_magazyn_l1_ladowanie", "Syntetyczny Magazyn L1 Ładowanie", "mdi:battery-charging"),
+                            ("syntetyczny_magazyn_l1_rozladowanie", "Syntetyczny Magazyn L1 Rozładowanie", "mdi:battery-arrow-down"),
+                            ("syntetyczny_magazyn_l2_ladowanie", "Syntetyczny Magazyn L2 Ładowanie", "mdi:battery-charging"),
+                            ("syntetyczny_magazyn_l2_rozladowanie", "Syntetyczny Magazyn L2 Rozładowanie", "mdi:battery-arrow-down"),
+                            ("syntetyczna_siec_oddanie_strefa_1", "Syntetyczna Sieć Oddanie Strefa 1", "mdi:transmission-tower-export"),
+                            ("syntetyczna_siec_oddanie_strefa_2", "Syntetyczna Sieć Oddanie Strefa 2", "mdi:transmission-tower-export"),
+                            ("syntetyczna_siec_pobor_strefa_1", "Syntetyczna Sieć Pobór Strefa 1", "mdi:transmission-tower-import"),
+                            ("syntetyczna_siec_pobor_strefa_2", "Syntetyczna Sieć Pobór Strefa 2", "mdi:transmission-tower-import"),
+                        ]
+                    else:
+                        synth_defs = [
+                            ("syntetyczny_magazyn_ladowanie", "Syntetyczny Magazyn Ładowanie", "mdi:battery-charging"),
+                            ("syntetyczny_magazyn_rozladowanie", "Syntetyczny Magazyn Rozładowanie", "mdi:battery-arrow-down"),
+                            ("syntetyczna_siec_oddanie", "Syntetyczna Sieć Oddanie", "mdi:transmission-tower-export"),
+                            ("syntetyczna_siec_pobor", "Syntetyczna Sieć Pobór", "mdi:transmission-tower-import"),
+                        ]
+                    for s_key, s_name, s_icon in synth_defs:
+                        sensors.append(
+                            EnergaSyntheticStatisticsSensor(
+                                coordinator=coordinator,
+                                meter_id=meter_id,
+                                data_key=s_key,
+                                name=s_name,
+                                icon=s_icon,
+                                device_info=device_info,
+                                entry=entry,
+                                serial=serial,
+                            )
+                        )
             else:
                 # New net-billing: monetary deposit in PLN, RCEm auto-fetch
                 # (No virtual battery/warehouse or kWh bilans in net-billing)
@@ -3000,6 +3039,52 @@ class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Cost placeholder is available when coordinator has data."""
+        return self.coordinator.data is not None
+
+
+class EnergaSyntheticStatisticsSensor(CoordinatorEntity, SensorEntity):
+    """Synthetic statistics sensor for virtual storage or net grid flows in Energy Dashboard (v1.6.0)."""
+
+    def __init__(
+        self,
+        coordinator: EnergaCoordinator,
+        meter_id: str,
+        data_key: str,
+        name: str,
+        icon: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        serial: str = "",
+    ) -> None:
+        """Initialize synthetic statistics sensor."""
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._data_key = data_key
+        self._entry = entry
+        self._serial = str(serial or meter_id)
+
+        self._attr_name = name
+        self._attr_unique_id = f"energa_{self._serial}_{data_key}_stats"
+        self._attr_has_entity_name = True
+        self.entity_id = f"sensor.energa_{self._serial}_{data_key}"
+
+        self._attr_device_class = SensorDeviceClass.ENERGY
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_device_info = device_info
+        self._attr_icon = icon
+
+    @property
+    def native_value(self):
+        """Return None — energy statistics flow exclusively via async_import_statistics.
+
+        Prevents Home Assistant Core's recorder from calculating competing
+        statistics from states table deltas.
+        """
+        return None
+
+    @property
+    def available(self) -> bool:
         return self.coordinator.data is not None
 
 

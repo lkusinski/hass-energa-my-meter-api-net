@@ -21,6 +21,21 @@ CONF_BANK_INITIAL_PLN = "bank_initial_pln"  # Initial PLN bank for new prosumer 
 CONF_INVERTER_ENERGY_ENTITY = "inverter_energy_entity"  # Inverter total/daily energy entity for autoconsumption
 DEFAULT_INVERTER_ENERGY_ENTITY = ""
 
+# Virtual storage & Energy Dashboard presentation modes (v1.6.0)
+CONF_ENERGY_DASHBOARD_MODE = "energy_dashboard_mode"
+CONF_ENABLE_SYNTHETIC_STORAGE = "enable_synthetic_storage"
+CONF_PROSUMER_POWER_GROUP = "prosumer_power_group"
+
+ENERGY_MODE_VIRTUAL_STORAGE = "virtual_storage"
+ENERGY_MODE_PHYSICAL_GRID = "physical_grid"
+
+POWER_GROUP_LE_10KW = "le_10kw"  # <= 10 kW (współczynnik 0.8)
+POWER_GROUP_GT_10KW = "gt_10kw"  # > 10 kW (współczynnik 0.7)
+
+DEFAULT_ENABLE_SYNTHETIC_STORAGE = True
+DEFAULT_ENERGY_DASHBOARD_MODE = ENERGY_MODE_VIRTUAL_STORAGE
+DEFAULT_PROSUMER_POWER_GROUP = POWER_GROUP_LE_10KW
+
 # Default prices (PLN/kWh) - G12w tariff from 2026-01-01
 DEFAULT_IMPORT_PRICE = 1.188
 DEFAULT_IMPORT_PRICE_1 = 1.2453  # Zone 1 (peak)

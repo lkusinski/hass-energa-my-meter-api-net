@@ -33,6 +33,8 @@ _HA_MODULES = [
     "homeassistant.components.recorder.models.statistics",
     "homeassistant.components.recorder.statistics",
     "homeassistant.components.persistent_notification",
+    "homeassistant.components.energy",
+    "homeassistant.components.energy.data",
     "homeassistant.const",
     "homeassistant.util",
     "homeassistant.util.dt",

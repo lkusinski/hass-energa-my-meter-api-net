@@ -23,6 +23,14 @@
           "system": "Settlement system"
         }
       },
+      "net_metering_survey": {
+        "title": "Net-metering: Energy Dashboard Model",
+        "description": "Under the net-metering system, solar energy surplus is stored in a virtual warehouse with a 20% or 30% operator discount (in-kind fee). The default Home Assistant Energy Dashboard treats all export and import as raw physical grid exchange, distorting self-consumption and financial balances.\n\nSelect your PV micro-installation capacity and desired presentation model:",
+        "data": {
+          "prosumer_power_group": "PV Micro-installation Capacity",
+          "energy_dashboard_mode": "Energy Dashboard Presentation Model"
+        }
+      },
       "reauth_confirm": {
         "title": "Update Password",
         "description": "Re-login for account {username}.",
@@ -47,8 +55,18 @@
         "menu_options": {
           "credentials": "Change Credentials",
           "prices": "Set Energy Prices",
+          "energy_dashboard": "Energy Dashboard & Virtual Storage",
           "history": "Download History",
           "clear_stats": "Clear Energy Panel Statistics"
+        }
+      },
+      "energy_dashboard": {
+        "title": "Energy Dashboard & Virtual Storage",
+        "description": "Adjust Energy Dashboard presentation model and prosumer settings for net-metering.",
+        "data": {
+          "energy_dashboard_mode": "Presentation Model",
+          "prosumer_power_group": "PV Micro-installation Capacity",
+          "enable_synthetic_storage": "Enable synthetic virtual storage and net grid entities"
         }
       },
       "credentials": {
@@ -148,6 +166,9 @@
     "button": {
       "create_dashboard": {
         "name": "Utwórz Pulpit Rozliczeń"
+      },
+      "configure_energy_dashboard": {
+        "name": "Skonfiguruj Panel Energia"
       }
     }
   }
