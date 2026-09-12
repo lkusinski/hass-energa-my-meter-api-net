@@ -956,7 +956,7 @@ async def _import_meter_history(
             energy_sensor_name = suffix_to_name.get(
                 entity_suffix, f"panel_{entity_suffix}"
             )
-            entity_id = f"sensor.energa_{meter_id}_{energy_sensor_name}"
+            entity_id = f"sensor.energa_{meter_id}_{energy_sensor_name}".lower()
 
             # Import energy statistics via RecorderAdapter
             recorder_adapter = (
