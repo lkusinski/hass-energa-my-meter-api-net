@@ -3101,9 +3101,25 @@ class EnergaPriceSensor(CoordinatorEntity, SensorEntity):
             }
             return round(rce * 1.23, 5)
 
-        return get_price_for_key(
+        price_val = get_price_for_key(
             opts, self._data_key, meter_id=self._meter_id
         )
+        if self._data_key.startswith("import"):
+            zone_desc = (
+                "Strefa 1 — Dzień (szczyt)"
+                if self._data_key == "import_1"
+                else "Strefa 2 — Noc (pozaszczyt / weekend)"
+                if self._data_key == "import_2"
+                else "Taryfa jednostrefowa (G11)"
+            )
+            self._attr_extra_state_attributes = {
+                "stawka_calkowita_brutto": round(price_val, 4),
+                "unit": "PLN/kWh",
+                "opis": "Łączny koszt 1 kWh brutto (energia czynna + opłaty dystrybucyjne zmienne + VAT 23%)",
+                "strefa": zone_desc,
+                "uwaga": "Cena w Panelu Energia uwzględnia pełny koszt zmienny (energię i dystrybucję brutto), dzięki czemu kalkulacja kosztów poboru pokrywa się z realną fakturą.",
+            }
+        return price_val
 
 
 class EnergaRceSensor(CoordinatorEntity, SensorEntity):

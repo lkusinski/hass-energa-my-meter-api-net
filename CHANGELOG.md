@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.5.1 (2026-09-12) — Transparentne Ceny Energii (Pełny Koszt Zmienny) & Eksperymentalny Model Syntetyczny
+
+### 💰 Transparentne Ceny Energii i Rozbicie Składników
+- **Wzbogacone atrybuty cen poboru (`sensor.energa_*_cena_poboru*`):** Dodano atrybuty `stawka_calkowita_brutto`, `strefa`, `opis` oraz szczegółowe wskazówki wyjaśniające, że stawka używana w Panelu Energia powinna zawierać pełny koszt zmienny (energia czynna + opłaty dystrybucyjne zmienne + podatki/VAT 23%).
+- **Doprecyzowanie formularzy konfiguracji (`strings.json`, `translations/pl.json`):** Zaktualizowano etykiety pól cenowych, eliminując wątpliwości użytkowników i zapobiegając zaniżaniu prognoz kosztów w natywnym Panelu Energia (`/energy`).
+
+### 🔬 Eksperymentalny Model Syntetyczny Wirtualnego Magazynu
+- Opracowanie i laboratoryjna weryfikacja (Lab 123 — Wiśniowa) modelu syntetycznych przepływów dla natywnego Panelu Energia, który zachowuje 100% spójności zużycia własnego budynku przy pełnej reprezentacji akumulatora (baterii).
+- Zestaw 331 przechodzących testów jednostkowych.
+
 ## v1.5.0 (2026-09-11) — Automatyczny Bank Energii (Zero-Config FIFO) & Kalibracja Datą Faktury
 
 ### 🤖 Automatyczny Wirtualny Magazyn Energii z API Energa (Zero-Config Out-of-the-Box)
