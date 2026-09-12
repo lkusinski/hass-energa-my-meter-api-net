@@ -1,6 +1,10 @@
 # Changelog
 
-## v1.6.1 (2026-09-12) — Poprawka Bilansowania Magazynu G11, Dostępność Autokonfiguratora i Optymalizacja Labów
+## v1.6.1 (2026-09-12) — Natychmiastowa Synteza Magazynu z Recorder DB, Poprawka G11 i Autokonfigurator
+
+### ⚡ Nowości i Usprawnienia (Features & Improvements)
+- **Błyskawiczna synteza statystyk magazynu z bazy Recorder (`synthetic_storage.py`):** Dodano funkcję `async_synthesize_storage_from_recorder`. Dla istniejących instalacji aktualizowanych do v1.6.0+ (gdzie pobieranie historii było już wcześniej oznaczone jako zakończone) integracja natychmiast generuje 730 dni historii wirtualnego magazynu bezpośrednio z lokalnej bazy danych Home Assistant w ułamku sekundy, bez konieczności wykonywania setek zapytań HTTP do API Energi.
+- **Automatyczny backfill przy kliknięciu przycisku (`button.py`):** Wciśnięcie przycisku `Skonfiguruj Panel Energia` natychmiast sprawdza i dopełnia statystyki syntetycznego magazynu w bazie Recorder, gwarantując natychmiastową widoczność wykresów w `/energy`.
 
 ### 🐛 Poprawki Błędów (Bug Fixes)
 - **Obsługa liczników 1-strefowych G11 (`sensor.py`):** Naprawiono krytyczny błąd `UnboundLocalError: cannot access local variable 'init_l1'` w sensorze wirtualnego magazynu (`EnergaBankKwhSensor`). W licznikach jednotaryfowych (G11, np. instalacje PV z taryfą całodobową) zmienne `init_l1` i `init_l2` były inicjalizowane wyłącznie wewnątrz bloku `if self._has_zones:`, co blokowało odświeżanie encji przez koordynatora i generowało błędy w logach.
@@ -8,7 +12,7 @@
 - **Wzmocniona detekcja prosumencka (`__init__.py`):** Rozszerzono warunek sprawdzania statusu prosumenta dla powiadomień systemowych oraz wstecznego generowania statystyk magazynu o analizę punktów eksportowych i kodów OBIS minus.
 
 ### 🧪 Testy Jednostkowe
-- 341 w pełni przechodzących testów jednostkowych (w tym nowy dedykowany test regresyjny dla taryf G11 bez stref).
+- 342 w pełni przechodzące testy jednostkowe (dodano testy dla syntezy z bazy Recorder oraz regresyjny dla taryf G11 bez stref).
 
 ## v1.6.0 (2026-09-12) — Natywny Wirtualny Magazyn Energii (Net-Metering 0.8/0.7), Onboarding Survey & Autokonfigurator Panelu Energia
 

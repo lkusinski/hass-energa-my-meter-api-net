@@ -440,6 +440,18 @@ async def _maybe_auto_backfill(hass: HomeAssistant, api, entry: ConfigEntry) -> 
         except Exception as d_err:
             _LOGGER.debug("Auto-provision dashboard skipped: %s", d_err)
 
+        # 1b. For prosumer meters with synthetic storage enabled, ensure synthetic statistics exist from recorder
+        enable_synth = entry.options.get(
+            CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+        )
+        if enable_synth:
+            try:
+                from .synthetic_storage import async_synthesize_storage_from_recorder
+                for meter in active:
+                    await async_synthesize_storage_from_recorder(hass, entry, meter)
+            except Exception as synth_err:
+                _LOGGER.debug("Auto-synthesize storage from recorder skipped: %s", synth_err)
+
         # 2. Check if auto-backfill was already completed according to entry data
         if (entry.data or {}).get("auto_backfill_completed"):
             _LOGGER.debug("Auto-backfill: already completed according to entry data, skipping")
