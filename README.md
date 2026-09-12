@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-344_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-345_passed-brightgreen)
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
@@ -36,9 +36,9 @@
   * **Wyeliminowanie przekłamań Energy Dashboard:** Rozwiązuje problem natywnego Panelu Energia w HA, który przy net-meteringu drastycznie zaniżał wskaźniki samowystarczalności oraz zawyżał koszty energii.
   * **Obsługa taryf jednostrefowych (G11) i dwustrefowych (G12/G12w):** Precyzyjne bilansowanie między strefami L1 (Dzień) i L2 (Noc) zgodnie z przepisami OZE.
 * 🔘 **1-Click Autokonfiguracja Panelu Energia (`button.py`):**
-  * Przycisk na karcie urządzenia (`button.energa_{numer}_skonfiguruj_panel_energia`) bezpośrednio programuje `.storage/energy` za pośrednictwem natywnego API `EnergyManager.async_update` — bez restartu HA i bez żmudnego ręcznego mapowania encji!
+  * Przycisk na karcie urządzenia (`button.energa_{numer}_skonfiguruj_panel_energia`) bezpośrednio programuje `.storage/energy` za pośrednictwem natywnego API `EnergyManager.async_update` — bez restartu HA i bez żmudnego ręcznego mapowania encji! Automatycznie dostosowuje układ do profilu: Net-metering (z wirtualnym magazynem i prowizją), Net-billing (z wyceną oddania wg RCEm) lub Konsument.
 * 📋 **Ankieta Konfiguracyjna Onboarding (Kreator i Opcje):**
-  * Asystent pierwszej instalacji pyta o moc mikroinstalacji ($\le 10$ kW / $> 10$ kW) oraz preferowany model prezentacji (Wirtualny Magazyn vs Model tradycyjny), z pełną możliwością późniejszej edycji w Opcjach integracji.
+  * Asystent pierwszej instalacji pyta o model rozliczeń (Net-billing vs Net-metering vs Odbiorca), moc mikroinstalacji ($\le 10$ kW / $> 10$ kW) oraz preferowany model prezentacji, z pełną możliwością późniejszej edycji w Opcjach integracji.
 * 🤖 **Automatyczny Wirtualny Magazyn Energii (Zero-Config FIFO z API Energa):**
   * **Zero ręcznej konfiguracji:** Integracja pobiera roczne agregacje miesięczne bezpośrednio z API Energi (`/resources/mchart`) i automatycznie wylicza stan banku oraz podział L1/L2 wg zasad FIFO bez konieczności wpisywania żadnych danych początkowych!
   * **Opcjonalna kalibracja datą faktury:** Jeśli chcesz skalibrować bank idealnie pod fakturę, podajesz wyłącznie datę z faktury (np. `2024-05-31`) oraz stany L1/L2 z tej faktury — nie musisz spisywać wielocyfrowych stanów licznika!
@@ -48,9 +48,10 @@
   * Natywne encje wirtualnej baterii (`Bank Ładowanie` i `Bank Rozładowanie`) dla sekcji Magazyn Energii w oficjalnym Panelu Energia HA.
   * Sensor poziomu napełnienia magazynu (`Poziom Magazynu %`) działający już od 3 miesięcy zebranej historii.
 * 💰 **Depozyt Prosumencki (Net-Billing — nowy system):**
-  * Miesięczne rozliczenie wartościowe w PLN.
+  * Miesięczne rozliczenie wartościowe w PLN zgodne z Ustawą o OZE.
   * Automatyczne pobieranie oficjalnych cen rynkowych **RCEm** publikowanych przez **PSE** (~11. dnia każdego miesiąca).
   * Wyliczanie salda depozytu z uwzględnieniem noweli ustawy o OZE (mnożnik 1.23).
+  * Ścisłe odliczanie depozytu od energii czynnej brutto (z wyłączeniem opłaty handlowej i dystrybucyjnej, zgodnie z rzeczywistymi fakturami OSD).
 * ☀️ **Silnik Autokonsumpcji PV i Realnego Zużycia Domu (Hour-by-Hour Alignment):**
   * Eliminacja pozornej „100% autokonsumpcji” wynikającej z opóźnień OSD Mój Licznik (3–24h) względem falownika PV.
   * Precyzyjne dopasowanie godzinowe produkcji PV i wskazań licznika w zamkniętych interwałach czasowych.
@@ -74,19 +75,19 @@
 
 ## 🤝 Szukamy testerów dla niestandardowych taryf i liczników!
 
-Integracja w wersji **v1.6.4** jest w 100% przetestowana i działa stabilnie w środowiskach produkcyjnych na następujących profilach:
+Integracja w wersji **v1.6.5** jest w 100% przetestowana i działa stabilnie w środowiskach produkcyjnych na następujących profilach:
 * ✅ **G12w na starych zasadach (Net-metering):** instalacja PV do 10 kWp z opustem 0.8, wirtualny magazyn energii w kWh rozliczany w Panelu Energia z podziałem na strefę dzienną L1 i nocną L2 (np. Wiśniowa).
 * ✅ **G12w na nowych zasadach (Net-billing):** instalacja PV z depozytem wartościowym w PLN, dynamicznym cennikiem rynkowym PSE RCEm i autokonsumpcją godzinową (np. Agrestowa).
-* ✅ **G11 + PV na starych zasadach (Net-metering):** opust 0.8, pojedynczy wirtualny magazyn energii (np. Bursztynowa).
+* ✅ **G11 na nowych zasadach (Net-billing):** instalacja PV z jednostrefowym depozytem wartościowym w PLN, zweryfikowana co do grosza na rzeczywistej fakturze OSD (np. Bursztynowa).
 * ✅ **G11 – standardowy odbiorca bez fotowoltaiki:** czysty konsument energii, automatyczne taryfikowanie i prognozy rachunków (np. Warzywna).
 
 Chcemy rozszerzyć integrację o kolejne taryfy i warianty instalacji. **Poszukujemy osób, które posiadają:**
 1. 🥇 **Taryfę trójstrefową G13** (przedpołudnie / szczyt popołudniowy / pozostałe godziny) — priorytet, aby dodać obsługę 3 stref w wirtualnym magazynie!
 2. 🥈 **Klasyczną taryfę dwustrefową G12** (dzień / noc bez weekendów) oraz **G12r / G12as**.
 3. 🥉 **Mikroinstalację PV powyżej 10 kWp** (współczynnik opustu **0.7** zamiast 0.8).
-4. 🏢 **Taryfy biznesowe z grupy C (C11, C12a, C12b)** dla małych firm.
-5. 👥 **Konto z kilkoma licznikami (PPE)** na jednym profilu portalu Mój Licznik.
-6. ☀️ **G11 w układzie Net-billing** (jednostrefowy depozyt w PLN).
+4. ☀️ **G11 na starych zasadach (Net-metering 0.8/0.7)** z pojedynczym magazynem w kWh.
+5. 🏢 **Taryfy biznesowe z grupy C (C11, C12a, C12b)** dla małych firm.
+6. 👥 **Konto z kilkoma licznikami (PPE)** na jednym profilu portalu Mój Licznik.
 
 **Jak możesz pomóc?**
 Jeśli posiadasz którąś z powyższych konfiguracji i chcesz pomóc w rozwoju projektu, utwórz zgłoszenie w [GitHub Issues](https://github.com/lkusinski/hass-energa-my-meter-api-net/issues) lub w sekcji [Discussions](https://github.com/lkusinski/hass-energa-my-meter-api-net/discussions). Wystarczy zanonimizowany fragment odpowiedzi z API (np. wycinek JSON z DevTools z wyciętymi danymi osobowymi) lub krótka współpraca przy testach. Kod integracji jest w 100% darmowy, otwarty i bezpieczny!

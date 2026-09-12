@@ -514,6 +514,32 @@ def is_export_prosumer(meter: dict | None) -> bool:
     return False
 
 
+def is_net_metering(is_prosumer: bool, coeff: float | None) -> bool:
+    """True when the prosumer is on old Net-metering (opust 0.8/0.7).
+
+    Requires is_prosumer to be True and an explicit opust coefficient >= 0.7.
+    """
+    if not is_prosumer:
+        return False
+    try:
+        return float(coeff if coeff is not None else 0.0) >= 0.7
+    except (ValueError, TypeError):
+        return False
+
+
+def is_net_billing(is_prosumer: bool, coeff: float | None) -> bool:
+    """True when the prosumer is on new Net-billing (PLN deposit, coeff < 0.7).
+
+    Requires is_prosumer to be True and an opust coefficient < 0.7 (typically 0.0).
+    """
+    if not is_prosumer:
+        return False
+    try:
+        return float(coeff if coeff is not None else 0.0) < 0.7
+    except (ValueError, TypeError):
+        return True
+
+
 def orphan_bank_uids(
     meter_id: str, serial: str, is_prosumer: bool, coefficient: float | None
 ) -> set:

@@ -236,7 +236,15 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
-            if choice != "brak":
+            if choice == "nowe":
+                options[CONF_PROSUMER_COEFFICIENT] = 0.0
+                options[CONF_ENABLE_SYNTHETIC_STORAGE] = False
+                options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
+                options[CONF_RCE_AUTO_FETCH] = True
+            elif choice == "brak":
+                options[CONF_ENABLE_SYNTHETIC_STORAGE] = False
+                options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
+            else:
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
             return self.async_create_entry(
                 title=getattr(self, "_pending_title", "Energa My Meter"),
@@ -266,7 +274,15 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
-            if choice != "brak":
+            if choice == "nowe":
+                options[CONF_PROSUMER_COEFFICIENT] = 0.0
+                options[CONF_ENABLE_SYNTHETIC_STORAGE] = False
+                options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
+                options[CONF_RCE_AUTO_FETCH] = True
+            elif choice == "brak":
+                options[CONF_ENABLE_SYNTHETIC_STORAGE] = False
+                options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
+            else:
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
             return self.async_create_entry(
                 title=getattr(self, "_pending_title", "Energa My Meter"),
@@ -600,6 +616,15 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
 
             # Save global prices
             new_options = {**self._config_entry.options, **user_input}
+
+            if CONF_PROSUMER_COEFFICIENT in user_input:
+                try:
+                    c_val = float(user_input[CONF_PROSUMER_COEFFICIENT])
+                    if c_val < 0.7:
+                        new_options[CONF_ENABLE_SYNTHETIC_STORAGE] = False
+                        new_options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
+                except (ValueError, TypeError):
+                    pass
 
             # Also save per-meter prices for each active meter
             meters = self._get_active_meters()
