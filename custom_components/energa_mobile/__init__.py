@@ -1095,7 +1095,8 @@ async def _import_meter_history(
                 f"- Zużycie z sieci (noc): `sensor.energa_{meter_id}_panel_energia_strefa_2`\n"
                 f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja_strefa_1` i `...strefa_2`"
             )
-            if is_export_prosumer(meter):
+            is_prosumer_meter = is_export_prosumer(meter) or bool(export_1_points or export_2_points or export_points) or bool(meter.get("obis_minus"))
+            if is_prosumer_meter:
                 panel_hint += (
                     f"\n\n🔋 **Wirtualny Magazyn Energii (Net-metering):**\n"
                     f"Wygenerowano bilansowanie i syntetyczny magazyn energii.\n"
@@ -1125,7 +1126,8 @@ async def _import_meter_history(
                 f"- Zużycie z sieci: `sensor.energa_{meter_id}_panel_energia_zuzycie`\n"
                 f"- Oddanie do sieci: `sensor.energa_{meter_id}_panel_energia_produkcja`"
             )
-            if is_export_prosumer(meter):
+            is_prosumer_meter = is_export_prosumer(meter) or bool(export_points) or bool(meter.get("obis_minus"))
+            if is_prosumer_meter:
                 panel_hint += (
                     f"\n\n🔋 **Wirtualny Magazyn Energii (Net-metering):**\n"
                     f"Wygenerowano bilansowanie i syntetyczny magazyn energii.\n"
@@ -1276,7 +1278,9 @@ async def _import_meter_history(
             enable_synth = entry.options.get(
                 CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
             )
-            if enable_synth and is_export_prosumer(meter):
+            has_any_export = bool(export_points or (has_zones and (export_1_points or export_2_points))) or bool(meter.get("obis_minus"))
+            if enable_synth and (is_export_prosumer(meter) or has_any_export):
+
                 try:
                     _coeff = float(
                         entry.options.get(

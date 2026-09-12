@@ -19,7 +19,8 @@ from custom_components.energa_mobile.const import (
 )
 from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
 from custom_components.energa_mobile.button import EnergaConfigureEnergyDashboardButton
-from custom_components.energa_mobile.sensor import EnergaSyntheticStatisticsSensor
+from custom_components.energa_mobile.sensor import EnergaSyntheticStatisticsSensor, EnergaBankKwhSensor
+
 
 
 class TestVirtualStorageOptionsFlow:
@@ -179,3 +180,40 @@ class TestSyntheticSensor:
         assert sensor.entity_id == "sensor.energa_12345_syntetyczny_magazyn_l1_ladowanie"
         assert sensor.native_value is None
         assert sensor.available is True
+
+    def test_bank_sensor_single_zone_g11_unbound_init_fix(self):
+        coord = MagicMock()
+        coord.data = [{
+            "meter_point_id": "30910672",
+            "meter_serial": "30910672",
+            "zone_count": 1,
+            "tariff": "G11",
+            "is_prosumer": True,
+            "total_plus": 1000.0,
+            "total_minus": 2000.0,
+        }]
+        coord._meter_totals = {"30910672": {"import": 1000.0, "export": 2000.0}}
+        coord._monthly = {"30910672": {}}
+
+
+        entry = MagicMock()
+        entry.options = {
+            CONF_PROSUMER_COEFFICIENT: 0.8,
+            # baselines are 0.0, initial is 0.0, no init_l1/init_l2 in single-zone
+        }
+        dev_info = MagicMock()
+
+        sensor = EnergaBankKwhSensor(
+            coordinator=coord,
+            meter_id="30910672",
+            serial="30910672",
+            device_info=dev_info,
+            entry=entry,
+            has_zones=False,
+        )
+
+        # Should compute without UnboundLocalError for init_l1 / init_l2
+        val = sensor.native_value
+        assert val is not None
+        assert val == (2000.0 * 0.8) - 1000.0  # 1600 - 1000 = 600
+

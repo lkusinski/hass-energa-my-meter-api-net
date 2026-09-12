@@ -60,14 +60,14 @@ async def async_setup_entry(
                 all_meters=active_meters,
             )
         )
-        if is_export_prosumer(meter):
-            buttons.append(
-                EnergaConfigureEnergyDashboardButton(
-                    hass=hass,
-                    entry=entry,
-                    meter=meter,
-                )
+        buttons.append(
+            EnergaConfigureEnergyDashboardButton(
+                hass=hass,
+                entry=entry,
+                meter=meter,
             )
+        )
+
 
     if buttons:
         async_add_entities(buttons)

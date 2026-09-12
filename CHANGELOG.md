@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.6.1 (2026-09-12) — Poprawka Bilansowania Magazynu G11, Dostępność Autokonfiguratora i Optymalizacja Labów
+
+### 🐛 Poprawki Błędów (Bug Fixes)
+- **Obsługa liczników 1-strefowych G11 (`sensor.py`):** Naprawiono krytyczny błąd `UnboundLocalError: cannot access local variable 'init_l1'` w sensorze wirtualnego magazynu (`EnergaBankKwhSensor`). W licznikach jednotaryfowych (G11, np. instalacje PV z taryfą całodobową) zmienne `init_l1` i `init_l2` były inicjalizowane wyłącznie wewnątrz bloku `if self._has_zones:`, co blokowało odświeżanie encji przez koordynatora i generowało błędy w logach.
+- **Uniwersalna dostępność przycisku autokonfiguracji (`button.py`):** Przycisk `Skonfiguruj Panel Energia` (`button.energa_{serial}_skonfiguruj_panel_energia`) jest teraz rejestrowany bezwarunkowo dla każdego licznika, eliminując problem pomijania przycisku na instalacjach, gdzie flaga `is_prosumer` lub sumaryczny eksport były zerowe w trakcie początkowej synchronizacji.
+- **Wzmocniona detekcja prosumencka (`__init__.py`):** Rozszerzono warunek sprawdzania statusu prosumenta dla powiadomień systemowych oraz wstecznego generowania statystyk magazynu o analizę punktów eksportowych i kodów OBIS minus.
+
+### 🧪 Testy Jednostkowe
+- 341 w pełni przechodzących testów jednostkowych (w tym nowy dedykowany test regresyjny dla taryf G11 bez stref).
+
 ## v1.6.0 (2026-09-12) — Natywny Wirtualny Magazyn Energii (Net-Metering 0.8/0.7), Onboarding Survey & Autokonfigurator Panelu Energia
 
 ### 🔋 Natywny Model Wirtualnego Magazynu Energii (Net-metering) w Panelu Energia (`/energy`)
