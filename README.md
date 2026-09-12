@@ -163,6 +163,26 @@ Nie rekomendujemy łączenia obu integracji na tym samym koncie. To nie jest rel
 ### Jak działa izolacja stref L1 i L2 w magazynie energii?
 Zgodnie z rzeczywistymi rozliczeniami OSD Energa (zweryfikowanymi na fakturach rozliczeniowych), w taryfach wielostrefowych nadwyżka wyprodukowana w dzień zasila wyłącznie magazyn L1, a nadwyżka poza szczytem wyłącznie magazyn L2. Jeśli w nocy zabraknie energii w magazynie L2, pobór nocny zostanie zafakturowany, nawet jeśli w magazynie L1 pozostał duży zapas. Integracja ściśle odwzorowuje tę zasadę.
 
+### Na jakiej podstawie wyliczany jest procent napełnienia magazynu energii (`Magazyn Poziom` / `%`)?
+Wirtualny magazyn energii w systemie opustów (net-metering, art. 4 ust. 11 ustawy o OZE) nie ma stałej pojemności fizycznej (jak bateria chemiczna np. 10 kWh). Zgodnie z ustawą każda nadwyżka energii wprowadzona do sieci w danym miesiącu (pomnożona przez współczynnik opustu 0.8 lub 0.7) jest ważna do odebrania przez **12 miesięcy**, po czym niewykorzystana wygasa.
+
+Z tego względu naturalną, dynamiczną „pojemnością maksymalną” magazynu w danym momencie jest **suma wszystkich wkładów zdeponowanych w sieci w ciągu ostatnich 12 miesięcy** (`deposits_12m_kwh`).
+
+Poziom napełnienia magazynu wyliczany jest według wzoru:
+$$\text{Poziom Magazynu (\%)} = \frac{\text{Bieżące saldo w magazynie (Bank kWh)}}{\text{Suma wkładów z ostatnich 12 miesięcy (kWh)}} \times 100\%$$
+
+**Jak to interpretować?**
+* **100%:** Przez ostatnie 12 miesięcy wyłącznie produkowałeś energię i nie odebrałeś z sieci ani jednej kilowatogodziny z magazynu (cały roczny depozyt jest nienaruszony).
+* **~50%:** Z energii zdeponowanej w sieci w ciągu ostatniego roku zużyłeś do tej pory ok. 50%, a druga połowa wciąż czeka na wykorzystanie w kolejnych miesiącach przed upływem terminu 12 miesięcy.
+* **0%:** Magazyn wirtualny został całkowicie wyczerpany.
+
+Dzięki jednostce `%` oraz klasie `device_class: battery`, Home Assistant automatycznie renderuje ten sensor jako graficzny wskaźnik naładowania baterii w kafelkach i panelach Lovelace.
+
+### Jak integracja rozróżnia stary Net-metering (opusty w kWh) od nowego Net-billingu (depozyt w PLN)?
+Rozróżnienie następuje automatycznie na podstawie współczynnika prosumenckiego (`prosumer_coefficient`):
+* **Współczynnik $\ge 0{,}7$ (np. 0.8 lub 0.7):** Stary system opustów (instalacje zgłoszone do 31 marca 2022 r.). Integracja prowadzi wirtualny magazyn w kWh, rozdziela strefy L1/L2 wg zasad FIFO, wylicza procent napełnienia i udostępnia przepływy ładowania/rozładowania dla baterii w Panelu Energia. Wycena sprzedaży energii (`cena_oddania`) jest w tym trybie wyłączona, ponieważ nadwyżki nie są sprzedawane, lecz deponowane wolumenowo.
+* **Współczynnik $< 0{,}7$ (np. 0.0):** Nowy system Net-billing (instalacje po 1 kwietnia 2022 r.). Integracja przełącza się w tryb wartościowy: prowadzi Depozyt Prosumencki w PLN (`bank_wirtualny_pln`), pobiera oficjalne rynkowe ceny RCEm z PSE i wycenia wprowadzoną energię stawką brutto ($RCEm \times 1{,}23$).
+
 ---
 
 ## 📄 Licencja
