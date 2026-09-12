@@ -2057,6 +2057,8 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
         initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
         bank_1 = None
         bank_2 = None
+        init_l1 = 0.0
+        init_l2 = 0.0
 
         if self._has_zones:
             # Per-zone baselines if available, else global
