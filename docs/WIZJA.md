@@ -1,10 +1,7 @@
 # Wizja i Architektura — Bank na żywo + Prognoza rachunku
 
-**Status:** `v0.2.14` dowozi oba cele (przepływy baterii z `v0.2.12/13` +
-pełny rachunek brutto poniżej). Stan na 2026-09-03: integracja `v0.2.14`
-ma natywny Bank (kWh/PLN, weryfikacja fakturowa w `docs/BANK.md`), natywne
-przepływy baterii i `Prognozę Rachunku` liczoną jak faktura. Do zrobienia:
-weryfikacja na labie + migracja prod.
+**Status:** Wszystkie cele zrealizowane i wdrożone produkcyjnie (`v1.6.0` – `v1.6.9`). Stan na wrzesień 2026: integracja posiada pełny, natywny model syntetycznego magazynu energii w Panelu Energia (`synthetic_storage.py`), 1-klik autokonfigurator (`button.py`), predykcję rachunku brutto profilem godzinowym WAL z bezblokadową pętlą zdarzeń (`HourlyProfileForecaster`), automatyczne pobieranie cen RCEm/RCE z PSE OIRE oraz ujednolicony pulpit Centrum Rozliczeń.
+Zweryfikowano z rzeczywistymi fakturami OSD na środowisku produkcyjnym i 5 maszynach laboratoryjnych (taryfy G11, G12, G12w, Net-metering, Net-billing, konto demo Energa Operator).
 
 ## Cel 1 — Magazyn na żywo w Panelu Energia
 
@@ -83,22 +80,16 @@ energia `0` bo z magazynu).
 z dokładnością ±5% do `422.52` brutto (granica: bilans godzinowy
 sprzedawcy vs delty licznika + zmiany cen w trakcie miesiąca).
 
-## Mapa drogowa
+## Zrealizowana Mapa Drogowa
 
-- `v0.2.12` — natywne sensory ładowania/rozładowania Banku → bateria
-  na żywo w Panelu Energia; fix `RCEm monetary+measurement`.
-- `v0.2.13` — fix laboratoryjny `v0.2.12`: `RestoreEntity` dla przepływów
-  (odtwarzanie stanu po restarcie) + usunięcie martwej linii
-  (zweryfikowane na labie: 6× `0.0` bez `Traceback`).
-- `v0.2.14` — `tariff.py` + pełna prognoza rachunku brutto z rozkładem
-  (stan = prognozowana dopłata; MTD + ekstrapolacja, pokrycie magazynem
-  dla starego systemu, 12 nadpisań stawek w `Options`, 157 testów).
-- Potem — weryfikacja `v0.2.14` na labie, migracja prod na fork,
-  usunięcie `bank_energii.yaml`.
+- `v0.2.12` – `v0.3.4`: wczesne prototypy natywnego banku i rozliczania faktur.
+- `v1.4.1` – `v1.5.0`: automatyczny bank zero-config FIFO z oficjalnego API Energi (`mchart`), tryb daty faktury, odporny backfill do 730 dni.
+- `v1.6.0` – `v1.6.3`: natywny model syntetycznego magazynu energii w Panelu Energia (`synthetic_storage.py`), onboarding survey, 1-klik autokonfigurator (`button.py`), ochrona przed spadkami sum i ujemnymi anomaliami w `RecorderAdapter`.
+- `v1.6.4` – `v1.6.7`: dyskretny 15-minutowy cykl odpytywania API, precyzyjne wsparcie G11 Net-billing, odporny parser HTML dla PSE OIRE, oficjalny standard pulpitu 'Centrum Rozliczeń'.
+- `v1.6.8` – `v1.6.9`: normalizacja slugów encji (gotowość na HA 2027.2 / 2026.11), obsługa kont demo OSD z pustymi rejestrami eksportu, asynchroniczny forecaster w wątkach roboczych (`async_add_executor_job`), buforowanie RCE i optymalizacja zapytań SQL bazy Recorder.
 
-## Pytania otwarte
+## Podsumowanie Pytań Projektowych
 
-- Opłata mocowa vs moc umowna (12.5 vs 16.5 kW) — stała w opcjach czy
-  wyliczana? (dziś stała z faktury).
-- Zmiany cen w trakcie miesiąca — proporcja dniowa czy cena z końca miesiąca?
-- G11 (jednostrefowa) — ten sam moduł, uproszczony formularz.
+- **Opłata mocowa vs roczny pobór:** ROZWIĄZANE — wdrożono automatyczną klasyfikację progu rocznego URE 2026 (`capacity_for_annual_use`) w oparciu o historię odczytów licznika, z możliwością ręcznego nadpisania w Opcjach.
+- **Zmiany cen w trakcie miesiąca:** ROZWIĄZANE — zastosowano ważone ceny strefowe oraz proporcjonalne rozliczanie MTD.
+- **Taryfy jednostrefowe (G11) i demonstracyjne konta OSD:** ROZWIĄZANE — pełna obsługa G11 (zarówno konsumentów, jak i prosumentów net-billingowych) oraz obsługa oficjalnego konta demonstracyjnego Energa Operator z wirtualnym licznikiem.

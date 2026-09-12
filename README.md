@@ -66,6 +66,14 @@
 * 🚀 **Automatyczny Pulpit Lovelace (`/energa-rachunek`):**
   * Integracja automatycznie tworzy i rejestruje dedykowany pulpit w menu bocznym Home Assistant natychmiast po instalacji.
   * Możliwość ponownego wygenerowania jednym kliknięciem przyciskiem urządzenia lub usługą `energa_mobile.generate_dashboard`.
+* ⚡ **Bezblokadowa Architektura Asynchroniczna i Buforowanie Pamięciowe (v1.6.9):**
+  * Obliczenia predykcyjne profilu godzinowego WAL (`HourlyProfileForecaster`) oraz kwerendy Canonical Storage oddelegowane do wątków roboczych (`async_add_executor_job`), gwarantując 0.0001s czas odpowiedzi i zero blokowania pętli zdarzeń `MainThread`.
+  * Inteligentne 2-godzinne buforowanie zapytań PSE OIRE z automatycznym odświeżaniem po 14:00 (dla cen na kolejną dobę) oraz eliminacja 13 zbędnych zapytań SQL do bazy Recorder na cykl dzięki buforowaniu zamkniętych miesięcy.
+* 🏷️ **Normalizacja Slugów i Standardy HA 2026.11 / 2027.2 Ready (v1.6.8):**
+  * Wymuszone małe litery w identyfikatorach encji (`s_slug`), odporność na alfanumeryczne i wirtualne numery seryjne oraz bezpieczna obsługa pustych rejestrów eksportowych (`total_minus: null`).
+  * Pełne wsparcie dla wytycznych `StatisticMetaData` (`mean_type = StatisticMeanType.NONE`, `unit_class = "energy"`).
+* 🎨 **Oficjalny Pulpit 'Centrum Rozliczeń' (v1.6.7):**
+  * Profesjonalny, zunifikowany układ kart Lovelace (`/energa-rachunek`) zapewniający pełny wgląd w koszty bieżące, prognozy zamknięcia miesiąca, stan depozytu/magazynu oraz autokonsumpcję.
 * 🛡️ **Kanonityczny Magazyn Danych (SQLite WAL):**
   * Baza danych powiązana z logicznym punktem poboru (PPE), chroniąca historię przed utratą przy fizycznej wymianie licznika przez monterów OSD.
 * 🏠 **Pełne Wsparcie dla Konsumentów bez Fotowoltaiki:**
@@ -75,11 +83,12 @@
 
 ## 🤝 Szukamy testerów dla niestandardowych taryf i liczników!
 
-Integracja w wersji **v1.6.5** jest w 100% przetestowana i działa stabilnie w środowiskach produkcyjnych na następujących profilach:
+Integracja w wersji **v1.6.9** jest w 100% przetestowana i działa stabilnie w środowiskach produkcyjnych na następujących profilach:
 * ✅ **G12w na starych zasadach (Net-metering):** instalacja PV do 10 kWp z opustem 0.8, wirtualny magazyn energii w kWh rozliczany w Panelu Energia z podziałem na strefę dzienną L1 i nocną L2 (np. Wiśniowa).
 * ✅ **G12w na nowych zasadach (Net-billing):** instalacja PV z depozytem wartościowym w PLN, dynamicznym cennikiem rynkowym PSE RCEm i autokonsumpcją godzinową (np. Agrestowa).
 * ✅ **G11 na nowych zasadach (Net-billing):** instalacja PV z jednostrefowym depozytem wartościowym w PLN, zweryfikowana co do grosza na rzeczywistej fakturze OSD (np. Bursztynowa).
 * ✅ **G11 – standardowy odbiorca bez fotowoltaiki:** czysty konsument energii, automatyczne taryfikowanie i prognozy rachunków (np. Warzywna).
+* ✅ **G12 – demonstracyjne konto Energa Operator:** oficjalne środowisko demo OSD (`amiEOP@energa-operator.pl`), obsługa liczników wirtualnych/alfanumerycznych oraz odporność na puste rejestry eksportowe (Lab VM 127).
 
 Chcemy rozszerzyć integrację o kolejne taryfy i warianty instalacji. **Poszukujemy osób, które posiadają:**
 1. 🥇 **Taryfę trójstrefową G13** (przedpołudnie / szczyt popołudniowy / pozostałe godziny) — priorytet, aby dodać obsługę 3 stref w wirtualnym magazynie!

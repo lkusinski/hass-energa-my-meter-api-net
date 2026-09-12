@@ -1,27 +1,24 @@
-# Bank / Wirtualny Magazyn Energii — jak czytać
+# Bank / Wirtualny Magazyn Energii — Kompendium i Architektura (v1.6.9)
 
-**Cel:** w łatwy sposób widzieć ile prądu / kasy masz w magazynie.
+**Cel:** Precyzyjne, zgodne z prawem OZE i rzeczywistymi fakturami OSD odwzorowanie wirtualnego magazynu energii (kWh) oraz depozytu prosumenckiego (PLN) w Home Assistant.
 
 ## Dwa systemy w jednej integracji (auto-wykrywanie po `prosumer_coefficient`)
 
-| Instalacja | Taryfa | System | Sensor | Jednostka | Formuła |
+| Instalacja | Taryfa | System | Sensor | Jednostka | Formuła i Prezentacja w Panelu Energia |
 |---|---|---|---|---|---|
-| G12W | **stare** net-metering roczny | `sensor.bank_wirtualny_kwh` (`energa_<nr-licznika>_bank_kwh`) | kWh | `max(0, (export-baseline)×0.8 - (import-baseline)) + initial_kwh` |
-| G12W | **nowe** net-billing miesięczny | `sensor.bank_wirtualny_pln` (`energa_<nr-licznika>_bank_pln`) + `sensor.energa_<nr-licznika>_rcem_auto` | PLN | `initial_pln + export×RCE×1.23 - import×cena_strefa` |
+| G11 / G12 / G12w | **stare** net-metering (opust 0.8/0.7) | `sensor.energa_{serial}_bank_wirtualny_kwh` | kWh | `max(0, (export-baseline)×coeff - (import-baseline)) + initial_kwh`. W Panelu Energia: **wirtualna bateria** (ładowanie/rozładowanie) + prowizja OSD 20/30% jako oddanie za 0 zł. |
+| G11 / G12 / G12w | **nowe** net-billing miesięczny (od 01.04.2022) | `sensor.energa_{serial}_bank_wirtualny_pln` + `sensor.energa_{serial}_rcem_auto` | PLN | `initial_pln + export×RCEm×1.23 - import×cena_strefa`. W Panelu Energia: **bezpośrednia sieć** z wyceną oddania wg rynkowej ceny odkupu $RCEm \times 1.23$. |
 
-> `<nr-licznika>` — podstaw numer swojego licznika. `G11 Odbiorca`
-> (taryfa jednostrefowa, sam pobór) nie dostaje banku — tylko prosumenci.
-> Od `v0.2.15` prosument = flaga `Wytwórca` lub niezerowy licznik eksportu
-> (same kody OBIS eksportu przy zerach nie wystarczą); sieroty po starej
-> bramce usuwają się same przy starcie.
+> `{serial}` — numer seryjny Twojego licznika (znormalizowany do małych liter). `G11 Odbiorca`
+> (taryfa jednostrefowa, sam pobór bez PV) nie dostaje banku — tylko prosumenci.
+> Od `v1.6.5` prosument = flaga `is_export_prosumer` (niezerowy rejestr eksportu lub flaga OSD).
 
 * `initial_kwh` = **1358** (`752+606` `Razem w magazynie` z faktury `06.2026` — stan po rozliczeniu). Ustaw `balance_baseline_import/export` na wskazania `do` z tej faktury + `bank_initial_kwh=1358`. `Bilans>0` nadbudowuje bank.
-* `initial_pln` = `0.00` na `01.08.2026` (faktura `07.2026`: `456×0.26288×1.23=147.44`, `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U.1847.
-* Per-strefa G12W: `import_1/export_1` (L1 droga) + `import_2/export_2` (L2 tania). Ceny `import_price_1 1.30` / `import_price_2 0.65` w `Options → Ceny` (lub zostaw `1.2453/0.5955` default — ujednolicisz).
-* `Bilans Prosumencki` to diagnostic (ukryty półprodukt: `Bank=max(0,Bilans)+initial`). Nie wieszaj go obok Banku — to ta sama energia liczona podwójnie.
-* `G11 bez PV` (faktura konsumencka, 2159 kWh): własna tabela opłat (handlowa `16,18`, sieciowa stała `11,77`, zmienna `0,3485`) — prognoza liczona jak faktura (`2271,74` netto → `2794,24` brutto co do grosza). Akcyza jest już w cenie energii (tylko przypis na fakturze).
-* **Wymiana licznika:** historia mchart obejmuje też poprzedni licznik (G12W nowe zasady: sumy 730d większe niż stan nowego). Bank liczony z nowego licznika (baseline) jest poprawny; FIFO i słupki pokazują historię gospodarstwa, nie licznika.
-* **Reimporty są bezpieczne (v0.3.4):** serie przepływów kontynuują zaimportowane sumy (kotwica sprzed zakresu), pełne backfille startują od 0. Sensor ładuje MAX z 14 dni — restarty nie zwijają słupków baterii.
+* `initial_pln` = `0.00` na `01.08.2026` (faktura `07.2026`: `456×0.26288×1.23=147.44`, `Depozyt po 0.00`). RCEm `0.26288` lipiec, `×1.23` od noweli 27.11.2024 Dz.U. 1847.
+* Per-strefa G12/G12w: `import_1/export_1` (L1 droga/dzień) + `import_2/export_2` (L2 tania/noc). Ceny taryfowe konfigurowane w `Opcje → Ceny`.
+* `G11 bez PV` (faktura konsumencka): własna tabela opłat (handlowa, sieciowa stała, zmienna) — prognoza liczona jak faktura co do grosza.
+* **Wymiana licznika:** historia mchart obejmuje też poprzedni licznik. Dzięki powiązaniu z logicznym punktem poboru (PPE) w bazie Canonical Storage (`energa_canonical.db`), wymiana fizycznego licznika nie powoduje utraty historii gospodarstwa.
+* **Reimporty są bezpieczne (v1.6.2+):** serie przepływów kontynuują zaimportowane sumy (kotwica sprzed zakresu), a twarde klamrowanie monotoniczności w `RecorderAdapter` uniemożliwia powstawanie ujemnych pików energii.
 
 ## Gdzie zobaczyć
 
@@ -76,35 +73,32 @@ cards:
       Dystrybucja i opłaty stałe pozostają do uregulowania na fakturze.
 ```
 
-**Energy Dashboard — jak wpiąć (v0.3.0, bez ściemy):**
-`Ustawienia → Pulpity → Energia`:
-* **Stary net-metering (off-grid):** Sieć pobór = `Panel Energia Strefa 1/2`
-  (z ceną), Sieć zwrot = `Panel Energia Produkcja Strefa 1/2` BEZ ceny
-  (nadwyżka trafia do magazynu kWh, nie na sprzedaż — brak rekompensaty),
-  Bateria = `Bank Ładowanie/Rozładowanie`.
-  ☀️ Fotowoltaika = TYLKO prawdziwe encje falownika, NIGDY eksport
-  z licznika: eksport to nadwyżka PO autokonsumpcji, więc produkcja
-  jest wyższa niż zwrot (podpięcie eksportu jako solara zaniża produkcję
-  i podwójnie liczy energię: raz jako zwrot, raz jako baterię —
-  zwrotu do sieci NIE dodawaj obok baterii).
-* **Nowy net-billing (sprzedaż):** Sieć pobór = `Panel Energia Strefa 1/2`
-  (z ceną), Sieć zwrot = `Panel Energia Produkcja Strefa 1/2` z ceną =
-  encja `Cena Oddania` (żywa sprzedaż `RCEm×1.23`, nie zamrożone 0,95).
-  Baterii NIE dodawaj (przepływy to kopia import/eksport; depozyt shows
-  `Bank PLN`). Stan depozytu i prognozę pokazuje Lovelace poniżej.
-* Bank `sensor.*_bank_*` + `Magazyn Poziom %` (klasa `battery`) na gauge
-  w Lovelace — Panel Energia słupków stanu nie umie, tylko przepływy.
+## Konfiguracja Panelu Energia (`/energy`)
+
+### ⚡ Metoda Automatyczna (1-Click Setup — Rekomendowana)
+Wystarczy na karcie urządzenia licznika kliknąć:
+`button.energa_{serial}_skonfiguruj_panel_energia`
+Integracja bezpośrednio programuje konfigurację Home Assistanta (`.storage/energy`):
+- **Stare zasady (Net-metering):** Rejestruje syntetyczne baterie (L1/L2 lub pojedynczą), syntetyczną sieć pobór z cenami oraz syntetyczną sieć oddanie ze stawką 0 zł (prowizja OSD).
+- **Nowe zasady (Net-billing):** Rejestruje sieć pobór z cenami oraz sieć oddanie z dynamiczną wyceną wg encji `sensor.energa_{serial}_cena_oddania` ($RCEm \times 1.23$).
+- **Fotowoltaika:** Automatycznie dołącza skonfigurowany w Opcjach falownik PV.
+
+### 🔬 Matematyczny Silnik Bilansowania (`synthetic_storage.py`)
+W polskim net-meteringu (Ustawa o OZE art. 4 ust. 1 i 11) eksport do sieci nie jest sprzedażą, lecz magazynowaniem energii pomniejszonym o 20% (dla $\le 10$ kWp) lub 30% (dla $> 10$ kWp) prowizji OSD:
+1. **Syntetyczny Magazyn Ładowanie:** $\text{Export} \times 0.8$ (lub $0.7$) trafia do sekcji Magazyn Energii (Bateria).
+2. **Syntetyczna Sieć Oddanie (Prowizja):** $\text{Export} \times 0.2$ (lub $0.3$) trafia do sekcji Oddawanie do sieci za 0.00 zł/kWh.
+3. **Syntetyczny Magazyn Rozładowanie:** Pokrycie poboru z wirtualnego banku za 0 zł/kWh.
+4. **Syntetyczna Sieć Pobór:** Wyłącznie pobór netto ponad stan magazynu, fakturowany pełną stawką brutto.
+
+Dzięki temu wskaźnik samowystarczalności budynku oraz koszty w Panelu Energia są w 100% zgodne z fizyką i fakturą OSD.
 
 ## Opcje integracji
 
-`Ustawienia → Urządzenia → Energa → Konfiguruj → Ustaw Ceny Energii`:
-* `prosumer_coefficient` `0.8` stara / `0.0` nowa (ustaw ręcznie
-  w Options — data aktywacji to data aplikacji, nie umowy),
-* `balance_baseline_import/export` = stan licznika na fakturze początkowej (0 = lifetime),
-* `bank_initial_kwh` / `bank_initial_pln` z faktur,
-* `bank_rce_price` np. `0.26288` + `rce_auto_fetch` (24h cache w coordinatorze, fallback manual).
-
-`Wykryj pierwszy odczyt` (`button.energa_*_wykryj_pierwszy_odczyt`) — hierarchicznie `today-730d` → `~14 req` `mchart` `0.7s`, nie `2020`.
+`Ustawienia → Urządzenia oraz usługi → Energa My Meter → Opcje`:
+* **Współczynnik prosumencki (`prosumer_coefficient`):** `0.8` (stare $\le 10$ kWp), `0.7` (stare $> 10$ kWp) lub `0.0` (nowe net-billing / konsument).
+* **Ceny taryfowe:** Stawki brutto za kWh dla strefy dziennej i nocnej (lub całodobowej).
+* **Automatyczne pobieranie RCEm (`rce_auto_fetch`):** Włączone domyślnie — integracja pobiera oficjalne średnie ważone RCEm z PSE OIRE z 2-godzinnym buforem w pamięci podręcznej.
+* **Encja falownika (`inverter_energy_entity`):** Encja produkcji PV do precyzyjnego godzinowego wyliczania autokonsumpcji i realnego zużycia domu.
 
 ## Weryfikacja z fakturami
 
@@ -146,13 +140,16 @@ Oba podmagazyny posiadają własną kolejkę FIFO z ważnością wkładów przez
   nie zwykłą średnią RCE. Reguła: przed 11. dniem miesiąca obowiązuje M-2, po 11. — M-1.
   Tabela: `pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej`.
 
-## Prognoza rachunku brutto (v0.2.14)
+## Prognoza rachunku brutto i Profil Godzinowy WAL (v1.6.9)
 
-`sensor.energa_<nr-licznika>_bill_forecast` (`Prognoza Rachunku`) liczy jak
-faktura: sprzedaż D/N + akcyza + handlowa + dystrybucja + VAT 23% −
-rozliczenie prosumenta (depozyt / pokrycie magazynem). Stan = prognozowana
-dopłata na koniec miesiąca, atrybuty = pełny rozkład MTD i prognozy.
-Stawki w `Options → Ceny` (`tariff_*`, domyślne G12W z faktur 2026).
+`sensor.energa_{serial}_prognoza_rachunku` (`Prognoza Rachunku Brutto`) liczy pełen rachunek odzwierciedlający strukturę faktury OSD:
+- Sprzedaż energii (czynna D/N) + akcyza + opłata handlowa.
+- Dystrybucja: stała sieciowa, abonamentowa, zmienna sieciowa D/N, jakościowa, OZE, kogeneracyjna.
+- Opłata mocowa: automatyczny dobór progu rocznego poboru URE 2026 (`capacity_for_annual_use`) z możliwością ręcznego nadpisania w Opcjach.
+- Rozliczenie prosumenta: depozyt wartościowy (net-billing) lub pokrycie z magazynu (net-metering).
+- VAT 23% naliczany ściśle wg reguł fakturowych.
+- **Predykcja profilem godzinowym WAL (`HourlyProfileForecaster`):** Po zebraniu co najmniej 7 dni historii w bazie Canonical Storage (`energa_canonical.db`), integracja dekomponuje profil dobowy z uwzględnieniem polskich dni roboczych, weekendów i świąt ustawowych (w tym ruchomych świąt wielkanocnych i Bożego Ciała), wyliczając dynamiczny trend zużycia.
+- **Bezblokadowy MainThread (v1.6.9):** Obliczenia profilu są wykonywane asynchronicznie w tle przez pulę wątków roboczych (`async_add_executor_job`), a wynik serwowany natychmiastowo z bufora RAM (< 0.0001s).
 
 ## Weryfikacja fakturowa (kotwice liczbowe)
 

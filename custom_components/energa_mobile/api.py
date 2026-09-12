@@ -509,6 +509,11 @@ class EnergaAPI:
             if await has_data_for_day(probe):
                 first_month = m
                 break
+            # Also check late month (e.g. day 28) in case meter was activated in second half of month
+            probe_late = datetime(first_year, m, 28, tzinfo=tz)
+            if probe_late <= today and await has_data_for_day(probe_late):
+                first_month = m
+                break
         if first_month is None:
             first_month = month_start
 

@@ -1,5 +1,87 @@
 # Changelog
 
+## v1.6.9 (2026-09-12) — Optymalizacja Asynchroniczna, Buforowanie RCE i Bezblokadowy MainThread
+
+### 🚀 Główne Ulepszenia i Optymalizacje Wydajności
+- **Przeniesienie obliczeń profilu godzinowego (`HourlyProfileForecaster`) do wątku roboczego (`async_add_executor_job`):**
+  - Wyeliminowano 3.7-sekundowe blokowanie głównej pętli zdarzeń Home Assistanta (`MainThread`).
+  - Prognozy WAL są teraz obliczane asynchronicznie w tle przez koordynatora i natychmiast serwowane z pamięci podręcznej RAM (`_profile_forecast_cache`) w czasie `< 0.0001s`.
+  - Całkowicie wyeliminowano ostrzeżenia HA: *"Updating sensor took longer than the scheduled update interval"* oraz *"Blocking call inside the event loop"*.
+- **Inteligentne buforowanie zapytań do PSE OIRE (RCE):**
+  - Wprowadzono 2-godzinny bufor zapytań do `api.raporty.pse.pl` z automatycznym odświeżaniem po godz. 14:00 (moment publikacji cen na dzień następny).
+  - Skrócono timeout sieciowy do 8s (w tym `connect: 4s`).
+  - Przejściowe błędy połączeń i DNS PSE zostały przeniesione do poziomu `DEBUG`, eliminując zaśmiecanie logów systemowych Home Assistant w trakcie przerw technicznych po stronie PSE.
+- **Buforowanie zamkniętych miesięcy historycznych w bazie Recorder:**
+  - Koordynator trzyma w pamięci RAM dane zamkniętych miesięcy z przeszłości, eliminując 13 powtarzalnych zapytań SQL do bazy SQLite w każdym 15-minutowym cyklu odpytywania.
+- **Warunkowe rejestrowanie encji autokonsumpcji:**
+  - 8 encji autokonsumpcji i bilansowania PV (`today_kwh`, `realne_zuzycie_domu_dzis`, `savings_mtd_pln`, etc.) jest rejestrowanych wyłącznie wtedy, gdy użytkownik skonfiguruje encję falownika (`CONF_INVERTER_ENERGY_ENTITY`) oraz licznik posiada status prosumencki (`is_export_prosumer`). Zapobiega to powstawaniu martwych encji `unknown`/`unavailable` na licznikach czysto konsumpcyjnych.
+- **Odporne wykrywanie daty początkowej dla aktywacji w drugiej połowie miesiąca (`api.py`):**
+  - W algorytmie `async_find_first_data_date` dodano sprawdzanie końca miesiąca (dzień 28), eliminując ryzyko pominięcia miesiąca instalacji w przypadku liczników uruchomionych po 15. dniu miesiąca.
+
+### 🧪 Testy Jednostkowe
+- 350 w pełni przechodzących testów jednostkowych (w czasie 0.23s).
+
+---
+
+## v1.6.8 (2026-09-12) — Normalizacja Slugów Encji (HA 2027.2 Ready) i Odporność na Puste Rejestry Eksportu
+
+### ⚡ Nowości i Usprawnienia (Features & Improvements)
+- **Rygorystyczna normalizacja slugów encji do małych liter (`s_slug`):**
+  - Usunięto ostrzeżenia Home Assistant dotyczące nieprawidłowych wielkich liter w `entity_id` (np. `sensor.energa_V705048953698419_...`).
+  - Wszystkie identyfikatory generowane przez przycisk autokonfiguracji Panelu Energia (`button.py`), generator kart Lovelace (`dashboard_generator.py`) oraz statystyki syntetycznego magazynu energii (`synthetic_storage.py`) stosują wymuszone małe litery, zachowując oryginalne oznaczenie seryjne w nazwach przyjaznych użytkownikowi.
+  - Pełna zgodność ze standardami Home Assistant przygotowująca integrację na wymogi wydania 2027.2.
+- **Zgodność z wytycznymi statystyk Home Assistant 2026.11:**
+  - W `async_import_statistics` dodano wymagane parametry `mean_type = StatisticMeanType.NONE` oraz `unit_class = "energy"` w `StatisticMetaData`, eliminując ostrzeżenia z logów systemowych.
+- **Odporność na brak danych eksportu u prosumentów (`total_minus: null`):**
+  - Obsłużono przypadek nowo przyłączonych instalacji PV oraz demonstracyjnych kont OSD (np. oficjalne konto demo Energa Operator `amiEOP@energa-operator.pl`), gdzie rejestry eksportowe zwracają wartość pustą. Encje eksportowe i dzienne produkcje inicjalizują się bezpiecznie z wartością `0.0 kWh` zamiast błędu `unavailable`.
+
+---
+
+## v1.6.7 (2026-09-12) — Oficjalny Standard Pulpitu 'Centrum Rozliczeń' (Layout Agrestowa 4)
+
+### 🎨 Nowy Wygląd i Ujednolicenie Pulpitu Lovelace (`/energa-rachunek`)
+- **Wdrożenie nowoczesnego, czytelnego layoutu Centrum Rozliczeń:**
+  - Przyjęto dopracowany, profesjonalny układ z instalacji Agrestowa 4 jako oficjalny standard integracji generowany automatycznie przy pierwszej instalacji oraz po kliknięciu przycisku `Wygeneruj Pulpit`.
+  - Spójna organizacja kart:
+    - *Nagłówek i status instalacji:* numer licznika, taryfa, typ rozliczeń (Net-metering vs Net-billing vs Konsument).
+    - *Bieżące koszty i prognozy:* kafelki dotychczasowego rachunku brutto i prognozy zamknięcia miesiąca z rozbiciem na energię czynną i opłaty dystrybucyjne.
+    - *Wirtualny magazyn / Depozyt prosumencki:* dedykowana sekcja w zależności od systemu rozliczeń (saldo kWh z podziałem L1/L2 lub depozyt wartościowy PLN z kursem RCEm).
+    - *Autokonsumpcja PV i BESS:* wykresy bilansowania godzinowego oraz spreadów arbitrażowych baterii.
+- **Wsparcie dla środowisk wielolicznikowych:**
+  - Automatyczne generowanie odrębnych sekcji dla każdego licznika przypisanego do konta w portalu Mój Licznik.
+
+---
+
+## v1.6.6 (2026-09-12) — Odporny Parser Tabelaryczny RCEm na HTMLParser (PSE OIRE)
+
+### 🐛 Poprawki Błędów i Odporność (Bug Fixes & Resilience)
+- **Zaawansowany parser HTML dla cen RCEm:**
+  - Zastąpiono uproszczony parser oparty na pojedynczym wyrażeniu regularnym dedykowaną implementacją bazującą na `html.parser.HTMLParser`.
+  - Rozwiązano problem gubienia rekordów tabeli na stronach PSE OIRE (wcześniej odczytywano jedynie ~10 z ~55 pozycji).
+  - Dodano pełne wsparcie dla korekt cenowych — parser poprawnie rozpoznaje etykiety `"skorygowana RCEm"` oraz `"RCEm korekta"`.
+  - Wyeliminowano błąd przesunięcia wierszy (gdzie cena z jednego miesiąca była omyłkowo przypisywana do nazwy miesiąca z nagłówka tabeli).
+
+---
+
+## v1.6.5 (2026-09-12) — Precyzyjna Klasyfikacja Net-billing vs Net-metering i Wsparcie G11 Net-billing
+
+### ⚡ Nowości i Poprawki (Features & Bug Fixes)
+- **Bezkompromisowa klasyfikacja profili prosumenckich:**
+  - Rozwiązano problem błędnego kwalifikowania prosumentów w taryfie jednotaryfowej G11 na nowych zasadach (Net-billing) jako starego Net-meteringu.
+  - Precyzyjne rozróżnienie: współczynnik `>= 0.7` aktywuje mechanizmy Net-meteringu (magazyn kWh w Panelu Energia), natomiast współczynnik `0.0` aktywuje depozyt wartościowy PLN (Net-billing z RCEm).
+  - Zweryfikowano zgodność formuł rozliczeniowych co do grosza na rzeczywistych fakturach OSD (m.in. instalacja Bursztynowa).
+
+---
+
+## v1.6.4 (2026-09-12) — Dyskretny 15-minutowy Interwał Odpytywania API
+
+### ⚡ Usprawnienia Wydajności (Performance Improvements)
+- **Dopasowanie interwału odpytywania API do cyklu OSD:**
+  - Zmieniono domyślny interwał koordynatora na 15 minut, harmonizując działanie integracji z cyklem publikacji danych przez Energa Operator.
+  - Zmniejszono narzut sieciowy i wyeliminowano ryzyko przekroczenia limitów zapytań (rate limiting) na serwerach Energa Mój Licznik.
+
+---
+
 ## v1.6.3 (2026-09-12) — Stabilne Wydanie Produkcyjne (Natywny Magazyn Wirtualny, Nowy Format Panelu Energia, Ochrona Bazy Danych)
 
 ### 🌟 Oficjalne Wydanie Stabilne (Production Release)
