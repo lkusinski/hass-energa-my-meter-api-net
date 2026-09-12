@@ -185,6 +185,63 @@ Jeśli wolisz skonfigurować Panel Energia ręcznie, przejdź do **Ustawienia** 
 
 ---
 
+## 🛠️ Zarządzanie Ustawieniami, Przełączanie Trybów i Czysta Reinstalacja (Clean Wipe)
+
+### 1. Zmiana Ustawień i Przełączanie Trybów w Locie (Bez Reinstalacji)
+Wszystkie parametry rozliczeniowe i konfiguracyjne możesz w każdej chwili zmieniać w interfejsie Home Assistant:
+👉 **Ustawienia** → **Urządzenia oraz usługi** → **Energa My Meter API PRO** → **Konfiguruj / Opcje**:
+
+* **Przełączanie Net-metering ↔ Net-billing ↔ Zwykły Odbiorca:**
+  W menu `Ceny energii i taryfy`:
+  * Zmień **Współczynnik prosumencki (`prosumer_coefficient`)**:
+    * `0.8` lub `0.7` → aktywuje **stary system (Net-metering)**: wirtualny magazyn energii w kWh, podział na strefy L1/L2, bilansowanie OZE, wirtualne baterie w Panelu Energia.
+    * `0.0` → natychmiast przestawia integrację na **nowy system (Net-billing)**: depozyt wartościowy w PLN, oficjalny rynkowy cennik RCEm z PSE, brak wirtualnej baterii w `/energy`, sprzedaż do sieci po stawce RCEm.
+* **Zmiana Modelu Prezentacji w Panelu Energia:**
+  W menu `Panel Energia i Wirtualny Magazyn`:
+  * Wybierz: *Wirtualny Magazyn Energii (Rekomendowany)* lub *Model Tradycyjny (Fizyczny licznik)*.
+  * Zmień grupę mocy mikroinstalacji ($\le 10$ kWp vs $> 10$ kWp).
+* **Aktualizacja Cenników i Falownika:**
+  * Wprowadzanie nowych stawek brutto za kWh dla strefy dziennej i nocnej (lub całodobowej w G11).
+  * Wybór innej encji falownika (`inverter_energy_entity`) do godzinowego wyliczania autokonsumpcji i realnego zużycia domu.
+  * Włączenie lub wyłączenie automatycznego pobierania cen RCE z PSE OIRE.
+* **Pobranie Historii:**
+  * W menu `Pobierz Historię` możesz ponownie zaimportować dane od dowolnego dnia z przeszłości (do 730 dni wstecz).
+
+> [!TIP]
+> Po kliknięciu **Zatwierdź** w formularzu opcji integracja **przeładowuje się automatycznie w ułamku sekundy** — nowe encje i przeliczenia pojawiają się natychmiast, bez konieczności restartu Home Assistanta!
+
+---
+
+### 2. Przywrócenie Ustawień Domyślnych (Reset do Fabrycznych)
+* **W działającej integracji:** W formularzu `Opcje → Ceny` wyczyść pola daty faktury (`settlement_date`) oraz baz wyjściowych (`balance_baseline_*`) i pozostaw domyślne stawki — integracja powróci do automatycznego trybu **Zero-Config FIFO z API Energi** (pobiera 12–14 miesięcy agregacji rocznych i sama wylicza saldo magazynu).
+* **Pełny reset:** Najszybszym sposobem na powrót do czystego stanu fabrycznego jest usunięcie integracji z Home Assistant i dodanie jej ponownie z poziomu kreatora.
+
+---
+
+### 3. Jak Usunąć Wszelkie Dane Archiwalne i Uporządkować Encje (Clean Wipe)
+Jeśli chcesz przeprowadzić **100% czystą reinstalację**, aby usunąć wszelkie dawne encje, wyzerować statystyki i rozpocząć pracę z integracją od zera:
+
+1. **Usunięcie integracji z Home Assistant:**
+   Przejdź do: **Ustawienia** → **Urządzenia oraz usługi** → **Energa My Meter API PRO** → kliknij menu (3 kropki) → **Usuń**.
+2. **Usunięcie bazy Canonical Storage integracji *(Kluczowy krok!)*:**
+   Integracja zapisuje lokalny bufor odczytów w dedykowanej bazie SQLite WAL. Aby wyczyścić te dane, w terminalu Home Assistant (dodatek *Terminal & SSH* lub konsola HA OS) wykonaj:
+   ```bash
+   rm -f /config/.storage/energa_canonical.db*
+   ```
+   *(Usunie to pliki `energa_canonical.db`, `energa_canonical.db-wal` oraz `energa_canonical.db-shm`)*.
+3. **Uporządkowanie osieroconych encji:**
+   Przejdź do: **Ustawienia** → **Urządzenia oraz usługi** → zakładka **Encje** → wpisz w filtrze `energa`. Zaznacz encje oznaczone statusem *"Przywrócona"* lub ikoną ostrzeżenia i kliknij na górze **Usuń wybrane**.
+4. **Wyczyszczenie statystyk w Panelu Energia *(Opcjonalnie)*:**
+   Jeśli w Panelu Energia widoczne były stare, błędne słupki: przejdź do **Narzędzia deweloperskie** → **Statystyki** → wyszukaj `energa` i kliknij **Napraw problem** lub wybierz usunięcie danych statystycznych.
+5. **Ponowna instalacja i 1-klik reinicjalizacja:**
+   * Zainstaluj integrację ponownie z poziomu kreatora (*Dodaj integrację*).
+   * Na karcie urządzenia licznika kliknij:
+     👉 **`Skonfiguruj Panel Energia`** (`button.energa_{serial}_skonfiguruj_panel_energia`).
+     Przycisk automatycznie zaprogramuje konfigurację Home Assistanta (`.storage/energy`), usuwając stare mapowania i przypisując aktualne, znormalizowane encje.
+   * W menu bocznym kliknij **Energa Rozliczenia** — świeży pulpit w standardzie *Centrum Rozliczeń* zostanie wygenerowany natychmiast!
+
+---
+
 ## 🎛️ Pulpity Rozliczeń i Karty Lovelace
 
 ### Automatyczny Dedykowany Pulpit
