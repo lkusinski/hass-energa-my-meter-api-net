@@ -306,6 +306,32 @@ async def async_synthesize_storage_from_recorder(
     except Exception:
         return False
 
+    metric_keys = (
+        [
+            "magazyn_l1_ladowanie",
+            "magazyn_l1_rozladowanie",
+            "magazyn_l2_ladowanie",
+            "magazyn_l2_rozladowanie",
+            "siec_oddanie_strefa_1",
+            "siec_oddanie_strefa_2",
+            "siec_pobor_strefa_1",
+            "siec_pobor_strefa_2",
+        ]
+        if has_zones
+        else [
+            "magazyn_ladowanie",
+            "magazyn_rozladowanie",
+            "siec_oddanie",
+            "siec_pobor",
+        ]
+    )
+    synth_eids = [
+        f"sensor.energa_{serial}_{'syntetyczny_' if k.startswith('magazyn') else 'syntetyczna_'}{k}"
+        for k in metric_keys
+    ]
+
+    # 1. Check existing synthetic statistics in the last 30 days to detect gaps
+    existing_check = None
     try:
         existing_check = await recorder.async_add_executor_job(
             functools.partial(
@@ -313,19 +339,39 @@ async def async_synthesize_storage_from_recorder(
                 hass,
                 check_start,
                 now,
-                [check_id],
-                "day",
+                synth_eids,
+                "hour",
                 None,
                 {"sum"},
             )
         )
-        if existing_check and existing_check.get(check_id):
-            _LOGGER.debug("Synthetic statistics already exist for meter %s, skipping", serial)
-            return False
     except Exception as check_err:
         _LOGGER.debug("Error checking existing synthetic statistics for %s: %s", serial, check_err)
 
-    history_start = now - timedelta(days=735)
+    latest_synth_ts: float | None = None
+    base_sums: dict[str, float] = {}
+
+    if existing_check:
+        for k, eid in zip(metric_keys, synth_eids):
+            rows = existing_check.get(eid)
+            if rows:
+                last_row = rows[-1]
+                st_ts = last_row.get("start")
+                if st_ts is not None:
+                    if latest_synth_ts is None or st_ts > latest_synth_ts:
+                        latest_synth_ts = st_ts
+                    base_sums[k] = float(last_row.get("sum") or 0.0)
+
+    if latest_synth_ts is not None:
+        history_start = datetime.fromtimestamp(latest_synth_ts, timezone.utc)
+        _LOGGER.debug(
+            "Incremental synthesis for %s: latest existing point is %s",
+            serial, history_start
+        )
+    else:
+        history_start = now - timedelta(days=735)
+        _LOGGER.debug("Full synthesis for %s: backfilling up to 735 days", serial)
+
     try:
         raw_stats = await recorder.async_add_executor_job(
             functools.partial(
@@ -350,6 +396,8 @@ async def async_synthesize_storage_from_recorder(
     for sid, rows in raw_stats.items():
         for r in rows:
             ts = r.get("start")
+            if latest_synth_ts is not None and ts <= latest_synth_ts:
+                continue
             st = float(r.get("state") or 0.0)
             rec = data_by_ts.setdefault(ts, {})
             if has_zones:
@@ -362,7 +410,8 @@ async def async_synthesize_storage_from_recorder(
                 elif sid == exp_id: rec["export"] = st
 
     if not data_by_ts:
-        return False
+        _LOGGER.debug("Synthetic statistics for %s are already up to date", serial)
+        return True
 
     hourly_records = []
     for ts in sorted(data_by_ts.keys()):
@@ -403,13 +452,25 @@ async def async_synthesize_storage_from_recorder(
     if not has_zones and init_b1 == 0.0 and init_b2 == 0.0:
         init_b1 = float(entry.options.get(CONF_BANK_INITIAL_KWH, 0.0) or 0.0)
 
+    if latest_synth_ts is not None and base_sums:
+        if has_zones:
+            cur_b1 = max(0.0, init_b1 + base_sums.get("magazyn_l1_ladowanie", 0.0) - base_sums.get("magazyn_l1_rozladowanie", 0.0))
+            cur_b2 = max(0.0, init_b2 + base_sums.get("magazyn_l2_ladowanie", 0.0) - base_sums.get("magazyn_l2_rozladowanie", 0.0))
+        else:
+            cur_b1 = max(0.0, init_b1 + base_sums.get("magazyn_ladowanie", 0.0) - base_sums.get("magazyn_rozladowanie", 0.0))
+            cur_b2 = 0.0
+    else:
+        cur_b1 = init_b1
+        cur_b2 = init_b2
+        base_sums = {}
+
     synth_res = calculate_synthetic_storage(
         hourly_records=hourly_records,
         coeff=coeff,
         has_zones=has_zones,
-        initial_bank_1=init_b1,
-        initial_bank_2=init_b2,
-        base_sums={},
+        initial_bank_1=cur_b1,
+        initial_bank_2=cur_b2,
+        base_sums=base_sums,
     )
 
     names = {
@@ -427,27 +488,45 @@ async def async_synthesize_storage_from_recorder(
         "siec_pobor": "Syntetyczna Sieć Pobór",
     }
 
+    adapter = None
+    if isinstance(getattr(hass, "data", None), dict):
+        adapter = (
+            hass.data.get("energa_mobile", {})
+            .get(entry.entry_id, {})
+            .get("recorder_adapter")
+        )
+
     for k, pts in synth_res.get("series", {}).items():
         prefix = "syntetyczny_" if k.startswith("magazyn") else "syntetyczna_"
         s_eid = f"sensor.energa_{serial}_{prefix}{k}"
-        meta_kwargs = {
-            "has_mean": False,
-            "has_sum": True,
-            "name": names.get(k, s_eid),
-            "source": "recorder",
-            "statistic_id": s_eid,
-            "unit_of_measurement": "kWh",
-            "unit_class": "energy",
-        }
-        if StatisticMeanType is not None and hasattr(StatisticMeanType, "NONE"):
-            meta_kwargs["mean_type"] = StatisticMeanType.NONE
-        meta = StatisticMetaData(**meta_kwargs)
         stats = [{"start": p["dt"], "state": p["state"], "sum": p["sum"]} for p in pts]
-        async_import_statistics(hass, meta, stats)
+        if adapter:
+            adapter.import_energy_statistics(
+                statistic_id=s_eid,
+                statistics=stats,
+                name=names.get(k, s_eid),
+                unit="kWh",
+                last_known_sum=base_sums.get(k),
+            )
+        else:
+            meta_kwargs = {
+                "has_mean": False,
+                "has_sum": True,
+                "name": names.get(k, s_eid),
+                "source": "recorder",
+                "statistic_id": s_eid,
+                "unit_of_measurement": "kWh",
+                "unit_class": "energy",
+            }
+            if StatisticMeanType is not None and hasattr(StatisticMeanType, "NONE"):
+                meta_kwargs["mean_type"] = StatisticMeanType.NONE
+            meta = StatisticMetaData(**meta_kwargs)
+            async_import_statistics(hass, meta, stats)
 
     _LOGGER.info(
-        "Successfully synthesized %d hourly records of virtual storage for meter %s from recorder",
+        "Successfully synthesized %d hourly records of virtual storage for meter %s from recorder (incremental=%s)",
         len(hourly_records),
         serial,
+        latest_synth_ts is not None,
     )
     return True
