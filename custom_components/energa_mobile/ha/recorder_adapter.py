@@ -83,7 +83,7 @@ def validate_and_clean_statistics(
         if provided_sum is not None:
             cand_sum = float(provided_sum)
             if cand_sum < running_sum:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Monotonic clamp: sum dropped from %.3f to %.3f at %s",
                     running_sum,
                     cand_sum,

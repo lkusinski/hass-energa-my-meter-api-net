@@ -11,6 +11,7 @@ from custom_components.energa_mobile.dashboard_generator import (
     async_provision_dashboard,
     build_energa_dashboard,
     build_meter_view,
+    resolve_entity,
 )
 
 
@@ -261,4 +262,41 @@ def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
     # 4. Dynamic RCE & Arbitrage card
     rce_card = view["cards"][-1]
     assert "Ceny Dynamiczne RCE" in rce_card["title"]
+
+
+def test_resolve_entity():
+    # When hass is None, returns primary
+    assert resolve_entity(None, "sensor.energa_123_test", ["sensor.licznik_123_test"]) == "sensor.energa_123_test"
+
+    # When hass is present with states
+    mock_hass = MagicMock()
+    mock_hass.states.get.side_effect = lambda eid: MagicMock() if eid == "sensor.licznik_123_test" else None
+
+    resolved = resolve_entity(mock_hass, "sensor.energa_123_test", ["sensor.licznik_123_test"])
+    assert resolved == "sensor.licznik_123_test"
+
+
+def test_meter_view_dynamic_resolution_with_hass(mock_meter_net_billing):
+    mock_hass = MagicMock()
+    # Simulate legacy or Licznik naming present in hass.states
+    def _mock_states_get(eid):
+        if "licznik_11685328" in eid:
+            return MagicMock()
+        return None
+
+    mock_hass.states.get.side_effect = _mock_states_get
+
+    view = build_meter_view(mock_meter_net_billing, coeff=0.0, hass=mock_hass)
+    badge_entities = [b["entity"] for b in view["badges"]]
+    assert "sensor.licznik_11685328_bank_wirtualny_pln" in badge_entities
+    assert "sensor.licznik_11685328_dotychczasowy_rachunek" in badge_entities
+
+
+def test_autoconsumption_not_added_without_inverter_or_state(mock_meter_net_billing):
+    # Pure net billing without inverter entity
+    view = build_meter_view(mock_meter_net_billing, coeff=0.0, hass=None)
+    tariff_card = next(c for c in view["cards"] if "Taryfa" in c.get("title", ""))
+    tariff_entities = [e["entity"] for e in tariff_card["entities"]]
+    assert not any("autokonsumpcja" in e for e in tariff_entities)
+
 

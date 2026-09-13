@@ -474,11 +474,12 @@ async def _maybe_auto_backfill(
                     CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
                 )
             )
-            await _prov_fn(hass, meters, coeff=coeff)
+            await _prov_fn(hass, active, coeff=coeff)
             persistent_notification.async_create(
                 hass,
-                f"Pulpit Energa został utworzony w menu bocznym: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})\n\n"
-                "Pobieranie historii z ostatnich 2 lat wystartowało w tle. Dane wypełnią się automatycznie.",
+                f"Dedykowany pulpit Energa został utworzony w menu bocznym: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})\n\n"
+                "Historia zużycia pobiera się w tle do statystyk długoterminowych. "
+                "Twój główny pulpit i wbudowany Panel Energia pozostają nienaruszone.",
                 title="Energa: Gotowe!",
                 notification_id="energa_dashboard_ready",
             )
@@ -532,10 +533,11 @@ async def _maybe_auto_backfill(
         days = max(1, min(days, AUTO_HISTORY_DAYS + 1))
         persistent_notification.async_create(
             hass,
-            "Pobieranie historii z ostatnich 2 lat wystartowało w tle "
-            f"({len(active)} liczników). Panel Energia wypełni się sam — "
-            "to potrwa kilkanaście minut.",
-            title="Energa: Pobieranie danych",
+            "Pobieranie historii zużycia z ostatnich 2 lat wystartowało w tle "
+            f"({len(active)} liczników) do bazy statystyk długoterminowych. "
+            "Integracja nie modyfikuje Twoich pulpitów ani wbudowanego Panelu Energia — "
+            "statystyki będą dostępne do wyboru w konfiguracji energii oraz na nowym pulpicie Energa.",
+            title="Energa: Pobieranie historii",
             notification_id="energa_auto_backfill",
         )
         _LOGGER.info(
