@@ -90,15 +90,17 @@ Wszystkie encje powiązane z danym licznikiem posiadają znormalizowany prefiks 
 +-----------------------------------------------------------------------------------+
 |  [ BADGES: Dotychczas brutto | Prognoza brutto | Magazyn/Depozyt | Wycena oddania ] |
 +-----------------------------------------------------------------------------------+
-|  🏡 Karta Nagłówkowa (Markdown: Nazwa punktu | Taryfa | System | Numer licznika)     |
+|  🏡 Karta Nagłówkowa (Markdown H3: Nazwa punktu • Taryfa • System • Licznik)      |
 +-----------------------------------------------------------------------------------+
-|  ⚡ KARTA 1: Rozliczenie Finansowe Energa (Odtworzenie bieżącej faktury VAT)       |
+|  ⚡ KARTA 1: Rozliczenie Finansowe (Odtworzenie bieżącej faktury VAT)              |
 +-----------------------------------------------------------------------------------+
 |  🔋 KARTA 2: Wirtualny Magazyn Energii (Konto depozytu PLN lub Magazyn FIFO kWh)  |
 +-----------------------------------------------------------------------------------+
 |  ⚡ KARTA 3: Taryfa i Wolumeny Energii (Pobory, Oddania, Ceny kWh, Autokonsumpcja) |
 +-----------------------------------------------------------------------------------+
-|  🔢 KARTA 4: Rejestry Licznika Fizycznego OSD (1.8.0, 2.8.0, dobowe przyrosty)   |
+|  🔢 KARTA 4: Rejestry Licznika (OSD) (1.8.0, 2.8.0, dobowe przyrosty)             |
++-----------------------------------------------------------------------------------+
+|  ⚡ KARTA 5: Ceny Dynamiczne RCE i Arbitraż (PSE) (dla net-billingu / taryf RCE)  |
 +-----------------------------------------------------------------------------------+
 ```
 
@@ -200,12 +202,26 @@ Zapewnia pełną przejrzystość rozliczeń wyprodukowanej energii słonecznej.
 
 ---
 
-### E. Karta 4: 🔢 Rejestry Licznika Fizycznego OSD
+### E. Karta 4: 🔢 Rejestry Licznika (OSD)
 
 * **`sensor.energa_{serial}_stan_licznika_import`:** Wskazanie całkowite licznika poboru (rejestr OBIS **1.8.0**).
 * **`sensor.energa_{serial}_stan_licznika_export`:** Wskazanie całkowite licznika oddania (rejestr OBIS **2.8.0**).
 * **`sensor.energa_{serial}_zuzycie_dzis` / `_produkcja_dzis`:** Przyrost dobowy z ostatniej zamkniętej doby z portalu Mój Licznik.
 * **`sensor.energa_{serial}_ppe`:** Unikalny numer logicznego Punktu Poboru Energii (PPE).
+
+---
+
+### F. Karta 5: ⚡ Ceny Dynamiczne RCE i Arbitraż (PSE)
+
+Generowana automatycznie dla liczników prosumenckich w systemie net-billing (np. Agrestowa 4).
+
+* **`sensor.energa_{serial}_rcem_auto`:** Miesięczna rynkowa cena referencyjna energii elektrycznej publikowana przez PSE.
+* **`sensor.energa_{serial}_cena_oddania`:** Stawka zasilenia depozytu brutto ($\text{RCEm} \times 1{,}23$).
+* **`sensor.licznik_{serial}_dynamiczna_cena_energii_rce`:** Bieżąca cena energii 15-minutowa z rynku bilansującego PSE.
+* **`sensor.licznik_{serial}_spread_arbitrazowy_bess_rce`:** Wyliczony przez ArbitrageEngine spread cenowy brutto uwzględniający sprawność magazynu bateryjnego.
+* **`binary_sensor.licznik_{serial}_okno_ladowania_bess_arbitraz_rce`:** Stan `on`, gdy trwa wyznaczone najtańsze okno ładowania baterii / EV.
+* **`binary_sensor.licznik_{serial}_okno_rozladowania_bess_szczyt_rce`:** Stan `on`, gdy trwa okno najwyższych cen popołudniowego szczytu.
+* **`binary_sensor.licznik_{serial}_cena_ujemna_rce_zagrozenie_eksportu`:** Krytyczny alert `problem`: cena RCE < 0 zł (zagrożenie stratami z niekontrolowanego eksportu PV). Szczegółowe instrukcje automatyzacji w [`docs/AUTOMATIONS.md`](AUTOMATIONS.md).
 
 ---
 
@@ -262,3 +278,22 @@ Jeśli przypadkowo zmodyfikujesz lub usuniesz karty na pulpicie, możesz go przy
 Wszystkie stawki bazowe (cena T1/T2, opłaty sieciowe, opłata handlowa) można zaktualizować w:
 **Ustawienia** → **Urządzenia oraz usługi** → **Energa My Meter PRO** → **Konfiguruj** → **Ceny energii i taryfy**.
 Zmiany są aplikowane natychmiast bez konieczności restartu Home Assistanta.
+
+---
+
+## 💡 8. Wnioski Wdrożeniowe i Dobre Praktyki (Lessons Learned)
+
+W oparciu o weryfikację na 5 zróżnicowanych środowiskach produkcyjnych i laboratoryjnych (konsumenci G11, prosumenci G12 net-metering, prosumenci G12w net-billing z cenami RCE PSE oraz środowiska demo OSD), wypracowano następujące zasady projektowe:
+
+### A. Dedykowany pulpit boczny (`/energa-rachunek`) vs Domyślny `lovelace`
+* **Niezależność od widoku domowego:** Pulpit rozliczeniowy został zarejestrowany jako niezależny element w menu bocznym (`lovelace_dashboards`), zamiast nadpisywać domyślny pulpit `Overview` (`lovelace`). 
+* **Zaleta:** Użytkownicy i domownicy zachowują swoje prywatne karty, widoki pokoi i automatyzacje na głównym pulpicie, a analityka energetyczna i faktury są dostępne natychmiast jednym kliknięciem z paska bocznego.
+
+### B. Segmentacja profili zamiast „jednego pulpitu dla wszystkich”
+* **Taryfa G11 (Konsument):** Wyświetlanie stref T1/T2, autokonsumpcji czy wirtualnych magazynów jest zbędnym szumem informacyjnym. Karta skupia się wyłącznie na: bieżącym koszcie MTD, predykcji rachunku na koniec miesiąca i dobowym profilu zużycia.
+* **Taryfa G12 / G12w (Prosument Net-metering 0.8/0.7):** Kluczowy jest bilans energii, wirtualny magazyn FIFO w kWh z izolacją stref L1/L2, autokonsumpcja oraz integracja z fizycznym falownikiem PV (np. Solis, Huawei, Fronius).
+* **Net-billing i Ceny Dynamiczne RCE:** Sercem widoku staje się depozyt wartościowy w PLN, rynkowa cena energii RCEm publikowana przez PSE oraz korelacja produkcji z godzinami najdroższej/najtańszej energii.
+
+### C. Standardy typografii i ergonomii kart Lovelace
+* **Kafle (`tile`) z precyzyjnymi nagłówkami Markdown H3 (`###`):** Zamiast surowych list encji (`entities card`) zastosowano nowoczesne karty `tile` z ikonami `mdi:*` i funkcjami `features`.
+* **Eliminacja duplikatów nagłówków:** Wprowadzono zasadę czystych nagłówków Markdown `### ⚡ Tytuł` z usunięciem domyślnego parametru `title:` w kartach, co eliminuje dublowanie napisów w interfejsie.

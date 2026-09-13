@@ -248,7 +248,16 @@ Jeśli chcesz przeprowadzić **100% czystą reinstalację**, aby usunąć wszelk
 Pulpit `/energa-rachunek` jest generowany i rejestrowany automatycznie w menu bocznym HA. Jeśli zechcesz wygenerować go ponownie, wystarczy kliknąć encję:
 `button.energa_<numer_licznika>_utworz_pulpit_rozliczen` lub wywołać akcję `energa_mobile.generate_dashboard`.
 
-👉 **Pełna dokumentacja pulpitu, encyklopedia encji i opis wzorów matematycznych:** zobacz [docs/DASHBOARD.md](docs/DASHBOARD.md).
+---
+
+## 📚 Dokumentacja i Przewodniki Techniczne
+
+Szczegółowe opracowania poszczególnych modułów systemu:
+
+* 📊 **[Pulpit Lovelace i Dobre Praktyki (docs/DASHBOARD.md)](docs/DASHBOARD.md):** Architektura dashboardu, opis polimorfizmu dla profili G11, G12 i Net-billing, eliminacja duplikatów i wzory matematyczne.
+* ⚡ **[Automatyzacje i Blueprints (docs/AUTOMATIONS.md)](docs/AUTOMATIONS.md):** Gotowe automatyzacje pod ceny dynamiczne PSE, ujemne ceny RCE, ładowanie magazynów BESS i autokonsumpcję.
+* 🛡️ **[Stabilność, Restarty HA i Integracje Chmurowe (docs/STABILITY_AND_INTEGRATIONS.md)](docs/STABILITY_AND_INTEGRATIONS.md):** Analiza stabilności, zjawisko przeciążenia chmur zewnętrznych (np. SolisCloud) podczas restartów HA oraz rekomendacje local-first (Modbus).
+* 🗺️ **[Mapa Rozwoju i Katalog Propozycji (docs/ROADMAP.md)](docs/ROADMAP.md):** Planowane funkcje (wykresy ApexCharts, sensory binarne, szablony Blueprints) oraz zaproszenie do zgłaszania Issues na GitHubie.
 
 ---
 

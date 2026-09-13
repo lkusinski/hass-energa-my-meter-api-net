@@ -22,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_URL_PATH = "energa-rachunek"
 DEFAULT_TITLE = "Energa Rozliczenia"
-DEFAULT_ICON = "mdi:currency-pln"
+DEFAULT_ICON = "mdi:lightning-bolt-circle"
 
 
 def is_export_prosumer(meter: dict[str, Any]) -> bool:
@@ -44,15 +44,30 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         tariff = tariff_raw.upper()
     has_zones = meter.get("zone_count", 1) > 1
     is_prosumer = is_export_prosumer(meter)
-    is_net_billing = is_prosumer and coeff < 0.7
+    effective_coeff = float(meter.get("prosumer_coefficient")) if meter.get("prosumer_coefficient") is not None else coeff
+    is_net_billing = is_prosumer and effective_coeff < 0.7
     is_net_metering = is_prosumer and not is_net_billing
 
-    label = (
+    raw_label = (
         str(meter.get("customer_label", "")).strip()
         or str(meter.get("address", "")).strip()
         or str(meter.get("custom_title", "")).strip()
         or f"Licznik {serial}"
     )
+
+    if meter.get("customer_label"):
+        short_name = str(meter["customer_label"]).strip()
+        location_sub = ""
+    elif meter.get("custom_title"):
+        short_name = str(meter["custom_title"]).strip()
+        location_sub = ""
+    elif "," in raw_label:
+        parts = [p.strip() for p in raw_label.split(",")]
+        short_name = parts[-1] if len(parts) >= 2 else raw_label
+        location_sub = parts[0] if len(parts) >= 2 else ""
+    else:
+        short_name = raw_label
+        location_sub = ""
 
     if meter.get("customer_label"):
         title = str(meter["customer_label"]).strip()
@@ -68,7 +83,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         title = f"{tariff} — Profil Konsumencki"
 
     if is_net_metering:
-        system_desc = f"Net-metering (Opust {coeff} — Magazyn kWh)"
+        system_desc = f"Net-metering (Opust {effective_coeff} — Magazyn kWh)"
     elif is_net_billing:
         system_desc = "Net-billing (Depozyt Prosumencki PLN)"
     elif is_prosumer:
@@ -134,15 +149,19 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
 
     cards: list[dict[str, Any]] = []
 
-    # 2. Card: Header Card (Markdown, Agrestowa 4 style)
+    # 2. Card: Header Card (Markdown, clean, non-duplicated)
+    meta_parts = []
+    if location_sub:
+        meta_parts.append(location_sub)
+    meta_parts.append(f"**Taryfa:** {tariff}")
+    meta_parts.append(f"**System:** {system_desc}")
+    meta_parts.append(f"**Licznik:** `{serial}`")
+    meta_line = " &nbsp;•&nbsp; ".join(meta_parts)
+
     cards.append(
         {
             "type": "markdown",
-            "title": f"🏡 {label} — Centrum Rozliczeń",
-            "content": (
-                f"## 🏡 {label} — Centrum Rozliczeń\n"
-                f"**Taryfa:** {tariff} | **System:** {system_desc} | **Licznik:** `{serial}`"
-            ),
+            "content": f"### 🏡 {short_name}\n{meta_line}",
         }
     )
 
@@ -172,7 +191,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     cards.append(
         {
             "type": "entities",
-            "title": f"⚡ Rozliczenie Finansowe Energa ({label})",
+            "title": "⚡ Rozliczenie Finansowe",
             "icon": "mdi:receipt-text-outline",
             "entities": bill_entities,
         }
@@ -268,7 +287,7 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     cards.append(
         {
             "type": "entities",
-            "title": f"⚡ Taryfa {tariff} — Koszt i Wolumeny Energii",
+            "title": f"⚡ Taryfa {tariff} — Wolumeny i Koszty",
             "icon": "mdi:transmission-tower",
             "entities": tariff_entities,
         }
@@ -295,11 +314,30 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     cards.append(
         {
             "type": "entities",
-            "title": "🔢 Rejestry Licznika Fizycznego (OSD)",
+            "title": "🔢 Rejestry Licznika (OSD)",
             "icon": "mdi:counter",
             "entities": meter_entities,
         }
     )
+
+    # 7. Card: Dynamic PSE RCE & Arbitrage (for net-billing or prosumers)
+    if is_net_billing:
+        cards.append(
+            {
+                "type": "entities",
+                "title": "⚡ Ceny Dynamiczne RCE i Arbitraż (PSE)",
+                "icon": "mdi:chart-timeline-variant",
+                "entities": [
+                    {"entity": f"sensor.energa_{s_slug}_rcem_auto", "name": "Miesięczna cena referencyjna RCEm"},
+                    {"entity": f"sensor.energa_{s_slug}_cena_oddania", "name": "Wycena zasilenia depozytu brutto"},
+                    {"entity": f"sensor.licznik_{s_slug}_dynamiczna_cena_energii_rce", "name": "Bieżąca cena RCE (15-min)"},
+                    {"entity": f"sensor.licznik_{s_slug}_spread_arbitrazowy_bess_rce", "name": "Spread arbitrażowy brutto"},
+                    {"entity": f"binary_sensor.licznik_{s_slug}_okno_ladowania_bess_arbitraz_rce", "name": "Okno taniego ładowania (BESS/EV)"},
+                    {"entity": f"binary_sensor.licznik_{s_slug}_okno_rozladowania_bess_szczyt_rce", "name": "Okno szczytu rozładowania"},
+                    {"entity": f"binary_sensor.licznik_{s_slug}_cena_ujemna_rce_zagrozenie_eksportu", "name": "Ostrzeżenie: ujemna cena RCE"},
+                ],
+            }
+        )
 
     return {
         "title": title,
@@ -372,6 +410,26 @@ async def async_provision_dashboard(
             dash_data["items"] = items
             await store_dashboards.async_save(dash_data)
             _LOGGER.info("Registered new dashboard %s in lovelace_dashboards", clean_url)
+        else:
+            updated = False
+            if existing_item.get("icon") != icon:
+                existing_item["icon"] = icon
+                updated = True
+            if existing_item.get("title") != title:
+                existing_item["title"] = title
+                updated = True
+            if not existing_item.get("show_in_sidebar"):
+                existing_item["show_in_sidebar"] = True
+                updated = True
+            if updated:
+                dash_data["items"] = items
+                await store_dashboards.async_save(dash_data)
+                _LOGGER.info(
+                    "Updated existing dashboard %s (icon=%s, title=%s) in lovelace_dashboards",
+                    clean_url,
+                    icon,
+                    title,
+                )
 
         # 2. Save dashboard views to .storage/lovelace.<url_path>
         store_view = storage.Store(hass, 1, f"lovelace.{storage_key_suffix}")
@@ -465,6 +523,9 @@ async def async_provision_dashboard(
                 )
 
             dash_obj = lovelace_data.dashboards[clean_url]
+            if hasattr(dash_obj, "config") and isinstance(dash_obj.config, dict):
+                dash_obj.config["icon"] = icon
+                dash_obj.config["title"] = title
             await dash_obj.async_save(ui_config)
             _LOGGER.info("Notified live Lovelace session for %s", clean_url)
 

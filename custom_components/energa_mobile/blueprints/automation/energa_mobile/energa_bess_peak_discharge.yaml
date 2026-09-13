@@ -1,0 +1,83 @@
+blueprint:
+  name: "Energa: Rozładowanie magazynu BESS w szczycie cenowym RCE"
+  description: >
+    Automatycznie optymalizuje pracę magazynu energii w godzinach najwyższych cen energii RCE
+    (szczyt popołudniowo-wieczorny na rynku bilansującym PSE).
+  domain: automation
+  input:
+    discharge_window_sensor:
+      name: Sensor okna rozładowania BESS
+      description: Encja binarna okna szczytu rozładowania z integracji Energa.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+    notify_device:
+      name: Urządzenie do powiadomień (opcjonalne)
+      description: Smartfon do wysyłania powiadomienia.
+      default: ""
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+    actions_discharge_start:
+      name: Akcje rozpoczęcia szczytu (Rozładowanie)
+      description: Zezwól na maksymalne rozładowanie BESS / zasilanie domu z baterii / eksport do sieci.
+      default: []
+      selector:
+        action: {}
+    actions_discharge_stop:
+      name: Akcje zakończenia szczytu
+      description: Przywróć tryb domyślny falownika po zakończeniu godzin szczytowych.
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input discharge_window_sensor
+    to: "on"
+    id: "discharge_start"
+  - platform: state
+    entity_id: !input discharge_window_sensor
+    to: "off"
+    id: "discharge_stop"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "discharge_start"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "⚡ Energa: Szczyt Cenowy RCE (Okno Rozładowania)"
+                message: >
+                  Rozpoczął się szczyt cenowy PSE.
+                  Średnia cena w szczycie: {{ state_attr(trigger.entity_id, 'avg_discharge_price_pln_kwh') }} PLN/kWh.
+          - choose: []
+            default: !input actions_discharge_start
+
+      - conditions:
+          - condition: trigger
+            id: "discharge_stop"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "⚡ Energa: Koniec Szczytu Cenowego RCE"
+                message: "Godziny szczytowych cen RCE dobiegły końca."
+          - choose: []
+            default: !input actions_discharge_stop

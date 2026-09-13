@@ -1,0 +1,83 @@
+blueprint:
+  name: "Energa: Inteligentne ładowanie magazynu BESS / auta EV (Tani prąd RCE)"
+  description: >
+    Automatycznie uruchamia ładowanie domowego magazynu energii lub samochodu elektrycznego
+    w optymalnym oknie najniższych cen RCE PSE (wyliczonym przez wbudowany ArbitrageEngine).
+  domain: automation
+  input:
+    charge_window_sensor:
+      name: Sensor okna ładowania BESS
+      description: Encja binarna okna ładowania arbitrażowego z integracji Energa.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+    notify_device:
+      name: Urządzenie do powiadomień (opcjonalne)
+      description: Smartfon do wysyłania powiadomienia o rozpoczęciu/zakończeniu okna taniego ładowania.
+      default: ""
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+    actions_charge_start:
+      name: Akcje rozpoczęcia ładowania
+      description: Rozpocznij ładowanie BESS z sieci, ustaw prąd ładowarki EV lub włącz dedykowane gniazdo.
+      default: []
+      selector:
+        action: {}
+    actions_charge_stop:
+      name: Akcje zakończenia ładowania
+      description: Zakończ ładowanie z sieci / przywróć standardowy harmonogram.
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input charge_window_sensor
+    to: "on"
+    id: "charge_start"
+  - platform: state
+    entity_id: !input charge_window_sensor
+    to: "off"
+    id: "charge_stop"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "charge_start"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "🔋 Energa: Rozpoczęcie Okna Taniego Ładowania"
+                message: >
+                  Rozpoczęło się optymalne okno arbitrażu cenowego RCE.
+                  Średnia cena w oknie: {{ state_attr(trigger.entity_id, 'avg_charge_price_pln_kwh') }} PLN/kWh.
+          - choose: []
+            default: !input actions_charge_start
+
+      - conditions:
+          - condition: trigger
+            id: "charge_stop"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "🔋 Energa: Koniec Okna Taniego Ładowania"
+                message: "Okno niskich cen energii dobiegło końca. Przywrócono tryb standardowy."
+          - choose: []
+            default: !input actions_charge_stop

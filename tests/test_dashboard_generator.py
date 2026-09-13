@@ -72,14 +72,14 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
     assert "sensor.energa_10000002_prognoza_rachunku" in badge_entities
 
     # Cards
-    card_titles = [c["title"] for c in view["cards"]]
+    card_titles = [c["title"] for c in view["cards"] if "title" in c]
     assert any("Net-Metering" in t for t in card_titles)
     assert any("Rozliczenie Finansowe" in t for t in card_titles)
     assert any("Taryfa G12w" in t for t in card_titles)
-    assert any("Rejestry Licznika Fizycznego" in t for t in card_titles)
+    assert any("Rejestry Licznika" in t for t in card_titles)
 
     # Specific entities in storage card
-    storage_card = next(c for c in view["cards"] if "Net-Metering" in c["title"])
+    storage_card = next(c for c in view["cards"] if "Net-Metering" in c.get("title", ""))
     storage_entities = [e["entity"] for e in storage_card["entities"]]
     assert "sensor.energa_10000002_bank_wirtualny_l1_dzien_kwh" in storage_entities
     assert "sensor.energa_10000002_bank_wirtualny_l2_noc_kwh" in storage_entities
@@ -89,7 +89,7 @@ def test_build_meter_view_net_metering(mock_meter_net_metering):
     assert not any("bank_rozladowanie" in e for e in storage_entities)
 
     # Card 4: Dedicated MTD volume sensors (no panel_energia_* entities)
-    tariff_card = next(c for c in view["cards"] if "Taryfa G12w" in c["title"])
+    tariff_card = next(c for c in view["cards"] if "Taryfa G12w" in c.get("title", ""))
     tariff_entities = [e["entity"] for e in tariff_card["entities"]]
     assert "sensor.energa_10000002_pobor_energii_strefa_1_mtd" in tariff_entities
     assert "sensor.energa_10000002_pobor_energii_strefa_2_mtd" in tariff_entities
@@ -108,10 +108,10 @@ def test_build_meter_view_net_billing(mock_meter_net_billing):
     assert "sensor.energa_10000001_bank_wirtualny_pln" in badge_entities
     assert "sensor.energa_10000001_cena_oddania" in badge_entities
 
-    card_titles = [c["title"] for c in view["cards"]]
+    card_titles = [c["title"] for c in view["cards"] if "title" in c]
     assert any("Depozyt Prosumencki" in t for t in card_titles)
 
-    storage_card = next(c for c in view["cards"] if "Depozyt Prosumencki" in c["title"])
+    storage_card = next(c for c in view["cards"] if "Depozyt Prosumencki" in c.get("title", ""))
     storage_entities = [e["entity"] for e in storage_card["entities"]]
     assert "sensor.energa_10000001_odzyskano_z_depozytu_mtd" in storage_entities
     assert "sensor.energa_10000001_rcem_auto" in storage_entities
@@ -125,11 +125,11 @@ def test_build_meter_view_pure_consumer(mock_meter_pure_consumer):
     badge_entities = [b["entity"] for b in view["badges"]]
     assert "sensor.energa_10000004_taryfa" in badge_entities
 
-    card_titles = [c["title"] for c in view["cards"]]
+    card_titles = [c["title"] for c in view["cards"] if "title" in c]
     # Should NOT have prosumer storage card
     assert not any("Wirtualny Magazyn" in t for t in card_titles)
     assert any("Rozliczenie Finansowe" in t for t in card_titles)
-    tariff_card = next(c for c in view["cards"] if "Taryfa G11" in c["title"])
+    tariff_card = next(c for c in view["cards"] if "Taryfa G11" in c.get("title", ""))
     tariff_entities = [e["entity"] for e in tariff_card["entities"]]
     assert "sensor.energa_10000004_pobor_energii_mtd" in tariff_entities
     assert not any("panel_energia" in e for e in tariff_entities)
@@ -201,7 +201,7 @@ async def test_button_async_press(mock_meter_net_metering):
             [mock_meter_net_metering],
             url_path=DEFAULT_URL_PATH,
             title=DEFAULT_TITLE,
-            icon="mdi:currency-pln",
+            icon="mdi:lightning-bolt-circle",
             coeff=0.8,
         )
 
@@ -239,11 +239,11 @@ def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
     mock_meter_net_billing["customer_label"] = "Agrestowa 4"
     view = build_meter_view(mock_meter_net_billing, coeff=0.0)
 
-    # 1. Header card
+    # 1. Header card (no duplicate title, clean H3 markdown)
     header_card = view["cards"][0]
     assert header_card["type"] == "markdown"
-    assert "Agrestowa 4" in header_card["title"]
-    assert "Centrum Rozliczeń" in header_card["title"]
+    assert "title" not in header_card
+    assert "Agrestowa 4" in header_card["content"]
     assert "Net-billing" in header_card["content"]
     assert "10000001" in header_card["content"]
 
@@ -253,7 +253,11 @@ def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
     assert "Prognoza brutto" in badge_names
     assert "Magazyn/Depozyt" in badge_names
 
-    # 3. Financial card title
+    # 3. Financial card title (clean, non-duplicated)
     financial_card = view["cards"][1]
-    assert "Rozliczenie Finansowe Energa (Agrestowa 4)" in financial_card["title"]
+    assert financial_card["title"] == "⚡ Rozliczenie Finansowe"
+
+    # 4. Dynamic RCE & Arbitrage card
+    rce_card = view["cards"][-1]
+    assert "Ceny Dynamiczne RCE" in rce_card["title"]
 
