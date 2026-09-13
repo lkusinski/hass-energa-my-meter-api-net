@@ -1,19 +1,20 @@
 """Tests for canonical entity names, has_entity_name=True, device_info, and EntityRegistry migration."""
 
 from unittest.mock import MagicMock
+
 import pytest
 
 from custom_components.energa_mobile.sensor import (
-    EnergaProsumerBalanceSensor,
-    EnergaBankKwhSensor,
-    EnergaBankPlnSensor,
-    EnergaBankLevelSensor,
     EnergaBankFlowSensor,
-    EnergaFirstDataDateSensor,
-    EnergaRceSensor,
-    EnergaBillForecastSensor,
-    EnergaBillCurrentSensor,
+    EnergaBankKwhSensor,
+    EnergaBankLevelSensor,
+    EnergaBankPlnSensor,
     EnergaBillComponentSensor,
+    EnergaBillCurrentSensor,
+    EnergaBillForecastSensor,
+    EnergaFirstDataDateSensor,
+    EnergaProsumerBalanceSensor,
+    EnergaRceSensor,
 )
 
 

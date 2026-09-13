@@ -10,7 +10,6 @@ Key invariants:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from ..core.readings.models import IntervalReading

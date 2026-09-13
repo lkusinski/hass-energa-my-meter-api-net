@@ -372,7 +372,7 @@ def reconcile_invoice(
         inv_gross = header_invoiced_gross
     else:
         inv_gross = sum(
-            (Decimal(str(l.get("amount_gross", "0.0"))) for l in invoiced_lines),
+            (Decimal(str(line_item.get("amount_gross", "0.0"))) for line_item in invoiced_lines),
             Decimal("0.0"),
         )
 
@@ -386,7 +386,7 @@ def reconcile_invoice(
 
     # Per-line comparison
     line_variances = []
-    inv_map = {l.get("rate_id"): l for l in invoiced_lines}
+    inv_map = {line_item.get("rate_id"): line_item for line_item in invoiced_lines}
 
     for comp in computed_lines:
         inv_match = inv_map.get(comp.rate_id)

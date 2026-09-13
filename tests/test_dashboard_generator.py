@@ -1,16 +1,17 @@
 """Tests for Energa dashboard generator and button platform."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.energa_mobile.dashboard_generator import (
-    build_meter_view,
-    build_energa_dashboard,
-    async_provision_dashboard,
-    DEFAULT_URL_PATH,
-    DEFAULT_TITLE,
-)
+import pytest
+
 from custom_components.energa_mobile.button import EnergaCreateDashboardButton
+from custom_components.energa_mobile.dashboard_generator import (
+    DEFAULT_TITLE,
+    DEFAULT_URL_PATH,
+    async_provision_dashboard,
+    build_energa_dashboard,
+    build_meter_view,
+)
 
 
 @pytest.fixture

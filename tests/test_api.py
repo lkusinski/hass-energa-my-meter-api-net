@@ -203,7 +203,6 @@ class TestFindFirstDataDate:
         """Data since May 9 -> detected date is May 9, not July 1."""
         from datetime import date, timedelta
         from unittest.mock import patch
-        from zoneinfo import ZoneInfo
 
         first = date.today() - timedelta(days=120)
 

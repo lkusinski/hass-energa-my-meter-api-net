@@ -18,7 +18,6 @@ from .const import (
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
-    get_price_for_key,
 )
 from .dashboard_generator import (
     DEFAULT_ICON,
@@ -26,7 +25,7 @@ from .dashboard_generator import (
     DEFAULT_URL_PATH,
     async_provision_dashboard,
 )
-from .settlement import is_export_prosumer, is_net_metering, is_net_billing
+from .settlement import is_export_prosumer
 
 _LOGGER = logging.getLogger(__name__)
 

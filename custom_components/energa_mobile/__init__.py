@@ -48,7 +48,6 @@ from .const import (
     MAX_HOURLY_KWH,
     get_price_for_key,
 )
-
 from .dashboard_generator import (
     DEFAULT_ICON,
     DEFAULT_TITLE,
@@ -109,10 +108,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(err) from err
 
     # Initialize Canonical SQLite Storage & HA Production Adapters (v1.0 Architecture)
-    from .storage.sqlite.database import CanonicalStorage
-    from .ha.recorder_adapter import RecorderAdapter
-    from .ha.migration_map import MigrationMap
     from .ha.alerts import ProsumerAlertManager
+    from .ha.migration_map import MigrationMap
+    from .ha.recorder_adapter import RecorderAdapter
+    from .storage.sqlite.database import CanonicalStorage
 
     db_path = hass.config.path(".storage", "energa_canonical.db")
     storage = CanonicalStorage(db_path)
@@ -548,6 +547,7 @@ async def _has_history_statistics(
     """True when statistics already extend back to near target_start."""
     try:
         import functools
+
         from homeassistant.components.recorder import get_instance
         from homeassistant.components.recorder.statistics import (
             statistics_during_period,
@@ -989,6 +989,7 @@ async def _import_meter_history(
             if storage and points:
                 try:
                     from decimal import Decimal
+
                     from .core.readings.models import IntervalReading
                     is_export = entity_suffix.startswith("export")
                     c_readings = [

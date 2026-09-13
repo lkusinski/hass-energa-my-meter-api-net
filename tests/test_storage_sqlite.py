@@ -10,9 +10,9 @@ Tests:
 - Zero float precision loss (Decimal assertions).
 """
 
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-import tempfile
 
 import pytest
 
@@ -27,7 +27,6 @@ from custom_components.energa_mobile.core.readings.models import (
     SourceObservation,
 )
 from custom_components.energa_mobile.storage.sqlite.database import CanonicalStorage
-
 
 
 @pytest.fixture
@@ -280,6 +279,7 @@ def test_job_checkpoint(storage: CanonicalStorage):
 def test_schema_v1_to_v2_migration():
     """Verify that an existing Schema V1 database safely migrates to Schema V2 without data loss."""
     import sqlite3
+
     from custom_components.energa_mobile.storage.sqlite.database import SCHEMA_V1_SQL
 
     with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
@@ -358,7 +358,10 @@ def test_market_prices_crud_and_effective_lookup(storage: CanonicalStorage):
 
 
 def test_settlement_lots_and_allocations(storage: CanonicalStorage):
-    from custom_components.energa_mobile.core.settlement.models import LotAllocation, SettlementLot
+    from custom_components.energa_mobile.core.settlement.models import (
+        LotAllocation,
+        SettlementLot,
+    )
 
     ppe_id = "PL_SETTLEMENT_TEST"
     storage.upsert_ppe(PPE(ppe_id=ppe_id, settlement_type=SettlementType.NET_BILLING_RCEM))
@@ -403,7 +406,9 @@ def test_settlement_lots_and_allocations(storage: CanonicalStorage):
 
 
 def test_invoice_reconciliation_storage_and_approval(storage: CanonicalStorage):
-    from custom_components.energa_mobile.core.tariffs.models import InvoiceReconciliation
+    from custom_components.energa_mobile.core.tariffs.models import (
+        InvoiceReconciliation,
+    )
 
     recon = InvoiceReconciliation(
         invoice_number="1200222768/FES/00017",

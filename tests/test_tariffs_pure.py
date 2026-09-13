@@ -11,7 +11,6 @@ from datetime import date
 from decimal import Decimal
 
 from custom_components.energa_mobile.core.tariffs.effective_tariffs import (
-    get_g11_tariff_plan,
     get_g12w_tariff_plan,
     reconcile_invoice,
 )

@@ -9,12 +9,10 @@ Invariants:
 
 from __future__ import annotations
 
-from decimal import Decimal
 import logging
-from typing import Any
+from decimal import Decimal
 
 from ..projections.statistics import build_statistic_id
-from ..core.identity.models import MeterLifecycle, MeterReadingOffset
 
 _LOGGER = logging.getLogger(__name__)
 

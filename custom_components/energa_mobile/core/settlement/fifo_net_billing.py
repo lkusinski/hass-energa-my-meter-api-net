@@ -59,7 +59,7 @@ def run_fifo_net_billing(
             )
 
     # Sort deposit lots by assigned_at ascending (FIFO order)
-    sorted_lots = sorted(deposit_lots, key=lambda l: (l.assigned_at, l.lot_id))
+    sorted_lots = sorted(deposit_lots, key=lambda lot: (lot.assigned_at, lot.lot_id))
     allocations: list[LotAllocation] = []
 
     # Check expiration as of today

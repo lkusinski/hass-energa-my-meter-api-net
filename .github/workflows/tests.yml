@@ -23,11 +23,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pytest pytest-asyncio aiohttp voluptuous
+          pip install -r requirements_test.txt
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m pytest tests/ -v --tb=short --cov=custom_components/energa_mobile --cov-report=term-missing
 
   lint:
     runs-on: ubuntu-latest
@@ -39,8 +39,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install dependencies
+        run: pip install -r requirements_test.txt
 
       - name: Ruff check
         run: ruff check custom_components/ tests/ --select E,F,I --ignore E501,E402

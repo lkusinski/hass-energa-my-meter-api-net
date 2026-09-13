@@ -12,12 +12,6 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import storage
 
-from .const import (
-    CONF_PROSUMER_COEFFICIENT,
-    DEFAULT_PROSUMER_COEFFICIENT,
-    DOMAIN,
-)
-
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_URL_PATH = "energa-rachunek"

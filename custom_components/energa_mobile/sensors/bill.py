@@ -1,0 +1,630 @@
+"""Bill forecast and component sensors for Energa My Meter integration."""
+
+import logging
+from datetime import datetime, timezone
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from ..const import (
+    CONF_BANK_RCE_PRICE,
+    CONF_RCE_AUTO_FETCH,
+    CONF_TARIFF_CAPACITY,
+    DEFAULT_BALANCE_BASELINE,
+    DEFAULT_BANK_INITIAL_KWH,
+    DEFAULT_BANK_RCE_PRICE,
+    ROLLING_MIN_COVERAGE_DAYS,
+    get_meter_baseline,
+    get_meter_initial_bank,
+    get_price_for_key,
+    get_prosumer_coefficient,
+)
+from ..settlement import month_to_date_forecast
+from ..tariff import (
+    capacity_for_annual_use,
+    compute_bill,
+    fees_from_options,
+    split_cover,
+    tariff_family,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
+    """Month-end bill forecast as a full invoice (v0.2.14).
+
+    MTD flows come from recorder statistics (same `_mtd` cache as v0.2.11);
+    the full bill (sale + excise + trade fee + distribution + VAT 23% −
+    prosumer settlement) is computed with `tariff.compute_bill` and
+    linearly extrapolated to month end.
+
+    - New net-billing: deposit = export×RCEm×1.23 lowers the payable.
+    - Old net-metering: import covered by the virtual warehouse (up to the
+      current Bank kWh, split day/night proportionally) pays no energy
+      charge and no variable distribution/quality fee — fixed fees,
+      excise and OZE/cogen always stay (as on the invoice).
+    - State = forecast payable (do_zapłaty) at month end; MTD bill and the
+      legacy energy-only numbers stay in attributes for compatibility.
+    Created only when enable_auto_settlement is on (needs history).
+    """
+
+    def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._serial = serial
+        self._entry = entry
+        self._has_zones = has_zones
+        self._attr_name = "Prognoza Rachunku"
+        self._attr_unique_id = f"energa_{meter_id}_bill_forecast"
+        self._attr_has_entity_name = True
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_unit_of_measurement = "PLN"
+        # NOTE: no monetary device_class (monetary+measurement rejected
+        # by HA, v0.2.12 fix); forecast is a projection, not a meter total.
+        self._attr_icon = "mdi:calendar-clock"
+        self._attr_device_info = device_info
+
+    def _mtd_parts(self):
+        """(import_kwh, export_kwh) month-to-date from coordinator cache."""
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+            or {}
+        )
+        imp = mtd.get("import", mtd.get("import_1", 0) + mtd.get("import_2", 0))
+        exp = mtd.get("export", mtd.get("export_1", 0) + mtd.get("export_2", 0))
+        return float(imp), float(exp)
+
+    def _mtd_zone_flows(self):
+        """(import_day, import_night, export_total) MTD per zone."""
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+            or {}
+        )
+        if self._has_zones:
+            imp_d = float(mtd.get("import_1", 0))
+            imp_n = float(mtd.get("import_2", 0))
+            exp = float(mtd.get("export_1", 0)) + float(mtd.get("export_2", 0))
+            if not exp:
+                exp = float(mtd.get("export", 0))
+        else:
+            imp_d = float(mtd.get("import", 0))
+            imp_n = 0.0
+            exp = float(mtd.get("export", 0))
+        return imp_d, imp_n, exp
+
+    def _annual_import_estimate(self):
+        """Annual grid import (kWh) for the URE capacity-fee bracket.
+
+        Prefers trailing-365-day statistics (needs history + coverage);
+        otherwise annualizes lifetime meter totals over the meter age
+        (first-data date from entry data). None when unknowable.
+        """
+        mid = str(self._meter_id)
+        try:
+            rolling = getattr(self.coordinator, "_rolling_365", {}).get(mid, {})
+            cov = int(rolling.get("_coverage_days", 0))
+            imp365 = rolling.get(
+                "import", rolling.get("import_1", 0) + rolling.get("import_2", 0)
+            )
+            if cov >= ROLLING_MIN_COVERAGE_DAYS and float(imp365) > 0:
+                return float(imp365)
+            if cov >= 30 and float(imp365) > 0:
+                return round(float(imp365) / cov * 365, 1)
+        except (ValueError, TypeError):
+            pass
+        totals = (getattr(self.coordinator, "_meter_totals", {}) or {}).get(mid)
+        if not totals:
+            return None
+        try:
+            lifetime = float(totals.get("import", 0))
+        except (ValueError, TypeError):
+            return None
+        if lifetime <= 0:
+            return None
+        try:
+            from datetime import date as _date
+
+            data = getattr(self._entry, "data", {}) or {}
+            first_s = data.get(f"meter_{self._meter_id}_first_data_date") or data.get(
+                "first_data_date"
+            )
+            if not first_s:
+                return None
+            y, m, d = (int(p) for p in str(first_s).split("-"))
+            days = max(30, (_date.today() - _date(y, m, d)).days)
+            return round(lifetime / days * 365, 1)
+        except (ValueError, TypeError):
+            return None
+
+    def _is_old_system(self) -> bool:
+        """Old net-metering (coeff >= 0.7) vs new net-billing."""
+        coeff = get_prosumer_coefficient(
+            self._entry.options, meter_id=str(self._meter_id), serial=str(getattr(self, "_serial", ""))
+        )
+        return coeff >= 0.7
+
+    def _warehouse_cover(self):
+        """Current Bank kWh available to cover this month's import."""
+        totals = self.coordinator._meter_totals.get(str(self._meter_id))
+        if not totals:
+            return 0.0
+        opts = self._entry.options
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
+        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
+        net_imp = float(totals.get("import", 0)) - bi
+        net_exp = float(totals.get("export", 0)) - be
+        return max(0.0, net_exp * coeff - net_imp) + max(0.0, initial)
+
+    def _rce(self) -> float:
+        opts = self._entry.options
+        coord_rce = getattr(self.coordinator, "_rce_cache", None)
+        if opts.get(CONF_RCE_AUTO_FETCH) and coord_rce is not None:
+            return float(coord_rce)
+        return float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
+
+    def _meter_tariff(self):
+        """Tariff string of this meter (G11 vs G12W fee table, v0.3.0)."""
+        for m in self.coordinator.data or []:
+            if str(m.get("meter_point_id")) == str(self._meter_id):
+                return m.get("tariff")
+        return None
+
+    @property
+    def native_value(self):
+        from datetime import date as _date
+
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+        )
+        if not mtd:
+            return None
+        imp_mtd, exp_mtd = self._mtd_parts()
+        imp_d, imp_n, exp_tot = self._mtd_zone_flows()
+        opts = self._entry.options
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        if self._has_zones:
+            m1 = mtd.get("import_1", 0)
+            m2 = mtd.get("import_2", 0)
+            p1 = get_price_for_key(opts, "import_1", meter_id=mid, serial=ser)
+            p2 = get_price_for_key(opts, "import_2", meter_id=mid, serial=ser)
+            imp_cost = m1 * p1 + m2 * p2
+        else:
+            imp_cost = imp_mtd * get_price_for_key(opts, "import", meter_id=mid, serial=ser)
+        rce = self._rce()
+        mtd_net = exp_mtd * rce * 1.23 - imp_cost
+        today = _date.today()
+        import calendar as _cal
+
+        forecast = month_to_date_forecast(
+            mtd_net, today.day, _cal.monthrange(today.year, today.month)[1]
+        )
+
+        # === v0.2.14 full-bill math (invoice reconstruction) ===
+        # v0.3.0: fee table follows the meter tariff (G11 invoice table
+        # for single-zone meters, G12W otherwise).
+        fees = fees_from_options(opts, self._meter_tariff())
+        # v0.2.18: capacity fee auto-bracket (URE 2026) unless overridden.
+        capacity_source = "manual (Options tariff_capacity)"
+        if CONF_TARIFF_CAPACITY not in (opts or {}):
+            annual = self._annual_import_estimate()
+            if annual is not None:
+                fees["capacity"] = capacity_for_annual_use(annual)
+                capacity_source = (
+                    f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
+                )
+        old_system = self._is_old_system()
+        if old_system:
+            cover_d, cover_n = split_cover(
+                self._warehouse_cover(), imp_d, imp_n
+            )
+            # No PLN deposit in the old system — coverage only.
+            # (None would auto-compute export×RCEm×1.23.)
+            deposit_mtd = 0.0
+        else:
+            cover_d, cover_n = 0.0, 0.0
+            deposit_mtd = None  # computed inside compute_bill
+        try:
+            bill_mtd = compute_bill(
+                imp_d, imp_n, exp_tot, rce, fees,
+                cover_day=cover_d, cover_night=cover_n,
+                deposit_pln=deposit_mtd,
+            )
+        except (ValueError, TypeError):
+            bill_mtd = None
+        # Pre-computed hourly profile forecast from coordinator's executor thread (v1.6.9)
+        cache = getattr(self.coordinator, "_profile_forecast_cache", None)
+        profile_res = cache.get(str(self._meter_id)) if isinstance(cache, dict) else None
+        if profile_res is None:
+            storage = getattr(self.coordinator, "storage", None)
+            if storage:
+                try:
+                    from ..projections.forecast import HourlyProfileForecaster
+                    canonical_readings = storage.get_readings(
+                        ppe_id=str(self._meter_id),
+                        resolution="1h",
+                    )
+                    if canonical_readings:
+                        forecaster = HourlyProfileForecaster(
+                            readings=canonical_readings,
+                            tariff_code=self._meter_tariff(),
+                        )
+                        if forecaster.history_days_count >= 7:
+                            month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
+                            mtd_readings = [
+                                r for r in canonical_readings
+                                if r.interval_start_utc >= month_start_utc
+                            ]
+                            profile_res = forecaster.forecast_month(
+                                current_date=today,
+                                mtd_readings=mtd_readings,
+                                tariff_options=opts,
+                                rce_price=rce,
+                                warehouse_kwh=self._warehouse_cover() if old_system else 0.0,
+                                is_old_system=old_system,
+                            )
+                except Exception as pf_err:
+                    _LOGGER.debug("Profile forecaster fallback failed: %s", pf_err)
+
+        days_in_month = _cal.monthrange(today.year, today.month)[1]
+        elapsed = min(max(today.day, 1), days_in_month)
+
+        if profile_res and profile_res.method == "hourly_profile_wal":
+            f_imp_d = float(profile_res.forecast_import_t1_kwh)
+            f_imp_n = float(profile_res.forecast_import_t2_kwh)
+            f_exp = float(profile_res.forecast_export_total_kwh)
+            forecast_method = (
+                f"hourly_profile_wal ({profile_res.history_days_count} dni historii, "
+                f"trend: {profile_res.trend_factor:.2f})"
+            )
+        else:
+            # Early-month volatility smoothing (day 1-6): blend MTD with trailing history
+            rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(self._meter_id), {})
+            cov = int(rolling.get("_coverage_days", 0)) if rolling else 0
+
+            if elapsed < 7 and cov >= 14:
+                w_mtd = elapsed / 7.0
+                w_hist = 1.0 - w_mtd
+
+                t_imp_d = float(rolling.get("import_1" if self._has_zones else "import", 0)) / cov
+                t_imp_n = float(rolling.get("import_2", 0)) / cov if self._has_zones else 0.0
+                t_exp = (
+                    (float(rolling.get("export_1", 0)) + float(rolling.get("export_2", 0))) / cov
+                    if self._has_zones
+                    else float(rolling.get("export", 0)) / cov
+                )
+
+                m_imp_d = imp_d / elapsed
+                m_imp_n = imp_n / elapsed
+                m_exp = exp_tot / elapsed
+
+                f_imp_d = (w_mtd * m_imp_d + w_hist * t_imp_d) * days_in_month
+                f_imp_n = (w_mtd * m_imp_n + w_hist * t_imp_n) * days_in_month
+                f_exp = (w_mtd * m_exp + w_hist * t_exp) * days_in_month
+                forecast_method = f"smoothed_blend_7d (dzień {elapsed}/7, {w_hist*100:.0f}% historia)"
+            else:
+                factor = days_in_month / elapsed
+                f_imp_d, f_imp_n, f_exp = imp_d * factor, imp_n * factor, exp_tot * factor
+                forecast_method = "linear_mtd"
+
+
+        if old_system:
+            f_cover_d, f_cover_n = split_cover(
+                self._warehouse_cover(), f_imp_d, f_imp_n
+            )
+            f_deposit = 0.0
+        else:
+            f_cover_d, f_cover_n = 0.0, 0.0
+            f_deposit = None
+        try:
+            bill_fc = compute_bill(
+                f_imp_d, f_imp_n, f_exp, rce, fees,
+                cover_day=f_cover_d, cover_night=f_cover_n,
+                deposit_pln=f_deposit,
+            )
+        except (ValueError, TypeError):
+            bill_fc = None
+
+        self._attr_extra_state_attributes = {
+            "mtd_import_kwh": round(imp_mtd, 2),
+            "mtd_export_kwh": round(exp_mtd, 2),
+            "mtd_net_pln": round(mtd_net, 2),
+            "forecast_pln": forecast,
+            "forecast_method": forecast_method,
+            "day_of_month": today.day,
+            "rce_price": rce,
+            "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",
+            "formula": "mtd_net/days_elapsed*days_in_month; mtd_net=export×RCE×1.23-import×cena",
+            "note": "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)",
+            "rule_version": "ustawa_oze_art4_ust11_v1",
+            "settlement_type": "net_metering" if old_system else "net_billing_rcem",
+            "period": f"{today.year}-{today.month:02d}",
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if profile_res and profile_res.method == "hourly_profile_wal":
+            self._attr_extra_state_attributes.update({
+                "profile_confidence": profile_res.confidence_score,
+                "profile_history_days": profile_res.history_days_count,
+                "profile_trend_factor": profile_res.trend_factor,
+                "forecast_import_t1_kwh": float(profile_res.forecast_import_t1_kwh),
+                "forecast_import_t2_kwh": float(profile_res.forecast_import_t2_kwh),
+                "forecast_export_t1_kwh": float(profile_res.forecast_export_t1_kwh),
+                "forecast_export_t2_kwh": float(profile_res.forecast_export_t2_kwh),
+            })
+        if bill_mtd is not None and bill_fc is not None:
+
+            self._attr_extra_state_attributes.update({
+                "system": "stare net-metering (magazyn kWh)"
+                if old_system else "nowe net-billing (depozyt PLN)",
+                "mtd_import_day_kwh": round(imp_d, 2),
+                "mtd_import_night_kwh": round(imp_n, 2),
+                "mtd_sale_total_pln": bill_mtd["sale_total"],
+                "mtd_distr_total_pln": bill_mtd["distr_total"],
+                "mtd_sale_gross_pln": bill_mtd["sale_gross"],
+                "mtd_distr_gross_pln": bill_mtd["distr_gross"],
+                "mtd_netto_pln": bill_mtd["netto"],
+                "mtd_vat_pln": bill_mtd["vat"],
+                "mtd_brutto_pln": bill_mtd["brutto"],
+                "mtd_deposit_pln": bill_mtd["deposit"],
+                "mtd_deposit_applied_pln": bill_mtd["deposit_applied"],
+                "mtd_do_zaplaty_pln": bill_mtd["do_zaplaty"],
+                "forecast_brutto_pln": bill_fc["brutto"],
+                "forecast_sale_gross_pln": bill_fc["sale_gross"],
+                "forecast_distr_gross_pln": bill_fc["distr_gross"],
+                "forecast_deposit_applied_pln": bill_fc["deposit_applied"],
+                "forecast_do_zaplaty_pln": bill_fc["do_zaplaty"],
+
+                "cover_day_kwh": cover_d,
+                "cover_night_kwh": cover_n,
+                "capacity_source": capacity_source,
+                "fee_table": tariff_family(self._meter_tariff()),
+                "fee_note": "Stawki z Options (taryfa) lub domyślne z faktur (G11 bez PV, G12W 07 i 05-06.2026); "
+                "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
+                "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "
+                "godzinowo — przybliżenie ~1% (kWh) / ~13% (depozyt PLN)",
+            })
+            return bill_fc["do_zaplaty"]
+        return forecast
+
+    @property
+    def available(self) -> bool:
+        coords_mtd = getattr(self.coordinator, "_mtd", {})
+        return (
+            self.coordinator.data is not None
+            and (
+                str(self._meter_id) in coords_mtd
+                or str(getattr(self, "_serial", "")) in coords_mtd
+            )
+        )
+
+
+class EnergaBillCurrentSensor(EnergaBillForecastSensor):
+    """Month-to-date actual bill so far (v1.0.3).
+
+    Calculates the exact bill to pay from day 1 of the month until today
+    based on actual consumption, distribution fees, and prosumer settlement
+    (deducting deposit for energy purchase in net-billing, or warehouse coverage
+    in net-metering).
+    """
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        has_zones: bool = False,
+        serial: str = "",
+    ) -> None:
+        super().__init__(
+            coordinator,
+            meter_id=meter_id,
+            device_info=device_info,
+            entry=entry,
+            has_zones=has_zones,
+            serial=serial,
+        )
+        self._attr_name = "Dotychczasowy Rachunek"
+        self._attr_unique_id = f"energa_{meter_id}_bill_current"
+        self._attr_icon = "mdi:cash-clock"
+
+    def _calculate_bill_mtd(self):
+        from datetime import date as _date
+
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+        )
+        if not mtd:
+            return None, {}
+        imp_mtd, exp_mtd = self._mtd_parts()
+        imp_d, imp_n, exp_tot = self._mtd_zone_flows()
+        exp_d = float(mtd.get("export_1", 0)) if self._has_zones else 0.0
+        exp_n = float(mtd.get("export_2", 0)) if self._has_zones else 0.0
+        opts = self._entry.options
+        rce = self._rce()
+        today = _date.today()
+
+        fees = fees_from_options(opts, self._meter_tariff())
+        capacity_source = "manual (Options tariff_capacity)"
+        if CONF_TARIFF_CAPACITY not in (opts or {}):
+            annual = self._annual_import_estimate()
+            if annual is not None:
+                fees["capacity"] = capacity_for_annual_use(annual)
+                capacity_source = f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
+
+        old_system = self._is_old_system()
+        if old_system:
+            cover_d, cover_n = split_cover(
+                self._warehouse_cover(), imp_d, imp_n
+            )
+            deposit_mtd = 0.0
+        else:
+            cover_d, cover_n = 0.0, 0.0
+            deposit_mtd = None
+        try:
+            bill_mtd = compute_bill(
+                imp_d, imp_n, exp_tot, rce, fees,
+                cover_day=cover_d, cover_night=cover_n,
+                deposit_pln=deposit_mtd,
+            )
+        except (ValueError, TypeError):
+            bill_mtd = None
+
+        if bill_mtd is None:
+            return None, {}
+
+        attrs = {
+            "period": f"{today.year}-{today.month:02d}",
+            "day_of_month": today.day,
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
+            "system": "stare net-metering (magazyn kWh)"
+            if old_system
+            else "nowe net-billing (depozyt PLN)",
+            "mtd_import_kwh": round(imp_mtd, 2),
+            "mtd_export_kwh": round(exp_mtd, 2),
+            "mtd_import_day_kwh": round(imp_d, 2),
+            "mtd_import_night_kwh": round(imp_n, 2),
+            "mtd_export_day_kwh": round(exp_d, 2),
+            "mtd_export_night_kwh": round(exp_n, 2),
+            "mtd_sale_total_pln": bill_mtd.get("sale_total"),
+            "mtd_distr_total_pln": bill_mtd.get("distr_total"),
+            "mtd_sale_gross_pln": bill_mtd.get("sale_gross", round((bill_mtd.get("sale_total") or 0.0) * 1.23, 2)),
+            "mtd_distr_gross_pln": bill_mtd.get("distr_gross", round((bill_mtd.get("distr_total") or 0.0) * 1.23, 2)),
+            "mtd_netto_pln": bill_mtd.get("netto"),
+            "mtd_vat_pln": bill_mtd.get("vat"),
+            "mtd_brutto_pln": bill_mtd.get("brutto"),
+            "mtd_deposit_pln": bill_mtd.get("deposit"),
+            "mtd_deposit_applied_pln": bill_mtd.get("deposit_applied"),
+            "mtd_do_zaplaty_pln": bill_mtd.get("do_zaplaty"),
+            "cover_day_kwh": cover_d,
+            "cover_night_kwh": cover_n,
+            "capacity_source": capacity_source,
+            "rce_price": rce,
+            "fee_table": tariff_family(self._meter_tariff()),
+            "unit_of_measurement": "PLN",
+        }
+        return bill_mtd, attrs
+
+    @property
+    def native_value(self):
+        bill_mtd, attrs = self._calculate_bill_mtd()
+        if bill_mtd is None:
+            return None
+        self._attr_extra_state_attributes = attrs
+        return bill_mtd["do_zaplaty"]
+
+
+class EnergaBillComponentSensor(EnergaBillCurrentSensor):
+    """Dedicated breakdown sensor for MTD bill components (v1.0.4).
+
+    Exposes individual metrics (gross cost, energy cost, distribution cost,
+    deposit generated, deposit applied, warehouse coverage, MTD energy volumes) as native entities.
+    """
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        device_info: DeviceInfo,
+        entry: ConfigEntry,
+        component_key: str,
+        name: str,
+        icon: str,
+        unit: str = "PLN",
+        device_class: SensorDeviceClass | None = SensorDeviceClass.MONETARY,
+        has_zones: bool = False,
+        serial: str = "",
+    ) -> None:
+        super().__init__(
+            coordinator,
+            meter_id=meter_id,
+            device_info=device_info,
+            entry=entry,
+            has_zones=has_zones,
+            serial=serial,
+        )
+        self._component_key = component_key
+        self._attr_name = name
+        self._attr_unique_id = f"energa_{meter_id}_mtd_{component_key}"
+        self._attr_has_entity_name = True
+        self._attr_icon = icon
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
+        # MTD components are period breakdown metrics, not accumulative meters.
+        # State class MUST be None to prevent HA recorder from logging false reset spikes.
+        self._attr_state_class = None
+
+    @property
+    def native_value(self):
+        bill_mtd, attrs = self._calculate_bill_mtd()
+        if bill_mtd is None:
+            return None
+        self._attr_extra_state_attributes = {
+            "period": attrs.get("period"),
+            "calculated_at": attrs.get("calculated_at"),
+            "system": attrs.get("system"),
+        }
+        if self._component_key == "sale_total":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_sale_total_pln"),
+                "gross_pln": attrs.get("mtd_sale_gross_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
+        elif self._component_key == "distr_total":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_distr_total_pln"),
+                "gross_pln": attrs.get("mtd_distr_gross_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
+        elif self._component_key == "brutto":
+            self._attr_extra_state_attributes.update({
+                "netto_pln": attrs.get("mtd_netto_pln"),
+                "vat_pln": attrs.get("mtd_vat_pln"),
+                "vat_rate": "23%",
+                "tax_included": True,
+            })
+        if self._component_key == "deposit_applied":
+            val = attrs.get("mtd_deposit_applied_pln")
+            if val is not None:
+                try:
+                    num = float(val)
+                    self._attr_extra_state_attributes["deposit_applied_positive_pln"] = round(num, 2)
+                    self._attr_extra_state_attributes["is_deduction"] = True
+                    return -round(abs(num), 2) if num > 0 else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+            return None
+        key_map = {
+            "brutto": attrs.get("mtd_brutto_pln"),
+            "sale_total": attrs.get("mtd_sale_gross_pln"),
+            "distr_total": attrs.get("mtd_distr_gross_pln"),
+            "deposit": attrs.get("mtd_deposit_pln"),
+            "deposit_applied": attrs.get("mtd_deposit_applied_pln"),
+            "cover_day": attrs.get("cover_day_kwh"),
+            "cover_night": attrs.get("cover_night_kwh"),
+            "energy_import": attrs.get("mtd_import_kwh"),
+            "energy_export": attrs.get("mtd_export_kwh"),
+            "energy_import_1": attrs.get("mtd_import_day_kwh"),
+            "energy_import_2": attrs.get("mtd_import_night_kwh"),
+            "energy_export_1": attrs.get("mtd_export_day_kwh"),
+            "energy_export_2": attrs.get("mtd_export_night_kwh"),
+        }
+        return key_map.get(self._component_key)
+
+

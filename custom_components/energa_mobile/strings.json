@@ -165,10 +165,10 @@
   "entity": {
     "button": {
       "create_dashboard": {
-        "name": "Utwórz Pulpit Rozliczeń"
+        "name": "Create Billing Dashboard"
       },
       "configure_energy_dashboard": {
-        "name": "Skonfiguruj Panel Energia"
+        "name": "Configure Energy Dashboard"
       }
     }
   }

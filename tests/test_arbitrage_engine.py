@@ -3,10 +3,10 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-import pytest
-
 from custom_components.energa_mobile.adapters.pse.models import MarketPriceRecord
-from custom_components.energa_mobile.adapters.pse.rce_client import parse_rce_api_payload
+from custom_components.energa_mobile.adapters.pse.rce_client import (
+    parse_rce_api_payload,
+)
 from custom_components.energa_mobile.projections.arbitrage import (
     ArbitrageAction,
     ArbitrageEngine,

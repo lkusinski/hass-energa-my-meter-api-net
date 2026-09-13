@@ -11,11 +11,11 @@ Pure domain logic:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
-import logging
 from typing import Sequence
 
 from ..core.readings.models import IntervalReading
@@ -46,10 +46,10 @@ def compute_easter(year: int) -> date:
     h = (19 * a + b - d - g + 15) % 30
     i = c // 4
     k = c % 4
-    l = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * l) // 451
-    month = (h + l - 7 * m + 114) // 31
-    day = ((h + l - 7 * m + 114) % 31) + 1
+    l_val = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l_val) // 451
+    month = (h + l_val - 7 * m + 114) // 31
+    day = ((h + l_val - 7 * m + 114) % 31) + 1
     return date(year, month, day)
 
 
@@ -281,7 +281,6 @@ class HourlyProfileForecaster:
                     latest_dt_local = local_dt
 
         mtd_import_total = mtd_import_t1 + mtd_import_t2
-        mtd_export_total = mtd_export_t1 + mtd_export_t2
 
         # 2. Insufficient history fallback check (< 7 days of history)
         if self.history_days_count < 7:

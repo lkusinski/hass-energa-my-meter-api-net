@@ -306,6 +306,7 @@ class TestFifoDepositsAndLevel:
     def test_graceful_partial_coverage(self):
         """4 miesiące historii - poziom wylicza się poprawnie, nie zwraca None (v1.3.4)."""
         from datetime import date
+
         from custom_components.energa_mobile.settlement import (
             fifo_kwh_bank,
             warehouse_level_pct,
@@ -480,6 +481,7 @@ class TestFifoDualZone:
     def test_wisniowa_invoice_transition(self):
         """Test exact transition matching Wiśniowa FES/00042 invoice."""
         from datetime import date
+
         from custom_components.energa_mobile.settlement import fifo_dual_zone_kwh_bank
 
         # As of June 30, 2026: L1 had 752 kWh in warehouse, L2 had 606 kWh
@@ -513,6 +515,7 @@ class TestFifoDualZone:
     def test_zone_isolation_no_cross_subsidy(self):
         """Verify that deficit in L2 does NOT consume credits from L1."""
         from datetime import date
+
         from custom_components.energa_mobile.settlement import fifo_dual_zone_kwh_bank
 
         flows_l1 = [(2026, 1, 0.0, 1000.0)]  # 800 kWh credit in L1

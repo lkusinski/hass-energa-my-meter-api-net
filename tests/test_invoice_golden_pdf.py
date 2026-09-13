@@ -9,20 +9,19 @@ Reference: Energa HA Skorygowana Architektura Docelowa (04.09.2026)
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+
 import pytest
 
-from custom_components.energa_mobile.core.settlement.models import (
-    LotAllocation,
-    SettlementLot,
-    SettlementSummary,
-)
 from custom_components.energa_mobile.core.settlement.fifo_net_billing import (
     InvoiceLineCharge,
     run_fifo_net_billing,
 )
+from custom_components.energa_mobile.core.settlement.models import (
+    SettlementLot,
+    SettlementSummary,
+)
 from custom_components.energa_mobile.core.tariffs.effective_tariffs import (
     calculate_g11_invoice_lines,
-    calculate_g12w_invoice_lines,
     reconcile_invoice,
 )
 from custom_components.energa_mobile.storage.sqlite.database import CanonicalStorage
@@ -45,7 +44,7 @@ def test_golden_invoice_fak_1200222768_fes_00017_reconciliation():
     )
 
     # Verify line quantities and net amounts from page 2 of PDF
-    line_dict = {l.rate_id: l for l in comp_lines}
+    line_dict = {comp_line.rate_id: comp_line for comp_line in comp_lines}
 
     assert line_dict["trade_fee"].total_net == Decimal("32.36")
     assert line_dict["energy_day"].total_net == Decimal("1320.01")
@@ -57,7 +56,7 @@ def test_golden_invoice_fak_1200222768_fes_00017_reconciliation():
     assert line_dict["cogen"].total_net == Decimal("6.48")
     assert line_dict["capacity"].total_net == Decimal("48.10")
 
-    total_net = sum((l.total_net for l in comp_lines), Decimal("0.0"))
+    total_net = sum((comp_line.total_net for comp_line in comp_lines), Decimal("0.0"))
     assert total_net == Decimal("2271.74")  # Matches exact "Razem wartość netto (1 + 2)" on PDF!
 
     # Actual lines as printed on invoice (gross per line)

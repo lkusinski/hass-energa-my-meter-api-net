@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.8.0 (2026-09-13) — Modułowa Architektura Sensorów, Coordinator i Narzędzia CI/CD
+
+### 🏗️ Modułowa Refaktoryzacja Architektury (`custom_components/energa_mobile`)
+- **Wydzielenie `coordinator.py` (925 linii):**
+  - Wyodrębniono `EnergaCoordinator` z monolitycznego pliku `sensor.py` do dedykowanego modułu `coordinator.py`.
+  - Zachowano 100% wstecznej kompatybilności — `EnergaCoordinator` jest re-eksportowany z `sensor.py`.
+- **Modułowy podział sensorów na katalog `sensors/`:**
+  - `sensors/bank.py` (760 linii): `EnergaBankKwhSensor`, `EnergaBankZoneSensor`, `EnergaBankPlnSensor`, `EnergaBankLevelSensor`, `EnergaBankFlowSensor` oraz funkcja bilansowania `_fifo_bank_from_monthly`.
+  - `sensors/bill.py` (635 linii): `EnergaBillForecastSensor`, `EnergaBillCurrentSensor`, `EnergaBillComponentSensor`.
+  - `sensors/price.py` (330 linii): `EnergaPriceSensor`, `EnergaRceSensor`, `PseRceDynamicPriceSensor`, `PseRceArbitrageSpreadSensor`.
+  - `sensors/live.py` (740 linii): `EnergaLiveSensor`, `EnergaProsumerBalanceSensor`, `EnergaFirstDataDateSensor`, `EnergaStatisticsSensor`, `EnergaInfoSensor`, `EnergaCostStatisticsSensor`, `EnergaSyntheticStatisticsSensor`, `EnergaAutoconsumptionSensor`.
+- **Odchudzenie `sensor.py`:** Zmniejszono objętość pliku z **4 249 linii** do **1 069 linii** (~75% redukcji), pozostawiając jedynie funkcję `async_setup_entry` oraz fabrykę encji.
+
+### 🌐 Tłumaczenia i Jakość Kodu
+- **Pełna synchronizacja języka angielskiego (`en.json`):**
+  - Uzupełniono brakujące sekcje `net_metering_survey`, `energy_dashboard`, `generate_dashboard` oraz przycisków encji.
+  - Osiągnięto 100% parytetu kluczy pomiędzy `pl.json`, `en.json` i `strings.json`.
+- **Naprawa brakującego importu typowania:**
+  - Dodano brakujący import `from typing import Any` w `sensor.py` dla `PseRceDynamicPriceSensor.extra_state_attributes`.
+
+### 🛠️ Infrastruktura i CI/CD
+- **`requirements_test.txt`:** Skonsolidowano wszystkie zależności testowe (`pytest`, `pytest-asyncio`, `pytest-cov`, `aiohttp`, `voluptuous`, `ruff`).
+- **Raportowanie pokrycia testami (coverage):** Zintegrowano `--cov` w workflow GitHub Actions `tests.yml`.
+- **Szablony GitHub Issue:** Dodano ustrukturyzowane szablony zgłaszania błędów (`bug_report.yml`) oraz propozycji funkcji (`feature_request.yml`).
+- **Plik `CODEOWNERS`:** Zdefiniowano automatyczną odpowiedzialność za kod w `.github/CODEOWNERS`.
+
 ## v1.7.2 (2026-09-13) — Ergonomia Pulpitu Lovelace, Ikona Paska Bocznego i Automatyzacje Cen Dynamicznych RCE
 
 ### 📊 Ergonomia i Dopracowanie Pulpitu Lovelace (`dashboard_generator.py`)

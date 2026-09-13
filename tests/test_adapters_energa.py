@@ -8,9 +8,9 @@ Verifies:
 - Defensive handling of empty or corrupt payloads.
 """
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
-import json
 
 from custom_components.energa_mobile.adapters.energa.client import (
     normalize_chart_payload,

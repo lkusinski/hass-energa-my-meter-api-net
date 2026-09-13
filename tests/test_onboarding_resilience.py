@@ -1,30 +1,29 @@
 """Unit tests for onboarding resilience, timeout fallback, and auto-backfill recovery (v1.4.1)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-from zoneinfo import ZoneInfo
+
 import pytest
 
-from custom_components.energa_mobile.settlement import system_choice_coefficient
-from custom_components.energa_mobile.const import (
-    CONF_PROSUMER_COEFFICIENT,
-    CONF_USERNAME,
-    CONF_PASSWORD,
-    DEFAULT_PROSUMER_COEFFICIENT,
-    CONF_PROSUMER_POWER_GROUP,
-    CONF_ENERGY_DASHBOARD_MODE,
-    CONF_ENABLE_SYNTHETIC_STORAGE,
-    POWER_GROUP_LE_10KW,
-    POWER_GROUP_GT_10KW,
-    ENERGY_MODE_VIRTUAL_STORAGE,
-    ENERGY_MODE_PHYSICAL_GRID,
-)
-from custom_components.energa_mobile.config_flow import EnergaConfigFlow
 from custom_components.energa_mobile import (
+    TIMEZONE,
     _has_history_statistics,
     _maybe_auto_backfill,
-    TIMEZONE,
 )
+from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+from custom_components.energa_mobile.const import (
+    CONF_ENABLE_SYNTHETIC_STORAGE,
+    CONF_ENERGY_DASHBOARD_MODE,
+    CONF_PASSWORD,
+    CONF_PROSUMER_COEFFICIENT,
+    CONF_PROSUMER_POWER_GROUP,
+    CONF_USERNAME,
+    ENERGY_MODE_PHYSICAL_GRID,
+    ENERGY_MODE_VIRTUAL_STORAGE,
+    POWER_GROUP_GT_10KW,
+    POWER_GROUP_LE_10KW,
+)
+from custom_components.energa_mobile.settlement import system_choice_coefficient
 
 
 class TestSystemChoiceCoefficient:

@@ -7,13 +7,12 @@ Kryteria akceptacji:
 - Wykrywanie niezaakceptowanych rozbieżności faktur.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
-import pytest
 
-from custom_components.energa_mobile.ha.alerts import ProsumerAlertManager, AlertItem
 from custom_components.energa_mobile.core.settlement.models import SettlementLot
+from custom_components.energa_mobile.ha.alerts import ProsumerAlertManager
 
 
 def test_alert_data_freshness():
