@@ -1,12 +1,10 @@
 """Unit tests for PV Autoconsumption & Microgrid Household Engine."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-import pytest
 
 from custom_components.energa_mobile.autoconsumption import (
     AutoconsumptionSummary,
-    HourlyAutoconsumptionBucket,
     compute_autoconsumption_summary,
     get_variable_unit_price_brutto,
 )
@@ -175,8 +173,9 @@ def test_autoconsumption_edge_case_export_greater_than_pv():
 def test_autoconsumption_sensor_entity():
     """Verify EnergaAutoconsumptionSensor state and attributes mapping."""
     from unittest.mock import MagicMock
-    from custom_components.energa_mobile.sensor import EnergaAutoconsumptionSensor
+
     from custom_components.energa_mobile.const import CONF_INVERTER_ENERGY_ENTITY
+    from custom_components.energa_mobile.sensor import EnergaAutoconsumptionSensor
 
     coordinator = MagicMock()
     entry = MagicMock()

@@ -235,11 +235,13 @@ async def async_synthesize_storage_from_recorder(
     """
     import functools
     import logging
-    from datetime import datetime, timedelta, timezone
+    from datetime import timedelta, timezone
 
     _LOGGER = logging.getLogger(__name__)
 
     try:
+        from homeassistant.components.recorder import get_instance
+
         from .const import (
             CONF_BANK_INITIAL_KWH,
             CONF_BANK_INITIAL_KWH_L1,
@@ -250,7 +252,6 @@ async def async_synthesize_storage_from_recorder(
             DEFAULT_PROSUMER_COEFFICIENT,
         )
         from .settlement import is_export_prosumer
-        from homeassistant.components.recorder import get_instance
         try:
             from homeassistant.components.recorder.models import (
                 StatisticMeanType,
@@ -290,12 +291,10 @@ async def async_synthesize_storage_from_recorder(
         imp2_id = f"sensor.energa_{serial}_panel_energia_strefa_2"
         exp1_id = f"sensor.energa_{serial}_panel_energia_produkcja_strefa_1"
         exp2_id = f"sensor.energa_{serial}_panel_energia_produkcja_strefa_2"
-        check_id = f"sensor.energa_{serial}_syntetyczny_magazyn_l1_ladowanie"
         wanted_ids = [imp1_id, imp2_id, exp1_id, exp2_id]
     else:
         imp_id = f"sensor.energa_{serial}_panel_energia_zuzycie"
         exp_id = f"sensor.energa_{serial}_panel_energia_produkcja"
-        check_id = f"sensor.energa_{serial}_syntetyczny_magazyn_ladowanie"
         wanted_ids = [imp_id, exp_id]
 
     now = datetime.now(timezone.utc)
@@ -401,13 +400,19 @@ async def async_synthesize_storage_from_recorder(
             st = float(r.get("state") or 0.0)
             rec = data_by_ts.setdefault(ts, {})
             if has_zones:
-                if sid == imp1_id: rec["import_1"] = st
-                elif sid == imp2_id: rec["import_2"] = st
-                elif sid == exp1_id: rec["export_1"] = st
-                elif sid == exp2_id: rec["export_2"] = st
+                if sid == imp1_id:
+                    rec["import_1"] = st
+                elif sid == imp2_id:
+                    rec["import_2"] = st
+                elif sid == exp1_id:
+                    rec["export_1"] = st
+                elif sid == exp2_id:
+                    rec["export_2"] = st
             else:
-                if sid == imp_id: rec["import"] = st
-                elif sid == exp_id: rec["export"] = st
+                if sid == imp_id:
+                    rec["import"] = st
+                elif sid == exp_id:
+                    rec["export"] = st
 
     if not data_by_ts:
         _LOGGER.debug("Synthetic statistics for %s are already up to date", serial)

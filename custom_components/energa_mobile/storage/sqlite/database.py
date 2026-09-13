@@ -10,17 +10,17 @@ Enforces:
 
 from __future__ import annotations
 
+import logging
+import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
-import logging
 from pathlib import Path
-import sqlite3
 from typing import Generator
 
-from ...core.identity.models import PPE, MeterLifecycle, SettlementType
-from ...core.readings.models import IntervalReading, ReadingRevision, SourceObservation
 from ...adapters.pse.models import MarketPriceRecord
+from ...core.identity.models import PPE, MeterLifecycle, SettlementType
+from ...core.readings.models import IntervalReading, SourceObservation
 from ...core.settlement.models import LotAllocation, SettlementLot
 from ...core.tariffs.models import InvoiceReconciliation
 
@@ -788,19 +788,19 @@ class CanonicalStorage:
         """
         params = [
             (
-                l.lot_id,
-                l.ppe_id,
-                l.unit,
-                l.zone,
-                str(l.original_amount),
-                str(l.remaining_amount),
-                l.created_at_utc.isoformat(),
-                l.assigned_at.isoformat(),
-                l.expires_at.isoformat(),
-                l.rule_version,
-                l.provenance,
+                lot.lot_id,
+                lot.ppe_id,
+                lot.unit,
+                lot.zone,
+                str(lot.original_amount),
+                str(lot.remaining_amount),
+                lot.created_at_utc.isoformat(),
+                lot.assigned_at.isoformat(),
+                lot.expires_at.isoformat(),
+                lot.rule_version,
+                lot.provenance,
             )
-            for l in lots
+            for lot in lots
         ]
         with self._connection() as conn:
             cur = conn.executemany(sql, params)

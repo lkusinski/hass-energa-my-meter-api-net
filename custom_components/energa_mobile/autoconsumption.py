@@ -13,16 +13,19 @@ Pure domain logic:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 from zoneinfo import ZoneInfo
 
 from .core.readings.models import IntervalReading
 from .projections.forecast import determine_tariff_zone
-from .tariff import G11_DEFAULT_FEES, G12W_DEFAULT_FEES, VAT_RATE, fees_from_options, tariff_family
+from .tariff import (
+    VAT_RATE,
+    fees_from_options,
+    tariff_family,
+)
 
 _LOGGER = logging.getLogger(__name__)
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")

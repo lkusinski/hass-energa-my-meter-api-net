@@ -3,8 +3,6 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-import pytest
-
 from custom_components.energa_mobile.core.readings.models import IntervalReading
 from custom_components.energa_mobile.projections.forecast import (
     DayType,

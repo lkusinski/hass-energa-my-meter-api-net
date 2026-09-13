@@ -7,10 +7,8 @@ Kryteria akceptacji:
 - Bezpieczeństwo metadanych StatisticMetaData.
 """
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
-
-import pytest
 
 from custom_components.energa_mobile.ha.recorder_adapter import (
     RecorderAdapter,

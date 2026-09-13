@@ -10,15 +10,15 @@ Features:
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-import logging
 from typing import Any
 
 import aiohttp
 
-from .models import MarketPriceRecord
 from ...const import PSE_RCE_API_URL
+from .models import MarketPriceRecord
 
 _LOGGER = logging.getLogger(__name__)
 

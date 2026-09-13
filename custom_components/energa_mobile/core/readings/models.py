@@ -5,10 +5,10 @@ Reference: Energa HA Skorygowana Architektura Docelowa (04.09.2026), Rozdzial 4 
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-import hashlib
 
 
 @dataclass(frozen=True)

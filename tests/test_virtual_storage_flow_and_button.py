@@ -1,26 +1,28 @@
 """Unit tests for Virtual Storage Net-metering config flow, button, and synthetic sensors (v1.6.0)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
+from custom_components.energa_mobile.button import EnergaConfigureEnergyDashboardButton
+from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
 from custom_components.energa_mobile.const import (
+    CONF_BANK_INITIAL_KWH,
+    CONF_BANK_INITIAL_KWH_L1,
+    CONF_BANK_INITIAL_KWH_L2,
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_ENERGY_DASHBOARD_MODE,
     CONF_INVERTER_ENERGY_ENTITY,
     CONF_PROSUMER_COEFFICIENT,
     CONF_PROSUMER_POWER_GROUP,
-    ENERGY_MODE_PHYSICAL_GRID,
     ENERGY_MODE_VIRTUAL_STORAGE,
     POWER_GROUP_GT_10KW,
     POWER_GROUP_LE_10KW,
-    DEFAULT_ENABLE_SYNTHETIC_STORAGE,
-    DEFAULT_ENERGY_DASHBOARD_MODE,
-    DEFAULT_PROSUMER_POWER_GROUP,
 )
-from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
-from custom_components.energa_mobile.button import EnergaConfigureEnergyDashboardButton
-from custom_components.energa_mobile.sensor import EnergaSyntheticStatisticsSensor, EnergaBankKwhSensor
-
+from custom_components.energa_mobile.sensor import (
+    EnergaBankKwhSensor,
+    EnergaSyntheticStatisticsSensor,
+)
 
 
 class TestVirtualStorageOptionsFlow:
@@ -62,6 +64,28 @@ class TestVirtualStorageOptionsFlow:
         assert res["data"][CONF_PROSUMER_POWER_GROUP] == POWER_GROUP_GT_10KW
         assert res["data"][CONF_PROSUMER_COEFFICIENT] == 0.7
         assert res["data"][CONF_ENABLE_SYNTHETIC_STORAGE] is True
+
+    @pytest.mark.asyncio
+    async def test_options_prices_dual_zone_initial_bank_auto_sum(self):
+        entry = MagicMock()
+        entry.options = {
+            CONF_BANK_INITIAL_KWH: 0.0,
+        }
+        flow = EnergaOptionsFlow(entry)
+        flow.async_create_entry = MagicMock(side_effect=lambda title, data: {"type": "create_entry", "data": data})
+        flow._get_active_meters = MagicMock(return_value=[{"meter_point_id": "10000001", "zone_count": 2}])
+
+        user_input = {
+            CONF_BANK_INITIAL_KWH_L1: 752.0,
+            CONF_BANK_INITIAL_KWH_L2: 606.0,
+            CONF_BANK_INITIAL_KWH: 0.0,
+        }
+        res = await flow.async_step_prices(user_input)
+        assert res["type"] == "create_entry"
+        assert res["data"][CONF_BANK_INITIAL_KWH] == 1358.0
+        assert res["data"][CONF_BANK_INITIAL_KWH_L1] == 752.0
+        assert res["data"][CONF_BANK_INITIAL_KWH_L2] == 606.0
+
 
 
 class TestConfigureEnergyDashboardButton:
@@ -220,7 +244,9 @@ class TestSyntheticSensor:
 
     @pytest.mark.asyncio
     async def test_async_synthesize_storage_from_recorder(self, monkeypatch):
-        from custom_components.energa_mobile.synthetic_storage import async_synthesize_storage_from_recorder
+        from custom_components.energa_mobile.synthetic_storage import (
+            async_synthesize_storage_from_recorder,
+        )
 
         hass = MagicMock()
         entry = MagicMock()
@@ -246,8 +272,6 @@ class TestSyntheticSensor:
         import sys
         rec_stat_mod = sys.modules["homeassistant.components.recorder.statistics"]
         rec_stat_mod.async_import_statistics = mock_async_import_statistics
-
-        mock_recorder = MagicMock()
 
         def mock_executor_job(func, *args):
             stat_ids = func.args[3] if hasattr(func, "args") and len(func.args) > 3 else []

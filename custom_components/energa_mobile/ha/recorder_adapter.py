@@ -11,11 +11,11 @@ Invariants:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
-from ..const import DOMAIN, MAX_HOURLY_KWH
+from ..const import MAX_HOURLY_KWH
 
 try:
     from homeassistant.components.recorder.models import (
@@ -242,7 +242,9 @@ class RecorderAdapter:
 
         try:
             from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.statistics import statistics_during_period
+            from homeassistant.components.recorder.statistics import (
+                statistics_during_period,
+            )
 
             res = await get_instance(self.hass).async_add_executor_job(
                 functools.partial(

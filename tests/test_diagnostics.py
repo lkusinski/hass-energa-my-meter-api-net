@@ -8,13 +8,14 @@ Kryteria akceptacji:
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from custom_components.energa_mobile.const import DOMAIN
 from custom_components.energa_mobile.diagnostics import (
     async_get_config_entry_diagnostics,
     redact_sensitive_data,
 )
-from custom_components.energa_mobile.const import DOMAIN
 
 
 def test_redact_sensitive_data():

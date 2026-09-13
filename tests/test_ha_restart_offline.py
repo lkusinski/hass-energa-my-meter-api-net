@@ -5,17 +5,13 @@ Kryterium akceptacji:
 "HA restart: Brak polaczenia po restarcie nie emituje zera i nie resetuje state/sum."
 """
 
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from custom_components.energa_mobile.sensor import (
-    EnergaStatisticsSensor,
     EnergaBankKwhSensor,
     EnergaBillCurrentSensor,
+    EnergaStatisticsSensor,
 )
-from custom_components.energa_mobile.ha.recorder_adapter import RecorderAdapter
 
 
 def test_statistics_sensor_offline_restart_no_zero_emission():

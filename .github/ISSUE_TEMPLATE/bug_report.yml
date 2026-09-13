@@ -1,0 +1,54 @@
+name: "🐛 Zgłoszenie błędu"
+description: "Zgłoś błąd w integracji Energa My Meter"
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "Opis błędu"
+      description: "Opisz co się wydarzyło i czego oczekiwałeś."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "Wersja integracji"
+      placeholder: "np. 1.7.2"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: "Wersja Home Assistant"
+      placeholder: "np. 2026.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: tariff
+    attributes:
+      label: "Taryfa"
+      options:
+        - G11
+        - G12
+        - G12W
+        - G13
+        - Inna
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: "System rozliczeniowy"
+      options:
+        - Net-metering (opusty 0.8)
+        - Net-metering (opusty 0.7)
+        - Net-billing (RCEm)
+        - Konsument (bez PV)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logi"
+      description: "Wklej logi z Ustawienia → System → Logi (filtruj: energa_mobile)"
+      render: text

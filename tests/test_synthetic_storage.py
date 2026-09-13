@@ -1,9 +1,12 @@
 """Unit tests for synthetic storage calculation engine."""
 
 from datetime import datetime, timedelta, timezone
+
 import pytest
 
-from custom_components.energa_mobile.synthetic_storage import calculate_synthetic_storage
+from custom_components.energa_mobile.synthetic_storage import (
+    calculate_synthetic_storage,
+)
 
 
 def test_empty_records():
@@ -181,8 +184,14 @@ def test_incremental_calculation_with_base_sums():
 async def test_async_synthesize_storage_incremental_gap_filling(monkeypatch):
     """Test gap detection and self-healing in async_synthesize_storage_from_recorder."""
     from unittest.mock import AsyncMock, MagicMock
-    from custom_components.energa_mobile.const import CONF_ENABLE_SYNTHETIC_STORAGE, CONF_PROSUMER_COEFFICIENT
-    from custom_components.energa_mobile.synthetic_storage import async_synthesize_storage_from_recorder
+
+    from custom_components.energa_mobile.const import (
+        CONF_ENABLE_SYNTHETIC_STORAGE,
+        CONF_PROSUMER_COEFFICIENT,
+    )
+    from custom_components.energa_mobile.synthetic_storage import (
+        async_synthesize_storage_from_recorder,
+    )
 
     hass = MagicMock()
     entry = MagicMock()

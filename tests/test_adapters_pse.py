@@ -10,8 +10,8 @@ Verifies:
 
 from datetime import date
 from decimal import Decimal
-import pytest
 
+import pytest
 
 from custom_components.energa_mobile.adapters.pse.rcem_parser import (
     get_effective_rcem,
@@ -91,7 +91,10 @@ def test_rcem_correction_and_as_of_filtering():
 async def test_async_fetch_rce_day():
     """Verify async fetching of daily RCE records via PSE API."""
     from unittest.mock import AsyncMock, MagicMock
-    from custom_components.energa_mobile.adapters.pse.rce_client import async_fetch_rce_day
+
+    from custom_components.energa_mobile.adapters.pse.rce_client import (
+        async_fetch_rce_day,
+    )
 
     mock_resp = AsyncMock()
     mock_resp.status = 200

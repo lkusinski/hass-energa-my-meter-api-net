@@ -5,8 +5,8 @@ Forward-only calculation: adds hourly values to last known sum (or 0).
 Guarantees monotonically increasing, non-negative sums.
 """
 
-from decimal import Decimal
 import logging
+from decimal import Decimal
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant

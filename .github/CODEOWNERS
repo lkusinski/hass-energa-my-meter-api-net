@@ -1,0 +1,8 @@
+# Cały kod integracji
+/custom_components/energa_mobile/ @lkusinski
+
+# Testy
+/tests/ @lkusinski
+
+# Dokumentacja
+/docs/ @lkusinski

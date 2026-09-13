@@ -317,7 +317,10 @@ class TestBillCurrentSensor:
 
     def test_current_bill_calculation(self):
         """MTD bill reflects actual consumed energy minus prosumer settlement."""
-        from custom_components.energa_mobile.tariff import compute_bill, G12W_DEFAULT_FEES
+        from custom_components.energa_mobile.tariff import (
+            G12W_DEFAULT_FEES,
+            compute_bill,
+        )
 
         # 4 days MTD: 51.74 kWh day, 9.70 kWh night, 41.58 kWh export, RCEm 0.26288
         imp_d = 51.74
@@ -346,7 +349,10 @@ class TestBillComponentSensor:
 
     def test_bill_components_breakdown(self):
         """Verify individual MTD bill components match compute_bill output."""
-        from custom_components.energa_mobile.tariff import compute_bill, G12W_DEFAULT_FEES
+        from custom_components.energa_mobile.tariff import (
+            G12W_DEFAULT_FEES,
+            compute_bill,
+        )
 
         imp_d = 51.74
         imp_n = 9.70
@@ -396,6 +402,7 @@ class TestPeriodSumsFallback:
         """Verify that coordinator calculates period sums correctly from hourly stats."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
         from custom_components.energa_mobile.sensor import EnergaCoordinator
 
         tz = ZoneInfo("Europe/Warsaw")
@@ -437,6 +444,7 @@ class TestPeriodSumsFallback:
         """Verify handling of ISO timestamp strings and single-zone meter."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
+
         from custom_components.energa_mobile.sensor import EnergaCoordinator
 
         tz = ZoneInfo("Europe/Warsaw")
@@ -465,7 +473,6 @@ class TestPeriodSumsFallback:
 
 def test_fifo_bank_from_monthly_partial_coverage():
     """Verify FIFO bank coverage threshold in sensor.py (v1.3.4)."""
-    from datetime import date
     from custom_components.energa_mobile.sensor import _fifo_bank_from_monthly
 
     # 2 months with flows (< 3) -> should return (None, None)
@@ -492,6 +499,7 @@ def test_fifo_bank_from_monthly_partial_coverage():
 def test_live_sensor_export_defaults_zero_for_null_prosumer():
     """Verify that EnergaLiveSensor returns 0.0 instead of None for missing prosumer export data."""
     from unittest.mock import MagicMock
+
     from custom_components.energa_mobile.sensor import EnergaLiveSensor
 
     coord = MagicMock()

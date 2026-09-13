@@ -1,15 +1,15 @@
 """Unit tests for spike prevention mechanisms."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from custom_components.energa_mobile.sensor import (
-    EnergaStatisticsSensor,
-    EnergaBillComponentSensor,
-)
 from custom_components.energa_mobile.data_updater import EnergaDataUpdater
-from custom_components.energa_mobile.const import DOMAIN
+from custom_components.energa_mobile.sensor import (
+    EnergaBillComponentSensor,
+    EnergaStatisticsSensor,
+)
 
 
 def test_energa_statistics_sensor_native_value_is_none():

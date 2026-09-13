@@ -10,11 +10,11 @@ Pure domain logic:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
-import logging
 from typing import Sequence
 
 from ..adapters.pse.models import MarketPriceRecord

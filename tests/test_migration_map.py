@@ -5,7 +5,6 @@ Warunek testu: Dwa seriale jednego PPE daja ciaglosc per register/zone, bez skok
 """
 
 from decimal import Decimal
-import pytest
 
 from custom_components.energa_mobile.ha.migration_map import MigrationMap
 

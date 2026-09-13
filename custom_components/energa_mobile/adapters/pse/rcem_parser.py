@@ -9,10 +9,10 @@ Solves P1:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+import re
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
-import re
 
 from .models import MarketPriceRecord
 

@@ -9,8 +9,8 @@ Provides decision binary sensors for Home Assistant automations:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
