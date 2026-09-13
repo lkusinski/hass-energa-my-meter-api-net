@@ -24,7 +24,39 @@ def is_export_prosumer(meter: dict[str, Any]) -> bool:
     return bool(meter.get("is_prosumer") or meter.get("has_export"))
 
 
-def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any]:
+def resolve_entity(
+    hass: HomeAssistant | None,
+    primary: str,
+    fallbacks: list[str] | None = None,
+) -> str:
+    """Resolve the most accurate entity ID available in Home Assistant.
+
+    Checks hass.states first, then entity registry if available, and falls back to primary.
+    """
+    if hass is None:
+        return primary
+
+    candidates = [primary] + (fallbacks or [])
+    for candidate in candidates:
+        if hass.states.get(candidate) is not None:
+            return candidate
+
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        ent_reg = er.async_get(hass)
+        for candidate in candidates:
+            if candidate in ent_reg.entities:
+                return candidate
+    except Exception:
+        pass
+
+    return primary
+
+
+def build_meter_view(
+    meter: dict[str, Any], coeff: float = 0.8, hass: HomeAssistant | None = None
+) -> dict[str, Any]:
     """Build a tailored Lovelace view for a specific Energa meter."""
     meter_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_id))
@@ -41,6 +73,15 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     effective_coeff = float(meter.get("prosumer_coefficient")) if meter.get("prosumer_coefficient") is not None else coeff
     is_net_billing = is_prosumer and effective_coeff < 0.7
     is_net_metering = is_prosumer and not is_net_billing
+
+    def _eid(name: str, domain: str = "sensor") -> str:
+        primary = f"{domain}.energa_{s_slug}_{name}"
+        fallbacks = [
+            f"{domain}.licznik_{s_slug}_{name}",
+            f"{domain}.energa_{meter_id}_{name}",
+            f"{domain}.licznik_{meter_id}_{name}",
+        ]
+        return resolve_entity(hass, primary, fallbacks)
 
     raw_label = (
         str(meter.get("customer_label", "")).strip()
@@ -96,11 +137,11 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     # 1. Badges (Agrestowa 4 style)
     badges = [
         {
-            "entity": f"sensor.energa_{s_slug}_dotychczasowy_rachunek",
+            "entity": _eid("dotychczasowy_rachunek"),
             "name": "Dotychczas brutto",
         },
         {
-            "entity": f"sensor.energa_{s_slug}_prognoza_rachunku",
+            "entity": _eid("prognoza_rachunku"),
             "name": "Prognoza brutto",
         },
     ]
@@ -109,34 +150,34 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
         badges.insert(
             0,
             {
-                "entity": f"sensor.energa_{s_slug}_bank_wirtualny_kwh",
+                "entity": _eid("bank_wirtualny_kwh"),
                 "name": "Magazyn kWh",
             },
         )
         badges.insert(
             1,
             {
-                "entity": f"sensor.energa_{s_slug}_magazyn_poziom",
+                "entity": _eid("magazyn_poziom"),
                 "name": "Poziom Magazynu",
             },
         )
     elif is_net_billing:
         badges.append(
             {
-                "entity": f"sensor.energa_{s_slug}_bank_wirtualny_pln",
+                "entity": _eid("bank_wirtualny_pln"),
                 "name": "Magazyn/Depozyt",
             }
         )
         badges.append(
             {
-                "entity": f"sensor.energa_{s_slug}_cena_oddania",
+                "entity": _eid("cena_oddania"),
                 "name": "Wycena oddania",
             }
         )
     else:
         badges.append(
             {
-                "entity": f"sensor.energa_{s_slug}_taryfa",
+                "entity": _eid("taryfa"),
                 "name": "Taryfa",
             }
         )
@@ -161,25 +202,25 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
 
     # 3. Card: Billing breakdown (MTD + Forecast)
     bill_entities = [
-        {"entity": f"sensor.energa_{s_slug}_dotychczasowy_rachunek", "name": "Dotychczasowy rachunek (brutto)"},
-        {"entity": f"sensor.energa_{s_slug}_prognoza_rachunku", "name": "Prognoza na koniec miesiąca (brutto)"},
-        {"entity": f"sensor.energa_{s_slug}_koszt_brutto_mtd", "name": "Całkowity koszt energii i dystrybucji brutto"},
-        {"entity": f"sensor.energa_{s_slug}_koszt_energii_czynnej_mtd", "name": "Energia czynna MTD (brutto)"},
-        {"entity": f"sensor.energa_{s_slug}_koszt_dystrybucji_mtd", "name": "Dystrybucja MTD (brutto)"},
+        {"entity": _eid("dotychczasowy_rachunek"), "name": "Dotychczasowy rachunek (brutto)"},
+        {"entity": _eid("prognoza_rachunku"), "name": "Prognoza na koniec miesiąca (brutto)"},
+        {"entity": _eid("koszt_brutto_mtd"), "name": "Całkowity koszt energii i dystrybucji brutto"},
+        {"entity": _eid("koszt_energii_czynnej_mtd"), "name": "Energia czynna MTD (brutto)"},
+        {"entity": _eid("koszt_dystrybucji_mtd"), "name": "Dystrybucja MTD (brutto)"},
     ]
     if is_net_billing:
         bill_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_pln", "name": "Stan konta wirtualnego (Depozyt PLN)"}
+            {"entity": _eid("bank_wirtualny_pln"), "name": "Stan konta wirtualnego (Depozyt PLN)"}
         )
         bill_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_cena_oddania", "name": "Wycena zasilenia depozytu brutto"}
+            {"entity": _eid("cena_oddania"), "name": "Wycena zasilenia depozytu brutto"}
         )
         bill_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_odzyskano_z_depozytu_mtd", "name": "Potrącenie z depozytu prosumenckiego"}
+            {"entity": _eid("odzyskano_z_depozytu_mtd"), "name": "Potrącenie z depozytu prosumenckiego"}
         )
     elif is_net_metering:
         bill_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_kwh", "name": "Stan magazynu wirtualnego (kWh)"}
+            {"entity": _eid("bank_wirtualny_kwh"), "name": "Stan magazynu wirtualnego (kWh)"}
         )
 
     cards.append(
@@ -194,24 +235,24 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     # 4. Card: Storage / Deposit (if prosumer)
     if is_net_metering:
         storage_entities = [
-            {"entity": f"sensor.energa_{s_slug}_magazyn_poziom", "name": "Poziom napełnienia magazynu"},
-            {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_kwh", "name": "Dostępne saldo w magazynie (Łącznie)"},
+            {"entity": _eid("magazyn_poziom"), "name": "Poziom napełnienia magazynu"},
+            {"entity": _eid("bank_wirtualny_kwh"), "name": "Dostępne saldo w magazynie (Łącznie)"},
         ]
         if has_zones:
             storage_entities.append(
-                {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_l1_dzien_kwh", "name": "Magazyn Strefa 1 / Dzień (T1)"}
+                {"entity": _eid("bank_wirtualny_l1_dzien_kwh"), "name": "Magazyn Strefa 1 / Dzień (T1)"}
             )
             storage_entities.append(
-                {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_l2_noc_kwh", "name": "Magazyn Strefa 2 / Noc (T2)"}
+                {"entity": _eid("bank_wirtualny_l2_noc_kwh"), "name": "Magazyn Strefa 2 / Noc (T2)"}
             )
             storage_entities.append(
-                {"entity": f"sensor.energa_{s_slug}_pokrycie_z_magazynu_dzien_mtd", "name": "Pobranie z magazynu (Dzień T1 MTD)"}
+                {"entity": _eid("pokrycie_z_magazynu_dzien_mtd"), "name": "Pobranie z magazynu (Dzień T1 MTD)"}
             )
             storage_entities.append(
-                {"entity": f"sensor.energa_{s_slug}_pokrycie_z_magazynu_noc_mtd", "name": "Pobranie z magazynu (Noc T2 MTD)"}
+                {"entity": _eid("pokrycie_z_magazynu_noc_mtd"), "name": "Pobranie z magazynu (Noc T2 MTD)"}
             )
         storage_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_wspolczynnik_prosumencki", "name": "Współczynnik opustu"}
+            {"entity": _eid("wspolczynnik_prosumencki"), "name": "Współczynnik opustu"}
         )
 
         cards.append(
@@ -229,54 +270,72 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
                 "title": "🔋 Wirtualny Magazyn Energii (Depozyt Prosumencki)",
                 "icon": "mdi:piggy-bank",
                 "entities": [
-                    {"entity": f"sensor.energa_{s_slug}_bank_wirtualny_pln", "name": "Dostępny stan depozytu prosumenckiego"},
-                    {"entity": f"sensor.energa_{s_slug}_depozyt_wygenerowany_mtd", "name": "Doładowanie depozytu z PV w tym m-cu"},
-                    {"entity": f"sensor.energa_{s_slug}_odzyskano_z_depozytu_mtd", "name": "Odzyskano z depozytu na pokrycie energii"},
-                    {"entity": f"sensor.energa_{s_slug}_rcem_auto", "name": "Rynkowa cena energii skupu RCEm (PSE)"},
-                    {"entity": f"sensor.energa_{s_slug}_cena_oddania", "name": "Wycena zasilenia depozytu brutto"},
+                    {"entity": _eid("bank_wirtualny_pln"), "name": "Dostępny stan depozytu prosumenckiego"},
+                    {"entity": _eid("depozyt_wygenerowany_mtd"), "name": "Doładowanie depozytu z PV w tym m-cu"},
+                    {"entity": _eid("odzyskano_z_depozytu_mtd"), "name": "Odzyskano z depozytu na pokrycie energii"},
+                    {"entity": _eid("rcem_auto"), "name": "Rynkowa cena energii skupu RCEm (PSE)"},
+                    {"entity": _eid("cena_oddania"), "name": "Wycena zasilenia depozytu brutto"},
                 ],
             }
         )
 
     # 5. Card: Tariffs and Energy Volumes
     tariff_entities: list[dict[str, Any]] = [
-        {"entity": f"sensor.energa_{s_slug}_taryfa", "name": "Aktywna taryfa OSD"},
+        {"entity": _eid("taryfa"), "name": "Aktywna taryfa OSD"},
     ]
     if has_zones:
         tariff_entities.extend(
             [
-                {"entity": f"sensor.energa_{s_slug}_cena_poboru_strefa_1", "name": "Stawka poboru Strefa 1 (Dzień)"},
-                {"entity": f"sensor.energa_{s_slug}_pobor_energii_strefa_1_mtd", "name": "Pobór energii Strefa 1 (MTD)"},
-                {"entity": f"sensor.energa_{s_slug}_cena_poboru_strefa_2", "name": "Stawka poboru Strefa 2 (Noc)"},
-                {"entity": f"sensor.energa_{s_slug}_pobor_energii_strefa_2_mtd", "name": "Pobór energii Strefa 2 (MTD)"},
+                {"entity": _eid("cena_poboru_strefa_1"), "name": "Stawka poboru Strefa 1 (Dzień)"},
+                {"entity": _eid("pobor_energii_strefa_1_mtd"), "name": "Pobór energii Strefa 1 (MTD)"},
+                {"entity": _eid("cena_poboru_strefa_2"), "name": "Stawka poboru Strefa 2 (Noc)"},
+                {"entity": _eid("pobor_energii_strefa_2_mtd"), "name": "Pobór energii Strefa 2 (MTD)"},
             ]
         )
         if is_prosumer:
             tariff_entities.extend(
                 [
-                    {"entity": f"sensor.energa_{s_slug}_oddanie_energii_strefa_1_mtd", "name": "Oddanie energii Strefa 1 (MTD)"},
-                    {"entity": f"sensor.energa_{s_slug}_oddanie_energii_strefa_2_mtd", "name": "Oddanie energii Strefa 2 (MTD)"},
+                    {"entity": _eid("oddanie_energii_strefa_1_mtd"), "name": "Oddanie energii Strefa 1 (MTD)"},
+                    {"entity": _eid("oddanie_energii_strefa_2_mtd"), "name": "Oddanie energii Strefa 2 (MTD)"},
                 ]
             )
     else:
         tariff_entities.extend(
             [
-                {"entity": f"sensor.energa_{s_slug}_cena_poboru", "name": "Stawka poboru G11"},
-                {"entity": f"sensor.energa_{s_slug}_pobor_energii_mtd", "name": "Pobór energii G11 (MTD)"},
+                {"entity": _eid("cena_poboru"), "name": "Stawka poboru G11"},
+                {"entity": _eid("pobor_energii_mtd"), "name": "Pobór energii G11 (MTD)"},
             ]
         )
         if is_prosumer:
             tariff_entities.append(
-                {"entity": f"sensor.energa_{s_slug}_oddanie_energii_mtd", "name": "Oddanie energii G11 (MTD)"}
+                {"entity": _eid("oddanie_energii_mtd"), "name": "Oddanie energii G11 (MTD)"}
             )
 
     if is_prosumer:
-        tariff_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_autokonsumpcja_mtd", "name": "Autokonsumpcja MTD"}
-        )
-        tariff_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_stopien_autokonsumpcji_mtd", "name": "Stopień autokonsumpcji"}
-        )
+        auto_ent = _eid("autokonsumpcja_mtd")
+        stopien_ent = _eid("stopien_autokonsumpcji_mtd")
+        has_auto = False
+        if hass is not None:
+            if hass.states.get(auto_ent) is not None:
+                has_auto = True
+            else:
+                try:
+                    from homeassistant.helpers import entity_registry as er
+
+                    reg = er.async_get(hass)
+                    has_auto = auto_ent in reg.entities
+                except Exception:
+                    pass
+        elif meter.get("has_inverter") or meter.get("inverter_entity"):
+            has_auto = True
+
+        if has_auto:
+            tariff_entities.append(
+                {"entity": auto_ent, "name": "Autokonsumpcja MTD"}
+            )
+            tariff_entities.append(
+                {"entity": stopien_ent, "name": "Stopień autokonsumpcji"}
+            )
 
     cards.append(
         {
@@ -289,20 +348,20 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
 
     # 6. Card: Physical meter registers
     meter_entities: list[dict[str, Any]] = [
-        {"entity": f"sensor.energa_{s_slug}_numer_licznika", "name": "Numer seryjny licznika"},
-        {"entity": f"sensor.energa_{s_slug}_ppe", "name": "Numer PPE"},
-        {"entity": f"sensor.energa_{s_slug}_stan_licznika_import", "name": "Licznik poboru (1.8.0)"},
+        {"entity": _eid("numer_licznika"), "name": "Numer seryjny licznika"},
+        {"entity": _eid("ppe"), "name": "Numer PPE"},
+        {"entity": _eid("stan_licznika_import"), "name": "Licznik poboru (1.8.0)"},
     ]
     if is_prosumer:
         meter_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_stan_licznika_export", "name": "Licznik oddania (2.8.0)"}
+            {"entity": _eid("stan_licznika_export"), "name": "Licznik oddania (2.8.0)"}
         )
     meter_entities.append(
-        {"entity": f"sensor.energa_{s_slug}_zuzycie_dzis", "name": "Pobór energii dzisiaj"}
+        {"entity": _eid("zuzycie_dzis"), "name": "Pobór energii dzisiaj"}
     )
     if is_prosumer:
         meter_entities.append(
-            {"entity": f"sensor.energa_{s_slug}_produkcja_dzis", "name": "Oddanie energii dzisiaj"}
+            {"entity": _eid("produkcja_dzis"), "name": "Oddanie energii dzisiaj"}
         )
 
     cards.append(
@@ -322,13 +381,13 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
                 "title": "⚡ Ceny Dynamiczne RCE i Arbitraż (PSE)",
                 "icon": "mdi:chart-timeline-variant",
                 "entities": [
-                    {"entity": f"sensor.energa_{s_slug}_rcem_auto", "name": "Miesięczna cena referencyjna RCEm"},
-                    {"entity": f"sensor.energa_{s_slug}_cena_oddania", "name": "Wycena zasilenia depozytu brutto"},
-                    {"entity": f"sensor.licznik_{s_slug}_dynamiczna_cena_energii_rce", "name": "Bieżąca cena RCE (15-min)"},
-                    {"entity": f"sensor.licznik_{s_slug}_spread_arbitrazowy_bess_rce", "name": "Spread arbitrażowy brutto"},
-                    {"entity": f"binary_sensor.licznik_{s_slug}_okno_ladowania_bess_arbitraz_rce", "name": "Okno taniego ładowania (BESS/EV)"},
-                    {"entity": f"binary_sensor.licznik_{s_slug}_okno_rozladowania_bess_szczyt_rce", "name": "Okno szczytu rozładowania"},
-                    {"entity": f"binary_sensor.licznik_{s_slug}_cena_ujemna_rce_zagrozenie_eksportu", "name": "Ostrzeżenie: ujemna cena RCE"},
+                    {"entity": _eid("rcem_auto"), "name": "Miesięczna cena referencyjna RCEm"},
+                    {"entity": _eid("cena_oddania"), "name": "Wycena zasilenia depozytu brutto"},
+                    {"entity": _eid("dynamiczna_cena_energii_rce"), "name": "Bieżąca cena RCE (15-min)"},
+                    {"entity": _eid("spread_arbitrazowy_bess_rce"), "name": "Spread arbitrażowy brutto"},
+                    {"entity": _eid("okno_ladowania_bess_arbitraz_rce", domain="binary_sensor"), "name": "Okno taniego ładowania (BESS/EV)"},
+                    {"entity": _eid("okno_rozladowania_bess_szczyt_rce", domain="binary_sensor"), "name": "Okno szczytu rozładowania"},
+                    {"entity": _eid("cena_ujemna_rce_zagrozenie_eksportu", domain="binary_sensor"), "name": "Ostrzeżenie: ujemna cena RCE"},
                 ],
             }
         )
@@ -343,11 +402,15 @@ def build_meter_view(meter: dict[str, Any], coeff: float = 0.8) -> dict[str, Any
     }
 
 
-def build_energa_dashboard(meters: list[dict[str, Any]], coeff: float = 0.8) -> dict[str, Any]:
+def build_energa_dashboard(
+    meters: list[dict[str, Any]],
+    coeff: float = 0.8,
+    hass: HomeAssistant | None = None,
+) -> dict[str, Any]:
     """Build full dashboard configuration containing all meter views."""
     views = []
     for idx, meter in enumerate(meters):
-        view = build_meter_view(meter, coeff=coeff)
+        view = build_meter_view(meter, coeff=coeff, hass=hass)
         if idx == 0:
             view["path"] = "glowny"
         views.append(view)
@@ -368,7 +431,7 @@ async def async_provision_dashboard(
 ) -> bool:
     """Provision or update the Energa Lovelace dashboard in Home Assistant."""
     try:
-        ui_config = build_energa_dashboard(meters, coeff=coeff)
+        ui_config = build_energa_dashboard(meters, coeff=coeff, hass=hass)
         clean_url = url_path.strip("/ ")
         storage_key_suffix = clean_url.replace("-", "_")
 
@@ -437,17 +500,24 @@ async def async_provision_dashboard(
                     return str(v["meter_serial"])
                 for b in v.get("badges", []):
                     ent = b.get("entity", "") if isinstance(b, dict) else str(b)
-                    if "sensor.energa_" in ent:
-                        parts = ent.replace("sensor.energa_", "").split("_")
-                        if parts:
-                            return parts[0]
+                    for prefix in ("sensor.energa_", "sensor.licznik_"):
+                        if prefix in ent:
+                            parts = ent.replace(prefix, "").split("_")
+                            if parts:
+                                return parts[0]
                 for c in v.get("cards", []):
                     for ent_item in c.get("entities", []):
                         ent = ent_item.get("entity", "") if isinstance(ent_item, dict) else str(ent_item)
-                        if "sensor.energa_" in ent:
-                            parts = ent.replace("sensor.energa_", "").split("_")
-                            if parts:
-                                return parts[0]
+                        for prefix in (
+                            "sensor.energa_",
+                            "sensor.licznik_",
+                            "binary_sensor.energa_",
+                            "binary_sensor.licznik_",
+                        ):
+                            if prefix in ent:
+                                parts = ent.replace(prefix, "").split("_")
+                                if parts:
+                                    return parts[0]
                 return None
 
             new_serials = {_extract_serial(v) for v in new_views}

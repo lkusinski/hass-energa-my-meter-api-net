@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.8.2 (2026-09-13) — Dynamiczne Rozpoznawanie Encji Pulpitu, Spójność Urządzeń i Wyciszenie Logów Monotonic Clamp
+
+### 🐛 Rozwiązanie Zgłoszenia Issue #2 ("no entities")
+- **Dynamiczne Rozpoznawanie Encji (`dashboard_generator.py`):**
+  - Wprowadzono inteligentną funkcję `resolve_entity(hass, primary, fallbacks)`, która dynamicznie weryfikuje aktualne identyfikatory encji w rejestrze `hass.states` oraz `entity_registry`.
+  - Pulpit automatycznie dopasowuje się do encji z prefiksem `sensor.energa_*` lub `sensor.licznik_*`, eliminując błąd "Wykryto nieznaną encję" na kartach Lovelace niezależnie od kolejności inicjalizacji platform.
+  - Warunkowe generowanie kart autokonsumpcji: encje `autokonsumpcja_mtd` oraz `stopien_autokonsumpcji_mtd` są dodawane wyłącznie wtedy, gdy użytkownik skonfiguruje encję falownika (`CONF_INVERTER_ENERGY_ENTITY`) lub gdy sensory realnie istnieją w Home Assistant.
+- **Ujednolicenie Rejestracji Urządzeń (`binary_sensor.py`, `sensors/price.py`):**
+  - Ujednolicono identyfikator urządzenia `DeviceInfo` we wszystkich encjach binarnych (okna ładowania/rozładowania BESS, ujemne ceny RCE, tania strefa) oraz cen dynamicznych RCE na `identifiers={(DOMAIN, str(meter_serial))}` i nazwę `Energa {serial}` (zamiast `Licznik {serial}`).
+  - Zapobiega to rozbieżnościom nazw w rejestrze urządzeń Home Assistant (`dr.async_get(hass)`), gdy platformy pomocnicze rejestrują się przed platformą główną `sensor`.
+- **Wyciszenie Spamu w Logach (`recorder_adapter.py`):**
+  - Zmieniono poziom logowania monotonicznego przycinania sum (`validate_and_clean_statistics`) z `WARNING` na `DEBUG`.
+  - Zapobiega to zalewaniu dziennika zdarzeń setkami tysięcy ostrzeżeń podczas 2-letniego importu historii zużycia dla liczników ze skokami lub korektami wskazań OSD.
+- **Klarowne Komunikaty Powiadomień (`services.py`):**
+  - Doprecyzowano treść powiadomień po instalacji i imporcie historii, jednoznacznie informując, że wbudowany domyślny Panel Energia Home Assistant nie jest modyfikowany bez wiedzy użytkownika, a dane trafiają do długoterminowych statystyk (LTS).
+
 ## v1.8.1 (2026-09-13) — Modułowe Usługi (services.py), Sensory Decyzyjne i Poprawki CI/CD
 
 ### 🏗️ Modułowa Refaktoryzacja Usług (`services.py`)

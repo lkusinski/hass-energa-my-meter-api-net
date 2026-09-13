@@ -233,10 +233,11 @@ class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers={(DOMAIN, self._meter_point_id)},
-            name=f"Licznik {self._meter_serial}",
+            identifiers={(DOMAIN, str(self._meter_serial))},
+            name=f"Energa {self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
+            configuration_url="https://mojlicznik.energa-operator.pl",
         )
 
     @property
@@ -290,10 +291,11 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
-            identifiers={(DOMAIN, self._meter_point_id)},
-            name=f"Licznik {self._meter_serial}",
+            identifiers={(DOMAIN, str(self._meter_serial))},
+            name=f"Energa {self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
+            configuration_url="https://mojlicznik.energa-operator.pl",
         )
 
     @property
