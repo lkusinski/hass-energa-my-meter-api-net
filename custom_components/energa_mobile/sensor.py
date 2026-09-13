@@ -69,7 +69,10 @@ from .const import (
     DOMAIN,
     FIFO_MIN_COVERAGE_MONTHS,
     ROLLING_MIN_COVERAGE_DAYS,
+    get_meter_baseline,
+    get_meter_initial_bank,
     get_price_for_key,
+    get_prosumer_coefficient,
 )
 from .settlement import (
     FlowAccumulator,
@@ -437,7 +440,9 @@ async def async_setup_entry(
         # === PROSUMER & BANK SENSORS ===
         # Auto-detect old (net-metering, coeff >= 0.7) vs new (net-billing, coeff < 0.7)
         if is_export_prosumer(meter):
-            coeff = float(entry.options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            coeff = get_prosumer_coefficient(
+                entry.options, str(meter_id), serial=str(serial)
+            )
             is_old_system = coeff >= 0.7  # 0.8 or 0.7 = old net-metering
 
             if is_old_system:
@@ -925,14 +930,9 @@ async def async_setup_entry(
         _doomed: set = set()
         for _m in meters_to_process:
             _pros = is_export_prosumer(_m)
-            try:
-                _coeff = float(
-                    entry.options.get(
-                        CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
-                    )
-                )
-            except (ValueError, TypeError):
-                _coeff = DEFAULT_PROSUMER_COEFFICIENT
+            _mid_str = str(_m["meter_point_id"])
+            _ser_str = str(_m.get("meter_serial", _mid_str))
+            _coeff = get_prosumer_coefficient(entry.options, _mid_str, serial=_ser_str)
             _doomed.update(
                 orphan_bank_uids(
                     str(_m["meter_point_id"]),
@@ -947,6 +947,7 @@ async def async_setup_entry(
                     str(_m.get("meter_serial", _m["meter_point_id"])),
                 )
             )
+        _LOGGER.info("Energa cleanup for entry %s: doomed=%s", entry.entry_id, _doomed)
         if _doomed:
             _ent_reg = er.async_get(hass)
             for _ent in list(_ent_reg.entities.values()):
@@ -956,11 +957,11 @@ async def async_setup_entry(
                     and (_ent.unique_id or "") in _doomed
                 ):
                     _LOGGER.info(
-                        "Removing consumer leftover %s", _ent.entity_id
+                        "Removing consumer leftover %s (uid=%s)", _ent.entity_id, _ent.unique_id
                     )
                     _ent_reg.async_remove(_ent.entity_id)
     except Exception as err:
-        _LOGGER.debug("Consumer leftover cleanup skipped: %s", err)
+        _LOGGER.error("Consumer leftover cleanup failed: %s", err, exc_info=True)
 
     # === ENTITY REGISTRY MIGRATION (v1.0.6: Option A Standard Canonical Names) ===
     # Smoothly migrate legacy entity IDs from earlier versions to the official
@@ -1473,31 +1474,89 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     )
                 except (ValueError, TypeError):
                     _coeff_now = DEFAULT_PROSUMER_COEFFICIENT
-                if _coeff_now >= 0.7:
-                    # Fetch from API if empty or first run (v1.5.0)
-                    for meter in (self.api._meters_data or []):
-                        mid_str = str(meter.get("meter_point_id", ""))
-                        if not mid_str:
-                            continue
-                        if mid_str not in self._monthly or not self._monthly[mid_str]:
-                            try:
-                                api_monthly = await self.api.async_get_monthly_history(mid_str)
-                                if api_monthly:
-                                    self._monthly[mid_str] = api_monthly
-                                    _LOGGER.info(
-                                        "Energa: Loaded %d monthly flows directly from API for meter %s",
-                                        len(api_monthly), mid_str,
-                                    )
-                            except Exception as api_err:
-                                _LOGGER.debug("API monthly history fetch failed for %s: %s", mid_str, api_err)
+                # Fetch from API if empty or first run for all meters (v1.5.0, v1.7.0)
+                meter_ids_to_fetch = set()
+                if self.api._meters_data:
+                    for meter in self.api._meters_data:
+                        mpid = str(meter.get("meter_point_id", ""))
+                        if mpid:
+                            meter_ids_to_fetch.add(mpid)
+                for mid_key in list(self._meter_totals.keys()):
+                    meter_ids_to_fetch.add(str(mid_key))
 
-                    _monthly = await self._async_compute_monthly_sums(_now)
-                    if _monthly:
-                        for mid_str, m_data in _monthly.items():
-                            if mid_str in self._monthly:
-                                self._monthly[mid_str].update(m_data)
-                            else:
-                                self._monthly[mid_str] = m_data
+                for mid_str in meter_ids_to_fetch:
+                    if not mid_str:
+                        continue
+                    if mid_str not in self._monthly or not self._monthly[mid_str]:
+                        try:
+                            api_monthly = await self.api.async_get_monthly_history(mid_str)
+                            if api_monthly:
+                                self._monthly[mid_str] = api_monthly
+                                _LOGGER.info(
+                                    "Energa: Loaded %d monthly flows directly from API for meter %s",
+                                    len(api_monthly), mid_str,
+                                )
+                        except Exception as api_err:
+                            _LOGGER.debug("API monthly history fetch failed for %s: %s", mid_str, api_err)
+
+                _monthly = await self._async_compute_monthly_sums(_now)
+                if _monthly:
+                    for mid_str, m_data in _monthly.items():
+                        if mid_str not in self._monthly:
+                            self._monthly[mid_str] = m_data
+                        else:
+                            for ym_key, vals in m_data.items():
+                                existing = self._monthly[mid_str].get(ym_key)
+                                if not existing:
+                                    self._monthly[mid_str][ym_key] = vals
+                                else:
+                                    ex_imp = float(existing.get("import", existing.get("import_1", 0) + existing.get("import_2", 0)))
+                                    ex_exp = float(existing.get("export", existing.get("export_1", 0) + existing.get("export_2", 0)))
+                                    rec_imp = float(vals.get("import", vals.get("import_1", 0) + vals.get("import_2", 0)))
+                                    rec_exp = float(vals.get("export", vals.get("export_1", 0) + vals.get("export_2", 0)))
+                                    # Only update if recorder has more complete or equal data (avoid regression from truncated DB)
+                                    if (rec_imp >= ex_imp - 0.5) and (rec_exp >= ex_exp - 0.5):
+                                        self._monthly[mid_str][ym_key].update(vals)
+
+                # Ensure _mtd is complete: if local recorder coverage is less than current day of month,
+                # hydrate from official API monthly history so dashboard MTD never displays truncated days
+                cur_key = (_now.year, _now.month)
+                for mid_str in meter_ids_to_fetch:
+                    if not mid_str:
+                        continue
+                    m_dict = self._monthly.get(mid_str, {})
+                    if cur_key in m_dict:
+                        cur_m = m_dict[cur_key]
+                        api_imp = float(cur_m.get("import", cur_m.get("import_1", 0) + cur_m.get("import_2", 0)))
+                        api_exp = float(cur_m.get("export", cur_m.get("export_1", 0) + cur_m.get("export_2", 0)))
+
+                        mtd_rec = self._mtd.get(mid_str, {})
+                        rec_imp = float(mtd_rec.get("import", mtd_rec.get("import_1", 0) + mtd_rec.get("import_2", 0)))
+                        rec_exp = float(mtd_rec.get("export", mtd_rec.get("export_1", 0) + mtd_rec.get("export_2", 0)))
+
+                        # If API monthly has more complete totals than the recorder (e.g. recorder truncated or fresh start),
+                        # or if recorder is empty, adopt the official API values:
+                        if (api_imp > rec_imp + 0.5) or (api_exp > rec_exp + 0.5) or not mtd_rec:
+                            _LOGGER.info(
+                                "Energa: Hydrating MTD for meter %s from official API (API imp=%.2f exp=%.2f > Rec imp=%.2f exp=%.2f)",
+                                mid_str, api_imp, api_exp, rec_imp, rec_exp,
+                            )
+                            hydrated_data = {
+                                "import": api_imp,
+                                "export": api_exp,
+                                "import_1": float(cur_m.get("import_1", 0.0)),
+                                "import_2": float(cur_m.get("import_2", 0.0)),
+                                "export_1": float(cur_m.get("export_1", 0.0)),
+                                "export_2": float(cur_m.get("export_2", 0.0)),
+                                "_coverage_days": _now.day,
+                                "_source": "energa_operator_api_monthly",
+                            }
+                            self._mtd[mid_str] = hydrated_data
+                            # Also map to meter serial if known
+                            if self.api._meters_data:
+                                for m in self.api._meters_data:
+                                    if str(m.get("meter_point_id")) == mid_str and m.get("meter_serial"):
+                                        self._mtd[str(m["meter_serial"])] = hydrated_data
                 if notify:
                     self.async_update_listeners()
         except Exception as cal_err:
@@ -2016,6 +2075,7 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
 
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
 
         # Entity attributes (canonical clean Polish name, device-scoped)
@@ -2047,21 +2107,11 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         current_import = totals.get("import", 0)
         current_export = totals.get("export", 0)
 
-        coefficient = float(
-            self._entry.options.get(
-                CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
-            )
-        )
-        baseline_import = float(
-            self._entry.options.get(
-                CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE
-            )
-        )
-        baseline_export = float(
-            self._entry.options.get(
-                CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE
-            )
-        )
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        coefficient = get_prosumer_coefficient(self._entry.options, meter_id=mid, serial=ser)
+        baseline_import = get_meter_baseline(self._entry.options, "import", meter_id=mid, serial=ser)
+        baseline_export = get_meter_baseline(self._entry.options, "export", meter_id=mid, serial=ser)
 
         net_export = current_export - baseline_export
         net_import = current_import - baseline_import
@@ -2079,21 +2129,11 @@ class EnergaProsumerBalanceSensor(CoordinatorEntity, SensorEntity):
         current_import = totals.get("import", 0)
         current_export = totals.get("export", 0)
 
-        coefficient = float(
-            self._entry.options.get(
-                CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
-            )
-        )
-        baseline_import = float(
-            self._entry.options.get(
-                CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE
-            )
-        )
-        baseline_export = float(
-            self._entry.options.get(
-                CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE
-            )
-        )
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        coefficient = get_prosumer_coefficient(self._entry.options, meter_id=mid, serial=ser)
+        baseline_import = get_meter_baseline(self._entry.options, "import", meter_id=mid, serial=ser)
+        baseline_export = get_meter_baseline(self._entry.options, "export", meter_id=mid, serial=ser)
 
         net_export = current_export - baseline_export
         net_import = current_import - baseline_import
@@ -2141,6 +2181,7 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
         self._has_zones = has_zones
         self._attr_name = "Bank Wirtualny kWh"
@@ -2159,14 +2200,15 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
             return None
 
         opts = self._entry.options
-        mid = self._meter_id
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
 
         # Get baselines
-        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
 
-        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
+        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
         bank_1 = None
         bank_2 = None
         init_l1 = 0.0
@@ -2174,18 +2216,18 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
 
         if self._has_zones:
             # Per-zone baselines if available, else global
-            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
-            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
-            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
-            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
+            bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
+            be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
+            be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
 
             imp1 = float(totals.get("import_1", totals.get("import", 0)))
             imp2 = float(totals.get("import_2", 0))
             exp1 = float(totals.get("export_1", totals.get("export", 0)))
             exp2 = float(totals.get("export_2", 0))
 
-            init_l1 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
-            init_l2 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
+            init_l1 = get_meter_initial_bank(opts, "kwh_l1", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L1)
+            init_l2 = get_meter_initial_bank(opts, "kwh_l2", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L2)
             if init_l1 > 0 or init_l2 > 0:
                 initial = round(init_l1 + init_l2, 2)
 
@@ -2372,6 +2414,7 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
         self._zone = zone
         zone_label = "L1 (Dzień)" if zone == 1 else "L2 (Noc)"
@@ -2391,15 +2434,16 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
             return None
 
         opts = self._entry.options
-        mid = self._meter_id
-        coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
 
         # 1. Invoice date mode (v1.5.0)
         settle_str = str(opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)).strip()
         monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
-        init_l1 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
-        init_l2 = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
-        initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
+        init_l1 = get_meter_initial_bank(opts, "kwh_l1", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L1)
+        init_l2 = get_meter_initial_bank(opts, "kwh_l2", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L2)
+        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
         if settle_str and monthly and (init_l1 > 0 or init_l2 > 0 or initial > 0):
             inv_bank, inv_detail = bank_from_invoice_date(
                 settle_str, monthly, init_1=init_l1 or initial, init_2=init_l2, coeff=coeff
@@ -2409,8 +2453,8 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
                 return round(inv_detail.get(key, 0.0), 2)
 
         # 2. Check FIFO mode (v1.5.0: automatic when no baselines or initial entered)
-        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
         if bi == 0.0 and be == 0.0 and initial == 0.0 and not init_l1 and not init_l2:
             if monthly:
                 _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff, has_zones=True)
@@ -2420,20 +2464,18 @@ class EnergaBankZoneSensor(CoordinatorEntity, SensorEntity):
                         return round(fifo_detail[key], 2)
 
         # Baseline mode
-        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
         if self._zone == 1:
-            bi_z = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
-            be_z = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
+            bi_z = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
+            be_z = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
             imp_z = float(totals.get("import_1", totals.get("import", 0)))
             exp_z = float(totals.get("export_1", totals.get("export", 0)))
-            init_z = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L1}", opts.get(CONF_BANK_INITIAL_KWH_L1, DEFAULT_BANK_INITIAL_KWH_L1)))
+            init_z = init_l1
         else:
-            bi_z = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
-            be_z = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            bi_z = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
+            be_z = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
             imp_z = float(totals.get("import_2", 0))
             exp_z = float(totals.get("export_2", 0))
-            init_z = float(opts.get(f"meter_{mid}_{CONF_BANK_INITIAL_KWH_L2}", opts.get(CONF_BANK_INITIAL_KWH_L2, DEFAULT_BANK_INITIAL_KWH_L2)))
+            init_z = init_l2
 
         net_imp = imp_z - bi_z
         net_exp = exp_z - be_z
@@ -2463,6 +2505,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
         self._has_zones = has_zones
         self._attr_name = "Bank Wirtualny PLN"
@@ -2481,7 +2524,8 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             return None
 
         opts = self._entry.options
-        mid = self._meter_id
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
 
         # Prefer coordinator RCE cache if auto-fetch enabled
         coord_rce = getattr(self.coordinator, "_rce_cache", None)
@@ -2489,17 +2533,17 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             rce = float(coord_rce)
         else:
             rce = float(opts.get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE))
-        initial = float(opts.get(CONF_BANK_INITIAL_PLN, DEFAULT_BANK_INITIAL_PLN))
+        initial = get_meter_initial_bank(opts, "pln", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_PLN)
 
-        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
 
         if self._has_zones:
             # Per-zone baselines if available
-            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
-            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
-            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
-            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
+            bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
+            be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
+            be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
 
             imp1 = float(totals.get("import_1", totals.get("import", 0)))
             imp2 = float(totals.get("import_2", 0))
@@ -2510,19 +2554,26 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             if bi1 == bi and bi2 == bi:
                 net_imp = float(totals.get("import", 0)) - bi
                 net_exp = float(totals.get("export", 0)) - be
-                price1 = get_price_for_key(opts, "import", mid)
-                net_imp_cost = net_imp * price1
+                tot_cur = imp1 + imp2
+                if tot_cur > 0:
+                    p1 = get_price_for_key(opts, "import_1", meter_id=mid, serial=ser)
+                    p2 = get_price_for_key(opts, "import_2", meter_id=mid, serial=ser)
+                    effective_price = (imp1 * p1 + imp2 * p2) / tot_cur
+                else:
+                    effective_price = get_price_for_key(opts, "import", meter_id=mid, serial=ser)
+                net_imp_cost = net_imp * effective_price
             else:
                 net_imp1 = imp1 - bi1
                 net_imp2 = imp2 - bi2
-                price1 = get_price_for_key(opts, "import_1", mid)
-                price2 = get_price_for_key(opts, "import_2", mid)
+                price1 = get_price_for_key(opts, "import_1", meter_id=mid, serial=ser)
+                price2 = get_price_for_key(opts, "import_2", meter_id=mid, serial=ser)
                 net_imp_cost = net_imp1 * price1 + net_imp2 * price2
                 net_exp = (exp1 - be1) + (exp2 - be2)
+                net_imp = net_imp1 + net_imp2
         else:
             net_imp = float(totals.get("import", 0)) - bi
             net_exp = float(totals.get("export", 0)) - be
-            price = get_price_for_key(opts, "import", mid)
+            price = get_price_for_key(opts, "import", meter_id=mid, serial=ser)
             net_imp_cost = net_imp * price
 
         comp_export = net_exp * rce * 1.23
@@ -2542,7 +2593,7 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
         else:
             rce_source = "manual"
         attrs = {
-            "net_import_kwh": round(net_imp, 2) if not self._has_zones else round(imp1 - bi1 + imp2 - bi2, 2),
+            "net_import_kwh": round(net_imp, 2),
             "net_export_kwh": round(net_exp, 2),
             "rce_price": rce,
             "rce_source": rce_source,
@@ -2582,8 +2633,8 @@ class EnergaBankPlnSensor(CoordinatorEntity, SensorEntity):
             if parse_settlement_date(settle_str) is not None:
                 attrs["days_to_settlement"] = days_to_settlement(settle_str)
         if self._has_zones:
-            price1 = get_price_for_key(opts, "import_1", mid)
-            price2 = get_price_for_key(opts, "import_2", mid)
+            price1 = get_price_for_key(opts, "import_1", meter_id=mid, serial=ser)
+            price2 = get_price_for_key(opts, "import_2", meter_id=mid, serial=ser)
             attrs.update({
                 "price_1": price1,
                 "price_2": price2,
@@ -2674,6 +2725,7 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
         self._has_zones = has_zones
         self._direction = direction
@@ -2689,45 +2741,23 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_icon = (
-            "mdi:battery-charging" if is_charge else "mdi:battery-discharging"
+            "mdi:battery-arrow-up" if is_charge else "mdi:battery-arrow-down"
         )
         self._attr_device_info = device_info
         self._restored = False
 
     async def async_added_to_hass(self) -> None:
-        """Seed totals from statistics (history backfill) or HA state.
-
-        v0.3.4: seeds from the MAX sum over the last 14 days, not the
-        last row — after a recorder sum reset (live 0.0 state seen right
-        after a backfill) the last row reads 0.0 while thousands are
-        imported. MAX keeps the battery bars continuous across restarts.
-        """
+        """Restore previous cumulative flow state on startup (anti-reset)."""
         await super().async_added_to_hass()
-        candidates: list = []
-        # v0.2.23: history backfill writes flow statistics; prefer the
-        # recent max sum so live deltas continue without a reset dip.
+        candidates = []
         try:
-            import functools
-            from datetime import timedelta
-
             from homeassistant.components.recorder import get_instance
-            from homeassistant.components.recorder.statistics import (
-                statistics_during_period,
+            from homeassistant.components.recorder.statistics import get_last_statistics
+            last_stat = await get_instance(self.hass).async_add_executor_job(
+                get_last_statistics, self.hass, 1, self.entity_id, True, {"sum"}
             )
-            from homeassistant.util import dt as dt_util
-
-            _end = dt_util.utcnow()
-            _start = _end - timedelta(days=14)
-            _res = await get_instance(self.hass).async_add_executor_job(
-                functools.partial(
-                    statistics_during_period,
-                    self.hass, _start, _end, [self.entity_id], "hour", None, {"sum"},
-                )
-            )
-            _rows = (_res or {}).get(self.entity_id) or []
-            _sums = [
-                float(r["sum"]) for r in _rows if r.get("sum") is not None
-            ]
+            _pts = last_stat.get(self.entity_id) or []
+            _sums = [p.get("sum") for p in _pts if p.get("sum") is not None]
             if _sums:
                 candidates.append(max(0.0, max(_sums)))
         except Exception:
@@ -2752,14 +2782,15 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         if not totals:
             return None
         opts = self._entry.options
-        mid = self._meter_id
-        bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-        be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
         if self._has_zones:
-            bi1 = float(opts.get(f"meter_{mid}_balance_baseline_import_1", bi))
-            bi2 = float(opts.get(f"meter_{mid}_balance_baseline_import_2", bi))
-            be1 = float(opts.get(f"meter_{mid}_balance_baseline_export_1", be))
-            be2 = float(opts.get(f"meter_{mid}_balance_baseline_export_2", be))
+            bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
+            bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
+            be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
+            be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
             if bi1 == bi and bi2 == bi:
                 net_imp = float(totals.get("import", 0)) - bi
                 net_exp = float(totals.get("export", 0)) - be
@@ -3417,6 +3448,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator, meter_id: str, device_info: DeviceInfo, entry: ConfigEntry, has_zones: bool = False, serial: str = "") -> None:
         super().__init__(coordinator)
         self._meter_id = meter_id
+        self._serial = serial
         self._entry = entry
         self._has_zones = has_zones
         self._attr_name = "Prognoza Rachunku"
@@ -3431,14 +3463,22 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
     def _mtd_parts(self):
         """(import_kwh, export_kwh) month-to-date from coordinator cache."""
-        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id), {})
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+            or {}
+        )
         imp = mtd.get("import", mtd.get("import_1", 0) + mtd.get("import_2", 0))
         exp = mtd.get("export", mtd.get("export_1", 0) + mtd.get("export_2", 0))
         return float(imp), float(exp)
 
     def _mtd_zone_flows(self):
         """(import_day, import_night, export_total) MTD per zone."""
-        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id), {})
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+            or {}
+        )
         if self._has_zones:
             imp_d = float(mtd.get("import_1", 0))
             imp_n = float(mtd.get("import_2", 0))
@@ -3497,35 +3537,23 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
     def _is_old_system(self) -> bool:
         """Old net-metering (coeff >= 0.7) vs new net-billing."""
-        try:
-            coeff = float(
-                self._entry.options.get(
-                    CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
-                )
-            )
-        except (ValueError, TypeError):
-            coeff = DEFAULT_PROSUMER_COEFFICIENT
+        coeff = get_prosumer_coefficient(
+            self._entry.options, meter_id=str(self._meter_id), serial=str(getattr(self, "_serial", ""))
+        )
         return coeff >= 0.7
 
     def _warehouse_cover(self):
-        """Current Bank kWh available to cover this month's import.
-
-        Same baseline math as EnergaBankKwhSensor (lifetime mode): only
-        energy introduced within the trailing 12 months really counts
-        (FIFO), so this is an upper-bound approximation — the exact
-        expiry schedule lives with the seller, not in the meter totals.
-        """
+        """Current Bank kWh available to cover this month's import."""
         totals = self.coordinator._meter_totals.get(str(self._meter_id))
         if not totals:
             return 0.0
         opts = self._entry.options
-        try:
-            bi = float(opts.get(CONF_BALANCE_BASELINE_IMPORT, DEFAULT_BALANCE_BASELINE))
-            be = float(opts.get(CONF_BALANCE_BASELINE_EXPORT, DEFAULT_BALANCE_BASELINE))
-            coeff = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-            initial = float(opts.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
-        except (ValueError, TypeError):
-            return 0.0
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
+        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
+        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
         net_imp = float(totals.get("import", 0)) - bi
         net_exp = float(totals.get("export", 0)) - be
         return max(0.0, net_exp * coeff - net_imp) + max(0.0, initial)
@@ -3548,21 +3576,25 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         from datetime import date as _date, datetime, timezone
 
-        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+        )
         if not mtd:
             return None
         imp_mtd, exp_mtd = self._mtd_parts()
         imp_d, imp_n, exp_tot = self._mtd_zone_flows()
         opts = self._entry.options
-        mid = self._meter_id
+        mid = str(self._meter_id)
+        ser = str(getattr(self, "_serial", ""))
         if self._has_zones:
             m1 = mtd.get("import_1", 0)
             m2 = mtd.get("import_2", 0)
-            p1 = get_price_for_key(opts, "import_1", mid)
-            p2 = get_price_for_key(opts, "import_2", mid)
+            p1 = get_price_for_key(opts, "import_1", meter_id=mid, serial=ser)
+            p2 = get_price_for_key(opts, "import_2", meter_id=mid, serial=ser)
             imp_cost = m1 * p1 + m2 * p2
         else:
-            imp_cost = imp_mtd * get_price_for_key(opts, "import", mid)
+            imp_cost = imp_mtd * get_price_for_key(opts, "import", meter_id=mid, serial=ser)
         rce = self._rce()
         mtd_net = exp_mtd * rce * 1.23 - imp_cost
         today = _date.today()
@@ -3760,9 +3792,13 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
+        coords_mtd = getattr(self.coordinator, "_mtd", {})
         return (
             self.coordinator.data is not None
-            and str(self._meter_id) in getattr(self.coordinator, "_mtd", {})
+            and (
+                str(self._meter_id) in coords_mtd
+                or str(getattr(self, "_serial", "")) in coords_mtd
+            )
         )
 
 
@@ -3800,7 +3836,10 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
         from datetime import date as _date
         from datetime import datetime, timezone
 
-        mtd = getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+        mtd = (
+            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
+            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+        )
         if not mtd:
             return None, {}
         imp_mtd, exp_mtd = self._mtd_parts()

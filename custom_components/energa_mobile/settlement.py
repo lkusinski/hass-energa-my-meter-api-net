@@ -578,13 +578,22 @@ def orphan_bank_uids(
     except (ValueError, TypeError):
         return set()
     if coeff >= 0.7:
-        return {f"energa_{mid}_bank_pln", f"energa_{mid}_rcem_auto"}
+        return {
+            f"energa_{mid}_bank_pln",
+            f"energa_{mid}_rcem_auto",
+            f"energa_{mid}_mtd_deposit",
+            f"energa_{mid}_mtd_deposit_applied",
+        }
     return {
         f"energa_{mid}_bank_kwh",
+        f"energa_{mid}_bank_kwh_l1",
+        f"energa_{mid}_bank_kwh_l2",
         f"energa_{mid}_bank_level",
         f"energa_{mid}_prosumer_balance",
         f"energa_{mid}_bank_charge",
         f"energa_{mid}_bank_discharge",
+        f"energa_{mid}_mtd_cover_day",
+        f"energa_{mid}_mtd_cover_night",
     }
 
 

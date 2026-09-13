@@ -173,16 +173,25 @@ class TestOrphanBankUids:
 
     def test_old_system_dooms_pln_bank_and_rcem(self):
         doomed = orphan_bank_uids("71000001", "71000001", True, 0.8)
-        assert doomed == {"energa_71000001_bank_pln", "energa_71000001_rcem_auto"}
+        assert doomed == {
+            "energa_71000001_bank_pln",
+            "energa_71000001_rcem_auto",
+            "energa_71000001_mtd_deposit",
+            "energa_71000001_mtd_deposit_applied",
+        }
 
     def test_new_system_dooms_kwh_bank(self):
         doomed = orphan_bank_uids("72000002", "72000002", True, 0.0)
         assert doomed == {
             "energa_72000002_bank_kwh",
+            "energa_72000002_bank_kwh_l1",
+            "energa_72000002_bank_kwh_l2",
             "energa_72000002_bank_level",
             "energa_72000002_prosumer_balance",
             "energa_72000002_bank_charge",
             "energa_72000002_bank_discharge",
+            "energa_72000002_mtd_cover_day",
+            "energa_72000002_mtd_cover_night",
         }
 
     def test_invalid_coefficient_dooms_nothing(self):
