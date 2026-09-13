@@ -115,18 +115,19 @@ async def async_setup_entry(
     integration = await async_get_integration(hass, DOMAIN)
     sw_version = str(integration.version)  # Must be string for AwesomeVersion
 
-    # Create coordinator
+    # Get storage instance
     storage = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("storage")
-    coordinator = EnergaCoordinator(hass, api, entry, storage=storage)
-    hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})["coordinator"] = coordinator
 
-
-    # Initial data fetch
-    try:
-        await coordinator.async_config_entry_first_refresh()
-        _LOGGER.debug("Energa: Initial refresh successful")
-    except Exception as err:
-        _LOGGER.warning("Energa: Initial fetch failed, will retry: %s", err)
+    # Get or create coordinator
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("coordinator")
+    if not coordinator:
+        coordinator = EnergaCoordinator(hass, api, entry, storage=storage)
+        hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})["coordinator"] = coordinator
+        try:
+            await coordinator.async_config_entry_first_refresh()
+            _LOGGER.debug("Energa: Initial refresh successful")
+        except Exception as err:
+            _LOGGER.warning("Energa: Initial fetch failed, will retry: %s", err)
 
     # CRITICAL: Fetch meters directly from API to create sensors
     # Don't rely on coordinator.data which may be empty at startup

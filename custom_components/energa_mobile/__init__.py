@@ -111,6 +111,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     migration_map = MigrationMap()
     alert_manager = ProsumerAlertManager(storage)
 
+    # Initialize coordinator before setting up platforms so all platforms have access
+    from .coordinator import EnergaCoordinator
+
+    coordinator = EnergaCoordinator(hass, api, entry, storage=storage)
+
     # Store API and storage instances
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
@@ -120,7 +125,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "recorder_adapter": recorder_adapter,
         "migration_map": migration_map,
         "alert_manager": alert_manager,
+        "coordinator": coordinator,
     }
+
+    # Initial data fetch for coordinator
+    try:
+        await coordinator.async_config_entry_first_refresh()
+        _LOGGER.debug("Energa: Initial coordinator refresh successful")
+    except Exception as err:
+        _LOGGER.warning("Energa: Initial coordinator fetch failed, will retry: %s", err)
 
     # Close session when HA shuts down
     async def _close_session(_event):
