@@ -248,6 +248,8 @@ Jeśli chcesz przeprowadzić **100% czystą reinstalację**, aby usunąć wszelk
 Pulpit `/energa-rachunek` jest generowany i rejestrowany automatycznie w menu bocznym HA. Jeśli zechcesz wygenerować go ponownie, wystarczy kliknąć encję:
 `button.energa_<numer_licznika>_utworz_pulpit_rozliczen` lub wywołać akcję `energa_mobile.generate_dashboard`.
 
+👉 **Pełna dokumentacja pulpitu, encyklopedia encji i opis wzorów matematycznych:** zobacz [docs/DASHBOARD.md](docs/DASHBOARD.md).
+
 ---
 
 ## 📋 Zestawienie Kluczowych Encji
