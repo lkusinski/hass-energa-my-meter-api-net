@@ -1117,6 +1117,38 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._autoconsumption_summary: dict = {}
         self._profile_forecast_cache: dict = {}  # {meter_id: HourlyProfileResult}
         self._rce_records_last_fetch = None
+        self._synth_tasks: dict[str, asyncio.Task] = {}
+
+    def async_request_synthetic_storage(self, meter_id: str) -> None:
+        """Debounce and run synthetic storage recalculation after statistics import."""
+        from .const import CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+
+        if not self.entry.options.get(
+            CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+        ):
+            return
+
+        async def _run_synth():
+            await asyncio.sleep(2)
+            try:
+                from .synthetic_storage import async_synthesize_storage_from_recorder
+
+                meter = next(
+                    (m for m in (self.data or []) if m.get("meter_point_id") == meter_id),
+                    None,
+                )
+                if meter:
+                    await async_synthesize_storage_from_recorder(self.hass, self.entry, meter)
+            except Exception as err:
+                _LOGGER.debug("Deferred synthetic storage update failed for %s: %s", meter_id, err)
+
+        if not hasattr(self, "_synth_tasks"):
+            self._synth_tasks = {}
+        prev_task = self._synth_tasks.get(meter_id)
+        if prev_task and not prev_task.done():
+            prev_task.cancel()
+
+        self._synth_tasks[meter_id] = self.hass.async_create_task(_run_synth())
 
     async def _async_update_data(self):
         """Fetch data from API using smart fetch pattern."""
@@ -3090,6 +3122,9 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
                     unit_class=None,
                 )
                 async_import_statistics(self.hass, cost_metadata, cost_stats)
+
+        if energy_stats and hasattr(self.coordinator, "async_request_synthetic_storage"):
+            self.coordinator.async_request_synthetic_storage(self._meter_id)
 
         super()._handle_coordinator_update()
 

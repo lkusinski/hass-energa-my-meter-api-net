@@ -135,3 +135,117 @@ def test_invariants_hold_exactly():
 
         assert abs((ch_tot + fee_tot) - exp_tot) < 0.0001, f"Export balance mismatch at hour {i}"
         assert abs((dis_tot + net_imp_tot) - imp_tot) < 0.0001, f"Import balance mismatch at hour {i}"
+
+
+def test_incremental_calculation_with_base_sums():
+    """Verify that incremental calculation anchors to base_sums and starting bank balances."""
+    now = datetime(2026, 9, 12, 0, 0, tzinfo=timezone.utc)
+    records = [
+        {"dt": now, "import": 3.0, "export": 5.0},
+    ]
+    base_sums = {
+        "magazyn_ladowanie": 100.0,
+        "magazyn_rozladowanie": 80.0,
+        "siec_oddanie": 25.0,
+        "siec_pobor": 150.0,
+    }
+    # Starting bank = 100 - 80 = 20.0 kWh
+    res = calculate_synthetic_storage(
+        records,
+        coeff=0.8,
+        has_zones=False,
+        initial_bank_1=20.0,
+        base_sums=base_sums,
+    )
+    series = res["series"]
+
+    # Export = 5.0 -> Charge = 4.0, Fee = 1.0
+    # Bank becomes 20 + 4 = 24.0. Import = 3.0 -> Discharge = 3.0, Net Import = 0.0.
+    # Ending bank = 21.0
+    assert series["magazyn_ladowanie"][0]["state"] == 4.0
+    assert series["magazyn_ladowanie"][0]["sum"] == 104.0
+
+    assert series["siec_oddanie"][0]["state"] == 1.0
+    assert series["siec_oddanie"][0]["sum"] == 26.0
+
+    assert series["magazyn_rozladowanie"][0]["state"] == 3.0
+    assert series["magazyn_rozladowanie"][0]["sum"] == 83.0
+
+    assert series["siec_pobor"][0]["state"] == 0.0
+    assert series["siec_pobor"][0]["sum"] == 150.0
+
+    assert res["ending_bank"] == 21.0
+
+
+@pytest.mark.asyncio
+async def test_async_synthesize_storage_incremental_gap_filling(monkeypatch):
+    """Test gap detection and self-healing in async_synthesize_storage_from_recorder."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.energa_mobile.const import CONF_ENABLE_SYNTHETIC_STORAGE, CONF_PROSUMER_COEFFICIENT
+    from custom_components.energa_mobile.synthetic_storage import async_synthesize_storage_from_recorder
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.options = {
+        CONF_ENABLE_SYNTHETIC_STORAGE: True,
+        CONF_PROSUMER_COEFFICIENT: 0.8,
+    }
+    meter = {
+        "meter_point_id": "00069839",
+        "meter_serial": "00069839",
+        "zone_count": 1,
+        "tariff": "G11",
+        "is_prosumer": True,
+    }
+
+    ts_old = 1789250400.0  # 2026-09-11 22:00:00 UTC (last existing synth stat)
+    ts_gap = 1789254000.0  # 2026-09-11 23:00:00 UTC (missing gap hour)
+
+    def mock_executor_job(func, *args):
+        stat_ids = func.args[3] if hasattr(func, "args") and len(func.args) > 3 else []
+        # Check existing synthetic stats: exists up to ts_old
+        if "sensor.energa_00069839_syntetyczny_magazyn_ladowanie" in stat_ids:
+            return {
+                "sensor.energa_00069839_syntetyczny_magazyn_ladowanie": [{"start": ts_old, "sum": 50.0}],
+                "sensor.energa_00069839_syntetyczny_magazyn_rozladowanie": [{"start": ts_old, "sum": 30.0}],
+                "sensor.energa_00069839_syntetyczna_siec_oddanie": [{"start": ts_old, "sum": 12.5}],
+                "sensor.energa_00069839_syntetyczna_siec_pobor": [{"start": ts_old, "sum": 40.0}],
+            }
+        # Raw stats query: has ts_old AND new gap hour ts_gap
+        return {
+            "sensor.energa_00069839_panel_energia_zuzycie": [
+                {"start": ts_old, "state": 1.0},
+                {"start": ts_gap, "state": 2.0},
+            ],
+            "sensor.energa_00069839_panel_energia_produkcja": [
+                {"start": ts_old, "state": 5.0},
+                {"start": ts_gap, "state": 10.0},
+            ],
+        }
+
+    import sys
+    rec_mod = sys.modules["homeassistant.components.recorder"]
+    rec_instance = rec_mod.get_instance.return_value
+    rec_instance.async_add_executor_job = AsyncMock(side_effect=mock_executor_job)
+
+    imported_stats = []
+    def mock_async_import_statistics(h, meta, stats):
+        imported_stats.append((meta.statistic_id, stats))
+
+    rec_stat_mod = sys.modules["homeassistant.components.recorder.statistics"]
+    rec_stat_mod.async_import_statistics = mock_async_import_statistics
+
+    res = await async_synthesize_storage_from_recorder(hass, entry, meter)
+    assert res is True
+    # Should only synthesize and import the 1 gap hour (ts_gap)
+    assert len(imported_stats) == 4
+    for eid, stats in imported_stats:
+        assert len(stats) == 1
+        assert stats[0]["start"] == datetime.fromtimestamp(ts_gap, timezone.utc)
+
+    # Check that cumulative sum started from base_sum
+    charge_stats = next(s for eid, s in imported_stats if "ladowanie" in eid)
+    # ts_gap export=10.0 * 0.8 = 8.0 kWh charge. Base sum was 50.0 -> new sum is 58.0!
+    assert charge_stats[0]["state"] == 8.0
+    assert charge_stats[0]["sum"] == 58.0
+
