@@ -38,16 +38,32 @@ async def async_setup_entry(
     """Set up Energa binary sensors from config entry."""
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
     coordinator = entry_data.get("coordinator")
+    api = entry_data.get("api")
+    _LOGGER.debug("Energa binary_sensor: setup called for entry %s", entry.entry_id)
 
     if not coordinator:
         _LOGGER.debug("Coordinator not yet available for binary sensors")
         return
 
-    meters = coordinator.data or []
+    meters = coordinator.data
+    if not meters and api:
+        try:
+            meters = await api.async_get_data(force_refresh=False)
+        except Exception as err:
+            _LOGGER.error("Energa: Failed to fetch meters for binary sensors: %s", err)
+            meters = []
+    meters = meters or []
+
     active_meters = [
         m for m in meters
-        if m.get("total_plus") and float(m.get("total_plus", 0)) > 0
+        if m.get("meter_point_id")
+        and (
+            float(m.get("total_plus", 0) or 0) > 0
+            or float(m.get("total_minus", 0) or 0) > 0
+        )
     ]
+    if not active_meters and meters:
+        active_meters = [m for m in meters if m.get("meter_point_id")]
 
     entities: list[BinarySensorEntity] = []
     for meter in active_meters:
@@ -62,9 +78,10 @@ async def async_setup_entry(
             EnergaRceNegativePriceBinarySensor(coordinator, entry, mid, serial),
         ])
 
+    _LOGGER.info("Energa binary_sensor: created %d entities for %d active meters", len(entities), len(active_meters))
     if entities:
-        async_add_entities(entities)
-        _LOGGER.info("Added %d Energa binary sensors for arbitrage & BESS", len(entities))
+        async_add_entities(entities, update_before_add=True)
+        _LOGGER.info("Energa binary_sensor: added %d entities successfully", len(entities))
 
 
 class EnergaBessChargeWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
