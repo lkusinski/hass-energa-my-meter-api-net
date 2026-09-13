@@ -122,12 +122,15 @@ FIFO_MIN_COVERAGE_MONTHS = 3  # minimum months with flows for graceful estimatio
 
 
 def get_price_for_key(
-    options: dict, data_key: str, meter_id: str | None = None
+    options: dict,
+    data_key: str,
+    meter_id: str | None = None,
+    serial: str | None = None,
 ) -> float:
     """Get the configured price for a given data key.
 
-    Supports per-meter pricing: if meter_id is provided, looks for
-    meter-specific keys first (e.g. 'meter_30132815_import_price'),
+    Supports per-meter pricing: if serial or meter_id is provided, looks for
+    meter-specific keys first (e.g. 'meter_10000001_import_price'),
     then falls back to global keys.
     """
     key_map = {
@@ -143,10 +146,105 @@ def get_price_for_key(
         data_key, (CONF_IMPORT_PRICE, DEFAULT_IMPORT_PRICE)
     )
 
-    # Per-meter override: meter_{serial}_{key}
-    if meter_id:
-        meter_key = f"meter_{meter_id}_{conf_key}"
-        if meter_key in options:
-            return float(options[meter_key])
+    for mid in (serial, meter_id):
+        if mid:
+            meter_key = f"meter_{mid}_{conf_key}"
+            if meter_key in options:
+                try:
+                    return float(options[meter_key])
+                except (ValueError, TypeError):
+                    pass
 
     return float(options.get(conf_key, default_val))
+
+
+def get_prosumer_coefficient(
+    options: dict,
+    meter_id: str | None = None,
+    serial: str | None = None,
+) -> float:
+    """Get prosumer coefficient with per-meter override support."""
+    for mid in (serial, meter_id):
+        if mid:
+            meter_key = f"meter_{mid}_{CONF_PROSUMER_COEFFICIENT}"
+            if meter_key in options:
+                try:
+                    return float(options[meter_key])
+                except (ValueError, TypeError):
+                    pass
+    val = options.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT)
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return DEFAULT_PROSUMER_COEFFICIENT
+
+
+def get_meter_baseline(
+    options: dict,
+    baseline_type: str,
+    meter_id: str | None = None,
+    serial: str | None = None,
+    default: float = DEFAULT_BALANCE_BASELINE,
+) -> float:
+    """Get balance baseline with per-meter and per-zone override support.
+
+    baseline_type can be:
+      'import', 'export', 'import_1', 'import_2', 'export_1', 'export_2'
+    """
+    key_suffix = f"balance_baseline_{baseline_type}"
+    for mid in (serial, meter_id):
+        if mid:
+            k = f"meter_{mid}_{key_suffix}"
+            if k in options:
+                try:
+                    return float(options[k])
+                except (ValueError, TypeError):
+                    pass
+    if key_suffix in options:
+        try:
+            return float(options[key_suffix])
+        except (ValueError, TypeError):
+            pass
+    if "_" in baseline_type:
+        base_prefix = baseline_type.rsplit("_", 1)[0]
+        for mid in (serial, meter_id):
+            if mid:
+                k = f"meter_{mid}_balance_baseline_{base_prefix}"
+                if k in options:
+                    try:
+                        return float(options[k])
+                    except (ValueError, TypeError):
+                        pass
+        gen_k = f"balance_baseline_{base_prefix}"
+        if gen_k in options:
+            try:
+                return float(options[gen_k])
+            except (ValueError, TypeError):
+                pass
+    return float(default)
+
+
+def get_meter_initial_bank(
+    options: dict,
+    bank_type: str,
+    meter_id: str | None = None,
+    serial: str | None = None,
+    default: float = 0.0,
+) -> float:
+    """Get initial bank value (kwh, pln, kwh_l1, kwh_l2) with per-meter support."""
+    key_suffix = f"bank_initial_{bank_type}"
+    for mid in (serial, meter_id):
+        if mid:
+            k = f"meter_{mid}_{key_suffix}"
+            if k in options:
+                try:
+                    return float(options[k])
+                except (ValueError, TypeError):
+                    pass
+    if key_suffix in options:
+        try:
+            return float(options[key_suffix])
+        except (ValueError, TypeError):
+            pass
+    return float(default)
+

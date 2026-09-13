@@ -67,3 +67,73 @@ class TestGetPriceForKey:
         """Prices stored as strings are converted to float."""
         options = {CONF_IMPORT_PRICE: "1.234"}
         assert get_price_for_key(options, "import") == 1.234
+
+
+class TestGetProsumerCoefficient:
+    """Tests for get_prosumer_coefficient()."""
+
+    def test_default_coefficient(self):
+        from custom_components.energa_mobile.const import (
+            DEFAULT_PROSUMER_COEFFICIENT,
+            get_prosumer_coefficient,
+        )
+        assert get_prosumer_coefficient({}) == DEFAULT_PROSUMER_COEFFICIENT
+
+    def test_global_coefficient(self):
+        from custom_components.energa_mobile.const import (
+            CONF_PROSUMER_COEFFICIENT,
+            get_prosumer_coefficient,
+        )
+        assert get_prosumer_coefficient({CONF_PROSUMER_COEFFICIENT: 0.7}) == 0.7
+
+    def test_per_meter_override(self):
+        from custom_components.energa_mobile.const import (
+            CONF_PROSUMER_COEFFICIENT,
+            get_prosumer_coefficient,
+        )
+        options = {
+            CONF_PROSUMER_COEFFICIENT: 0.8,
+            "meter_10000001_prosumer_coefficient": 0.0,
+        }
+        assert get_prosumer_coefficient(options, "10000001") == 0.0
+        assert get_prosumer_coefficient(options, "900001", serial="10000001") == 0.0
+        assert get_prosumer_coefficient(options, "99999999") == 0.8
+
+
+class TestGetMeterBaseline:
+    """Tests for get_meter_baseline()."""
+
+    def test_baselines(self):
+        from custom_components.energa_mobile.const import (
+            CONF_BALANCE_BASELINE_IMPORT,
+            get_meter_baseline,
+        )
+        options = {
+            CONF_BALANCE_BASELINE_IMPORT: 100.0,
+            "meter_10000001_balance_baseline_import_1": 1932.634,
+            "meter_10000001_balance_baseline_import_2": 2423.794,
+            "balance_baseline_export_1": 50.0,
+        }
+        # Serial lookup
+        assert get_meter_baseline(options, "import_1", meter_id="900001", serial="10000001") == 1932.634
+        # Meter id lookup
+        assert get_meter_baseline(options, "import_1", meter_id="10000001") == 1932.634
+        # Global per-zone fallback
+        assert get_meter_baseline(options, "export_1", meter_id="900001") == 50.0
+        # Generic prefix fallback
+        assert get_meter_baseline(options, "import", meter_id="900001") == 100.0
+        assert get_meter_baseline(options, "export", meter_id="900001", default=0.0) == 0.0
+
+
+class TestGetMeterInitialBank:
+    """Tests for get_meter_initial_bank()."""
+
+    def test_initial_bank(self):
+        from custom_components.energa_mobile.const import get_meter_initial_bank
+        options = {
+            "bank_initial_kwh": 500.0,
+            "meter_10000001_bank_initial_pln": 150.0,
+        }
+        assert get_meter_initial_bank(options, "pln", meter_id="900001", serial="10000001") == 150.0
+        assert get_meter_initial_bank(options, "kwh", meter_id="900001", serial="10000001") == 500.0
+        assert get_meter_initial_bank(options, "kwh_l1", meter_id="900001", serial="10000001", default=0.0) == 0.0
