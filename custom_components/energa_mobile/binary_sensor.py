@@ -7,26 +7,27 @@ Provides decision binary sensors for Home Assistant automations:
 - Negative RCE price alert (prosumer export protection)
 """
 
-from __future__ import annotations
-
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, get_price_for_key
 from .projections.arbitrage import ArbitrageAction
+from .projections.forecast import DayType, determine_tariff_zone, get_day_type
 
 _LOGGER = logging.getLogger(__name__)
+TIMEZONE = ZoneInfo("Europe/Warsaw")
 
 
 async def async_setup_entry(
@@ -52,8 +53,10 @@ async def async_setup_entry(
     for meter in active_meters:
         mid = str(meter.get("meter_point_id"))
         serial = str(meter.get("meter_serial") or mid)
+        tariff = str(meter.get("tariff") or "G11")
 
         entities.extend([
+            EnergaTaniaStrefaBinarySensor(coordinator, entry, mid, serial, tariff),
             EnergaBessChargeWindowBinarySensor(coordinator, entry, mid, serial),
             EnergaBessDischargeWindowBinarySensor(coordinator, entry, mid, serial),
             EnergaRceNegativePriceBinarySensor(coordinator, entry, mid, serial),
@@ -236,3 +239,124 @@ class EnergaRceNegativePriceBinarySensor(CoordinatorEntity, BinarySensorEntity):
                 for r in plan.negative_intervals
             ]
         return attrs
+
+
+class EnergaTaniaStrefaBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """Binary sensor indicating whether off-peak (cheap / T2) zone is active."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+        tariff: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._meter_point_id = meter_point_id
+        self._meter_serial = meter_serial
+        self._tariff = (tariff or "G11").upper()
+        self._attr_unique_id = f"energa_{meter_point_id}_tania_strefa"
+        self._attr_name = "Tania strefa"
+
+    async def async_added_to_hass(self) -> None:
+        """Register hourly time change listener to update zone state on the hour."""
+        await super().async_added_to_hass()
+
+        try:
+            from homeassistant.helpers.event import async_track_time_change
+
+            @callback
+            def _hourly_update(_now: datetime) -> None:
+                self.async_write_ha_state()
+
+            self.async_on_remove(
+                async_track_time_change(
+                    self.hass, _hourly_update, minute=0, second=0
+                )
+            )
+        except Exception:
+            pass
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._meter_point_id)},
+            name=f"Licznik {self._meter_serial}",
+            manufacturer="Energa-Operator",
+            model="Licznik zdalnego odczytu",
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if off-peak zone (T2) is active."""
+        if "G11" in self._tariff:
+            return False
+        now_local = datetime.now(TIMEZONE)
+        return determine_tariff_zone(self._tariff, now_local) == 2
+
+    @property
+    def icon(self) -> str:
+        """Return dynamic icon based on zone state."""
+        return "mdi:clock-check-outline" if self.is_on else "mdi:clock-alert-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return details about current and next tariff zone."""
+        now_local = datetime.now(TIMEZONE)
+        zone = determine_tariff_zone(self._tariff, now_local)
+        is_g11 = "G11" in self._tariff
+        zone_id = "T1" if (is_g11 or zone == 1) else "T2"
+
+        if is_g11:
+            zone_name = "Taryfa jednostrefowa (stała stawka)"
+            next_change_iso = None
+            hours_until_change = None
+            active_price = get_price_for_key(
+                dict(self._entry.options), "import", meter_id=self._meter_serial
+            )
+        else:
+            zone_name = (
+                "Strefa pozaszczytowa (T2 - tania)"
+                if zone == 2
+                else "Strefa szczytowa (T1 - standardowa)"
+            )
+            price_key = "import_2" if zone == 2 else "import_1"
+            active_price = get_price_for_key(
+                dict(self._entry.options), price_key, meter_id=self._meter_serial
+            )
+
+            # Calculate next zone transition (scan up to 168 hours)
+            next_hour = (now_local + timedelta(hours=1)).replace(
+                minute=0, second=0, microsecond=0
+            )
+            next_change = None
+            for step in range(168):
+                step_dt = next_hour + timedelta(hours=step)
+                if determine_tariff_zone(self._tariff, step_dt) != zone:
+                    next_change = step_dt
+                    break
+
+            if next_change:
+                next_change_iso = next_change.isoformat()
+                hours_until_change = round(
+                    (next_change - now_local).total_seconds() / 3600.0, 2
+                )
+            else:
+                next_change_iso = None
+                hours_until_change = None
+
+        return {
+            "tariff": self._tariff,
+            "zone_id": zone_id,
+            "zone_name": zone_name,
+            "next_zone_change": next_change_iso,
+            "hours_until_next_zone": hours_until_change,
+            "active_price_pln_kwh": active_price,
+            "is_weekend_or_holiday": get_day_type(now_local.date())
+            == DayType.WEEKEND,
+        }
+

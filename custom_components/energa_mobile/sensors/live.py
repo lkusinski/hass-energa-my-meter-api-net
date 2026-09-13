@@ -1,7 +1,7 @@
-"""Live meter, statistics and diagnostic sensors for Energa My Meter integration."""
-
 import logging
+from datetime import date, datetime
 from typing import Any, override
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder.models import (
     StatisticMeanType,
@@ -727,6 +727,124 @@ class EnergaAutoconsumptionSensor(CoordinatorEntity, SensorEntity):
                 "savings_mtd_pln": summary.savings_mtd_pln,
             })
         return attrs
+
+
+class EnergaDataQualitySensor(CoordinatorEntity, SensorEntity):
+    """Sensor reporting meter reading freshness, remote transmission status, and quality."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator,
+        meter_id: str,
+        name: str,
+        icon: str,
+        device_info: DeviceInfo,
+        storage=None,
+        ppe: str = "",
+        serial: str = "",
+        tariff: str = "",
+    ) -> None:
+        super().__init__(coordinator)
+        self._meter_id = meter_id
+        self._attr_name = name
+        self._attr_unique_id = f"energa_{meter_id}_jakosc_danych"
+        self._attr_device_info = device_info
+        self._storage = storage
+        self._ppe = ppe
+        self._serial = serial
+        self._tariff = tariff
+        self._default_icon = icon
+
+    def _get_meter_data(self) -> dict | None:
+        if not self.coordinator.data:
+            return None
+        for m in self.coordinator.data:
+            if str(m.get("meter_point_id")) == str(self._meter_id):
+                return m
+        return None
+
+    def _resolve_last_reading_date(self, meter_data: dict | None) -> date | None:
+        if meter_data and meter_data.get("last_measurement_date"):
+            try:
+                val = meter_data["last_measurement_date"]
+                if isinstance(val, str):
+                    return datetime.fromisoformat(val).date()
+                if isinstance(val, datetime):
+                    return val.date()
+                if isinstance(val, date):
+                    return val
+            except Exception:
+                pass
+
+        # Fallback to storage newest reading
+        if self._storage:
+            try:
+                latest_dt = self._storage.get_latest_reading_time(self._ppe or self._meter_id)
+                if latest_dt:
+                    return latest_dt.date()
+            except Exception:
+                pass
+        return None
+
+    @property
+    def native_value(self) -> str:
+        """Return data quality state: OK / Opóźnione / Braki / Brak danych."""
+        meter_data = self._get_meter_data()
+        last_date = self._resolve_last_reading_date(meter_data)
+        if not last_date:
+            return "Brak danych"
+
+        now_date = datetime.now(ZoneInfo("Europe/Warsaw")).date()
+        lag = (now_date - last_date).days
+
+        if lag <= 2:
+            return "OK"
+        if lag <= 5:
+            return "Opóźnione"
+        return "Braki"
+
+    @property
+    def icon(self) -> str:
+        val = self.native_value
+        if val == "OK":
+            return "mdi:check-network-outline"
+        if val == "Opóźnione":
+            return "mdi:clock-alert-outline"
+        return "mdi:network-strength-off-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        meter_data = self._get_meter_data()
+        last_date = self._resolve_last_reading_date(meter_data)
+        now_date = datetime.now(ZoneInfo("Europe/Warsaw")).date()
+
+        days_lag = (now_date - last_date).days if last_date else None
+        msg = meter_data.get("last_measurement_msg") if meter_data else None
+        remote_active = bool(msg and ("zdalnie" in msg.lower() or "licznik" in msg.lower()))
+
+        rec_count = 0
+        latest_storage_dt = None
+        if self._storage:
+            try:
+                rec_count = self._storage.get_readings_count(self._ppe or self._meter_id)
+                latest_storage_dt = self._storage.get_latest_reading_time(self._ppe or self._meter_id)
+            except Exception:
+                pass
+
+        return {
+            "last_reading_date": last_date.isoformat() if last_date else None,
+            "days_lag": days_lag,
+            "remote_reading_active": remote_active,
+            "remote_reading_message": msg or "Odczyt zdalny aktywny",
+            "meter_serial": self._serial,
+            "ppe": self._ppe,
+            "tariff": self._tariff or (meter_data.get("tariff") if meter_data else None),
+            "records_count_sqlite": rec_count,
+            "latest_storage_interval": latest_storage_dt.isoformat() if latest_storage_dt else None,
+        }
+
 
 
 

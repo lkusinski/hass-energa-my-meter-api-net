@@ -48,6 +48,7 @@ from .sensors.bill import (
 from .sensors.live import (
     EnergaAutoconsumptionSensor,
     EnergaCostStatisticsSensor,
+    EnergaDataQualitySensor,
     EnergaFirstDataDateSensor,
     EnergaInfoSensor,
     EnergaLiveSensor,
@@ -80,6 +81,7 @@ __all__ = [
     "EnergaBillForecastSensor",
     "EnergaCoordinator",
     "EnergaCostStatisticsSensor",
+    "EnergaDataQualitySensor",
     "EnergaFirstDataDateSensor",
     "EnergaInfoSensor",
     "EnergaLiveSensor",
@@ -867,6 +869,21 @@ async def async_setup_entry(
                         device_class=device_class,
                     )
                 )
+
+        # 16. Data Quality & Freshness Sensor
+        sensors.append(
+            EnergaDataQualitySensor(
+                coordinator=coordinator,
+                meter_id=meter_id,
+                name="Jakość danych",
+                icon="mdi:check-network-outline",
+                device_info=device_info,
+                storage=storage,
+                ppe=str(ppe),
+                serial=str(serial),
+                tariff=str(meter.get("tariff") or "G11"),
+            )
+        )
 
     # === CLEANUP CONSUMER LEFTOVERS (v0.2.15+) + v0.3.0 REMOVALS ===
     # Consumer meters (no export) no longer get prosumer sensors, and

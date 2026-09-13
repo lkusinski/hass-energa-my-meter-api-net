@@ -705,6 +705,17 @@ class EnergaAPI:
             # (see settlement.is_export_prosumer, v0.2.15+).
             is_prosumer = ag.get("type") == "Wytwórca"
 
+            last_meas_list = mp.get("lastMeasurements") or []
+            last_reading_dt = None
+            if last_meas_list and last_meas_list[0].get("date"):
+                try:
+                    ts_val = int(last_meas_list[0]["date"])
+                    last_reading_dt = datetime.fromtimestamp(ts_val / 1000, tz=ZoneInfo("Europe/Warsaw")).date().isoformat()
+                except (ValueError, TypeError, OSError):
+                    pass
+
+            last_msg = mp.get("lastMeasurementMsg")
+
             meter_obj = {
                 "meter_point_id": mp.get("id"),
                 "ppe": ppe,
@@ -714,6 +725,8 @@ class EnergaAPI:
                 "contract_date": c_date,
                 "activation_date": activation_ts,
                 "is_prosumer": is_prosumer,
+                "last_measurement_date": last_reading_dt,
+                "last_measurement_msg": last_msg,
                 "daily_pobor": None,
                 "daily_produkcja": None,
                 "total_plus": None,
