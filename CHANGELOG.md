@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.8.1 (2026-09-13) — Modułowe Usługi (services.py), Sensory Decyzyjne i Poprawki CI/CD
+
+### 🏗️ Modułowa Refaktoryzacja Usług (`services.py`)
+- **Wydzielenie `services.py` (1 288 linii):**
+  - Wyodrębniono rejestrację usług Home Assistant (`energa_mobile.update_data`, `energa_mobile.download_history`, `energa_mobile.import_statistics_service`), logikę synchronizacji i importu statystyk LTS do bazy Home Assistant z monolitycznego pliku `__init__.py`.
+  - Odchudzono `__init__.py` z **1 440 linii** do **175 linii** (~88% redukcji).
+  - Pełna zgodność wsteczna: re-eksport `import_statistics_for_range`, `async_import_statistics_for_meter`, `async_process_statistics_for_meter` oraz `_ensure_recorder_running`.
+
+### 💡 Nowe Sensory Decyzyjne i Automatyzacyjne (ROADMAP.md)
+- **Sensor Taniej Strefy (`binary_sensor.energa_tania_strefa`):**
+  - Determinuje w czasie rzeczywistym tańszą strefę (np. strefa pozaszczytowa T2 dla taryf G12/G12w/G12as/G13/C12a/C12b).
+  - Pełne wsparcie dla polskich świąt ustawowych (`is_polish_holiday`) i weekendów.
+  - Dynamiczne atrybuty encji: `current_zone`, `active_price_pln`, `next_zone`, `next_zone_change`, `hours_until_next_zone`.
+  - Automatyczne odświeżanie o każdej pełnej godzinie (`async_track_time_change`).
+- **Sensor Jakości Danych OSD (`sensor.energa_jakosc_danych`):**
+  - Stan główny: "OK" (opóźnienie do 2 dni), "Opóźnione" (3–5 dni), "Braki" (>5 dni) lub "Brak danych".
+  - Atrybuty: `remote_reading_active`, `days_lag`, `last_reading_date`, `status_msg`, `sqlite_records_count`.
+  - Rozszerzenie parsowania odpowiedzi API Energa w `api.py` o datę ostatniego pomiaru i komunikat licznika.
+
+### 🛠️ Poprawki CI/CD i Zgodności z Hassfest
+- **`manifest.json`:** Dodano `energy` oraz `lovelace` do tablicy `after_dependencies` (wymóg walidatora `hassfest`). Wersja podniesiona do `1.8.1`.
+- **`.github/workflows/release.yml`:** Dodano explicit uprawnienie `permissions: contents: write` dla tokenu GitHub Actions, naprawiając błąd 403 `Resource not accessible by integration` w akcji `softprops/action-gh-release@v2`.
+
+### 🧪 Testy Jednostkowe
+- Dodano `tests/test_services.py` (testy rejestracji usług, importu statystyk, fallbacków).
+- Dodano `tests/test_decision_sensors.py` (testy stref tanich, świąt, countdownu, stanów jakości danych).
+- 369/370 zaliczonych testów jednostkowych, 0 błędów lintera ruff.
+
 ## v1.8.0 (2026-09-13) — Modułowa Architektura Sensorów, Coordinator i Narzędzia CI/CD
 
 ### 🏗️ Modułowa Refaktoryzacja Architektury (`custom_components/energa_mobile`)

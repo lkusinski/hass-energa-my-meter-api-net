@@ -18,6 +18,7 @@ _HA_MODULES = [
     "homeassistant.helpers.update_coordinator",
     "homeassistant.helpers.entity",
     "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.event",
     "homeassistant.helpers.frame",
     "homeassistant.helpers.restore_state",
     "homeassistant.helpers.storage",
