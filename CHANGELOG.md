@@ -1,6 +1,61 @@
 # Changelog
 
-## v1.6.9 (2026-09-12) — Optymalizacja Asynchroniczna, Buforowanie RCE i Bezblokadowy MainThread
+## v1.7.2 (2026-09-13) — Ergonomia Pulpitu Lovelace, Ikona Paska Bocznego i Automatyzacje Cen Dynamicznych RCE
+
+### 📊 Ergonomia i Dopracowanie Pulpitu Lovelace (`dashboard_generator.py`)
+- **Oficjalna ikona paska bocznego (`mdi:lightning-bolt-circle`):**
+  - Zamieniono rzadziej wspieraną ikonę walutową na wyrazistą, uniwersalną ikonę energii `mdi:lightning-bolt-circle`.
+  - Zagwarantowano dynamiczną aktualizację istniejących wpisów w `.storage/lovelace_dashboards` przy regeneracji pulpitów (ikona, tytuł i widoczność na pasku bocznym są natychmiast uaktualniane).
+- **Wyeliminowanie podwójnego nagłówka na karcie tytułowej:**
+  - Całkowicie usunięto atrybut `title` z karty typu `markdown`, co zlikwidowało powtarzający się nagłówek Lovelace nad treścią karty.
+  - Zmniejszono rozmiar nagłówka z przeładowanego `##` do czytelnego, zwartego H3 (`### 🏡 {Nazwa punktu}`).
+  - Podtytuł z metadanymi (miejscowość, taryfa, system rozliczeń, numer licznika) ujednolicono w jednej zwięzłej linii ze separatorami `•`.
+- **Kompaktowe i czytelne tytuły kart:**
+  - Usunięto długie adresy powtarzane w tytułach kart (np. zmiana `⚡ Rozliczenie Finansowe Energa (87-148 Łysomice, Wiśniowa 9)` na eleganckie `⚡ Rozliczenie Finansowe`), zapobiegając ucinaniu i zawijaniu tekstu na urządzeniach mobilnych.
+- **Dedykowana Karta Cen Dynamicznych RCE i Arbitrażu BESS:**
+  - Dla liczników z taryfami dynamicznymi / net-billingiem automatycznie generowana jest dedykowana karta prezentująca:
+    - Miesięczną cenę referencyjną RCEm oraz wycenę zasilenia depozytu brutto
+    - Bieżącą 15-minutową cenę RCE z rynku bilansującego PSE
+    - Spread arbitrażowy brutto z uwzględnieniem sprawności magazynu
+    - Sensory binarne okien ładowania (`CHARGE`), rozładowania (`DISCHARGE`) oraz alertu cen ujemnych.
+
+### ⚡ Szablony Automatyzacji (Blueprints) dla Home Assistant
+- Wprowadzono 3 gotowe szablony Blueprints (dostępne bezpośrednio w HA):
+  - `energa_rce_negative_price_protection.yaml`: Natychmiastowa reakcja na ujemne ceny energii RCE (< 0 zł/kWh) — powiadomienie push oraz automatyczne załączenie odbiorników podnoszących autokonsumpcję (grzanie CWU pompą ciepła, ładowanie samochodu elektrycznego, klimatyzacja).
+  - `energa_bess_arbitrage_charging.yaml`: Automatyczne ładowanie domowego magazynu energii lub samochodu EV w najtańszym oknie doby wyznaczonym przez silnik `ArbitrageEngine`.
+  - `energa_bess_peak_discharge.yaml`: Optymalizacja rozładowania magazynu w popołudniowo-wieczornym szczycie najwyższych cen PSE.
+- Nowa dokumentacja [`docs/AUTOMATIONS.md`](docs/AUTOMATIONS.md) ze studium przypadków dla pomp ciepła i wallboxa BMW.
+
+### 📚 Nowe Przewodniki i Baza Wiedzy w Dokumentacji
+- **Stabilność, Restarty HA i Integracje Chmurowe ([`docs/STABILITY_AND_INTEGRATIONS.md`](docs/STABILITY_AND_INTEGRATIONS.md)):**
+  - Dogłębne studium kaskady restartowej na zewnętrznych chmurach API (np. SolisCloud) podczas intensywnych prac wdrożeniowych.
+  - Opis architektury *Resilience-by-Design* w integracji Energa (SQLite WAL, asynchroniczność bez blokowania pętli `MainThread`, odporność offline).
+  - Rekomendacje dla administratorów HA dotyczące higieny restartów oraz wdrożeń rozwiązań lokalnych (Modbus TCP/RS-485).
+- **Mapa Rozwoju i Katalog Propozycji ([`docs/ROADMAP.md`](docs/ROADMAP.md)):**
+  - Usystematyzowany katalog przyszłych usprawnień (zaawansowane wykresy ApexCharts, sensory binarne rekomendacji, integracja z natywnym panelem HA Energy).
+  - Zaproszenie społeczności do zgłaszania uwag i propozycji w GitHub Issues.
+- **Wnioski Wdrożeniowe w [`docs/DASHBOARD.md`](docs/DASHBOARD.md):**
+  - Dodano sekcję podsumowującą wnioski z wdrożenia na 5 różnych środowiskach (konsument G11, prosument net-metering, prosument net-billing RCE).
+
+---
+
+## v1.7.1 (2026-09-13) — Autonomiczny Silnik Przyrostowej Syntezy Magazynu Syntetycznego (Self-Healing)
+
+### 🛡️ Niezawodność i Ciągłość Danych w Panelu Energia (`synthetic_storage.py`)
+- **Silnik syntezy przyrostowej (Incremental Self-Healing Engine):**
+  - Wyeliminowano sztywny bezpiecznik pomijający obliczenia magazynu syntetycznego, gdy w bazie istniały jakiekolwiek wcześniejsze rekordy.
+  - Wprowadzono automatyczne wykrywanie luk czasowych (`max_raw_ts > max_synth_ts`): po każdej dobie OSD brakujące godziny są automatycznie dosyntetyzowywane z zachowaniem idealnej monotoniczności sum skumulowanych (`base_sums`).
+  - Każda aktualizacja integracji samoczynnie uzupełnia brakujące dni w przeszłości bez konieczności jakiejkolwiek ingerencji użytkownika.
+
+---
+
+## v1.7.0 (2026-09-13) — Precyzyjne Kalibracje Faktury Lipcowej i Obsługa Wielu Liczników
+
+### 💎 Dokładność Finansowa
+- Automatyczne wstrzykiwanie stanów bazowych liczników (`balance_baseline_*`) na granicy okresów rozliczeniowych (31 lipca).
+- 100% zgodności co do grosza z oficjalnymi fakturami Energa Obrót.
+
+---
 
 ### 🚀 Główne Ulepszenia i Optymalizacje Wydajności
 - **Przeniesienie obliczeń profilu godzinowego (`HourlyProfileForecaster`) do wątku roboczego (`async_add_executor_job`):**

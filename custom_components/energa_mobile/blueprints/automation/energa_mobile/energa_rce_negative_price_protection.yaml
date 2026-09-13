@@ -1,0 +1,87 @@
+blueprint:
+  name: "Energa: Ochrona przed ujemnymi cenami RCE (Load Boost / Curtailment)"
+  description: >
+    Automatycznie reaguje na ujemne ceny energii na rynku bilansującym PSE (RCE < 0 zł/kWh).
+    Pozwala wysłać powiadomienie push oraz uruchomić dodatkowe odbiorniki w domu
+    (np. grzałkę CWU, pompę ciepła, klimatyzację lub ładowarkę auta), aby uniknąć strat
+    i w pełni skonsumować energię na miejscu.
+  domain: automation
+  input:
+    rce_negative_sensor:
+      name: Sensor ujemnej ceny RCE
+      description: Encja binarna ostrzegająca o ujemnej cenie energii z integracji Energa.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+            device_class: problem
+    notify_device:
+      name: Urządzenie do powiadomień (opcjonalne)
+      description: Smartfon z aplikacją Home Assistant do wysyłania alertu.
+      default: ""
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+    actions_negative_start:
+      name: Akcje po wystąpieniu ujemnej ceny (Start)
+      description: Co zrobić, gdy cena RCE spadnie poniżej zera (np. włącz grzanie CWU, zwiększ moc pompy ciepła, uruchom wallbox).
+      default: []
+      selector:
+        action: {}
+    actions_negative_stop:
+      name: Akcje po ustąpieniu ujemnej ceny (Koniec)
+      description: Co zrobić, gdy cena RCE powróci do wartości dodatnich.
+      default: []
+      selector:
+        action: {}
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    entity_id: !input rce_negative_sensor
+    to: "on"
+    id: "negative_start"
+  - platform: state
+    entity_id: !input rce_negative_sensor
+    to: "off"
+    id: "negative_stop"
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "negative_start"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "⚠️ Energa: Ujemna Cena Energii RCE!"
+                message: >
+                  Uwaga! Cena odkupu RCE na rynku bilansującym PSE spadła poniżej zera
+                  ({{ state_attr(trigger.entity_id, 'current_price_pln_kwh') }} PLN/kWh).
+                  Zwiększ autokonsumpcję (CWU, ładowanie auta, klimatyzacja).
+          - choose: []
+            default: !input actions_negative_start
+
+      - conditions:
+          - condition: trigger
+            id: "negative_stop"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_device != '' }}"
+            then:
+              - domain: mobile_app
+                type: notify
+                device_id: !input notify_device
+                title: "✅ Energa: Koniec Ujemnej Ceny RCE"
+                message: "Cena energii na rynku bilansującym powróciła do wartości dodatnich."
+          - choose: []
+            default: !input actions_negative_stop
