@@ -12,6 +12,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import storage
 
+from .const import DOMAIN
+
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_URL_PATH = "energa-rachunek"
@@ -24,32 +26,163 @@ def is_export_prosumer(meter: dict[str, Any]) -> bool:
     return bool(meter.get("is_prosumer") or meter.get("has_export"))
 
 
+def _build_device_entity_map(
+    hass: HomeAssistant | None,
+    serial: str,
+    meter_id: str = "",
+) -> dict[Any, str]:
+    """Build a mapping from metric suffix / name to actual entity_id in Home Assistant.
+
+    Enables dynamic dashboard generation regardless of custom device names or area prefixes
+    (e.g., 'sensor.wejscie_licznik_energa_numer_licznika' for Area 'wejscie' and Device 'licznik energa').
+    """
+    if hass is None:
+        return {}
+
+    mapping: dict[Any, str] = {}
+    s_clean = str(serial).strip().lower()
+    mid_clean = str(meter_id).strip().lower()
+
+    # 1. Device Registry + Entity Registry lookup
+    try:
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        dev_reg = dr.async_get(hass)
+        device = dev_reg.async_get_device(identifiers={(DOMAIN, str(serial))})
+        if not device and meter_id:
+            device = dev_reg.async_get_device(identifiers={(DOMAIN, str(meter_id))})
+
+        ent_reg = er.async_get(hass)
+        entries = []
+        if device and hasattr(device, "id"):
+            entries = er.async_entries_for_device(ent_reg, device.id)
+
+        # Fallback if no entries found for device or device not found: check ent_reg for entries belonging to DOMAIN
+        if not entries and hasattr(ent_reg, "entities") and isinstance(ent_reg.entities, dict):
+            entries = [
+                entry
+                for entry in ent_reg.entities.values()
+                if getattr(entry, "platform", None) == DOMAIN
+                and (
+                    (s_clean and s_clean in str(getattr(entry, "unique_id", "")).lower())
+                    or (mid_clean and mid_clean in str(getattr(entry, "unique_id", "")).lower())
+                )
+            ]
+
+        for entry in entries:
+            eid = getattr(entry, "entity_id", None)
+            if not eid or not isinstance(eid, str):
+                continue
+            domain = eid.split(".", 1)[0]
+            obj_id = eid.split(".", 1)[1] if "." in eid else eid
+
+            # Map all suffix segments separated by underscore
+            parts = obj_id.split("_")
+            for i in range(len(parts)):
+                suffix = "_".join(parts[i:])
+                if suffix:
+                    mapping[(domain, suffix)] = eid
+                    if suffix not in mapping:
+                        mapping[suffix] = eid
+
+            # Map original_name if present
+            orig_name = getattr(entry, "original_name", None)
+            if orig_name and isinstance(orig_name, str):
+                slug = orig_name.lower().replace(" ", "_")
+                mapping[(domain, slug)] = eid
+                if slug not in mapping:
+                    mapping[slug] = eid
+    except Exception as ex:
+        _LOGGER.debug("Failed device/entity registry lookup in _build_device_entity_map: %s", ex)
+
+    # 2. Try hass.states lookup if mapping is empty or to complement
+    try:
+        if hasattr(hass, "states") and hasattr(hass.states, "async_all"):
+            states = hass.states.async_all()
+            if isinstance(states, list):
+                for st in states:
+                    eid = getattr(st, "entity_id", "")
+                    if not eid or not isinstance(eid, str):
+                        continue
+                    domain = eid.split(".", 1)[0]
+                    obj_id = eid.split(".", 1)[1] if "." in eid else eid
+                    is_match = (
+                        (s_clean and s_clean in obj_id.lower())
+                        or (mid_clean and mid_clean in obj_id.lower())
+                        or "energa" in obj_id.lower()
+                    )
+                    if is_match:
+                        parts = obj_id.split("_")
+                        for i in range(len(parts)):
+                            suffix = "_".join(parts[i:])
+                            if suffix:
+                                if (domain, suffix) not in mapping:
+                                    mapping[(domain, suffix)] = eid
+                                if suffix not in mapping:
+                                    mapping[suffix] = eid
+    except Exception as ex:
+        _LOGGER.debug("Failed hass.states scan in _build_device_entity_map: %s", ex)
+
+    return mapping
+
+
 def resolve_entity(
     hass: HomeAssistant | None,
     primary: str,
     fallbacks: list[str] | None = None,
+    entity_map: dict[Any, str] | None = None,
+    name_suffix: str | None = None,
 ) -> str:
     """Resolve the most accurate entity ID available in Home Assistant.
 
-    Checks hass.states first, then entity registry if available, and falls back to primary.
+    Checks:
+    1. Pre-computed device registry entity_map if provided.
+    2. Exact matches in hass.states for primary and fallbacks.
+    3. Exact matches in entity_registry for primary and fallbacks.
+    4. Suffix matching in hass.states if name_suffix is provided.
+    5. Falls back to primary.
     """
+    domain = primary.split(".")[0] if "." in primary else "sensor"
+
+    if entity_map and name_suffix:
+        if (domain, name_suffix) in entity_map:
+            return entity_map[(domain, name_suffix)]
+        if name_suffix in entity_map:
+            return entity_map[name_suffix]
+
     if hass is None:
         return primary
 
     candidates = [primary] + (fallbacks or [])
     for candidate in candidates:
-        if hass.states.get(candidate) is not None:
-            return candidate
+        try:
+            if hass.states.get(candidate) is not None:
+                return candidate
+        except Exception:
+            pass
 
     try:
         from homeassistant.helpers import entity_registry as er
 
         ent_reg = er.async_get(hass)
         for candidate in candidates:
-            if candidate in ent_reg.entities:
+            if hasattr(ent_reg, "entities") and candidate in ent_reg.entities:
                 return candidate
     except Exception:
         pass
+
+    # Suffix fallback scan in hass.states if candidates failed but name_suffix is given
+    if name_suffix and hasattr(hass, "states") and hasattr(hass.states, "async_all"):
+        try:
+            states = hass.states.async_all(domain)
+            if isinstance(states, list):
+                for st in states:
+                    eid = getattr(st, "entity_id", "")
+                    if eid.endswith(f"_{name_suffix}") or eid == f"{domain}.{name_suffix}":
+                        return eid
+        except Exception:
+            pass
 
     return primary
 
@@ -74,6 +207,8 @@ def build_meter_view(
     is_net_billing = is_prosumer and effective_coeff < 0.7
     is_net_metering = is_prosumer and not is_net_billing
 
+    entity_map = _build_device_entity_map(hass, serial, meter_id)
+
     def _eid(name: str, domain: str = "sensor") -> str:
         primary = f"{domain}.energa_{s_slug}_{name}"
         fallbacks = [
@@ -81,7 +216,13 @@ def build_meter_view(
             f"{domain}.energa_{meter_id}_{name}",
             f"{domain}.licznik_{meter_id}_{name}",
         ]
-        return resolve_entity(hass, primary, fallbacks)
+        return resolve_entity(
+            hass,
+            primary,
+            fallbacks,
+            entity_map=entity_map,
+            name_suffix=name,
+        )
 
     raw_label = (
         str(meter.get("customer_label", "")).strip()

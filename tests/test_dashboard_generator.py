@@ -300,3 +300,253 @@ def test_autoconsumption_not_added_without_inverter_or_state(mock_meter_net_bill
     assert not any("autokonsumpcja" in e for e in tariff_entities)
 
 
+def test_meter_view_with_custom_device_name_and_area():
+    """Test resolution when user puts meter in Area 'wejscie' and renames device to 'licznik energa' (Issue #2)."""
+    meter = {
+        "meter_point_id": "55555555",
+        "meter_serial": "55555555",
+        "address": "ul. Testowa 1",
+        "tariff": "G12w",
+        "zone_count": 2,
+        "is_prosumer": True,
+        "has_export": True,
+        "ppe": "590000000000000099",
+        "total_plus": 1000.0,
+    }
+
+    class MockEntry:
+        def __init__(self, entity_id, unique_id="", original_name="", domain="sensor"):
+            self.entity_id = entity_id
+            self.unique_id = unique_id
+            self.original_name = original_name
+            self.domain = domain
+            self.platform = "energa_mobile"
+
+    device_id = "mock_device_55555555"
+    mock_device = MagicMock()
+    mock_device.id = device_id
+
+    mock_entries = [
+        MockEntry(
+            "sensor.wejscie_licznik_energa_numer_licznika",
+            "energa_55555555_numer_licznika_info",
+            "Numer Licznika",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_dotychczasowy_rachunek",
+            "energa_55555555_bill_current",
+            "Dotychczasowy Rachunek",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_prognoza_rachunku",
+            "energa_55555555_bill_forecast",
+            "Prognoza Rachunku",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_stan_licznika_import",
+            "energa_55555555_total_plus_live",
+            "Stan Licznika Import",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_bank_wirtualny_kwh",
+            "energa_55555555_bank_kwh",
+            "Bank Wirtualny kWh",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_bank_wirtualny_pln",
+            "energa_55555555_bank_pln",
+            "Bank Wirtualny PLN",
+        ),
+        MockEntry(
+            "sensor.wejscie_licznik_energa_magazyn_poziom",
+            "energa_55555555_bank_level",
+            "Magazyn Poziom",
+        ),
+        MockEntry(
+            "binary_sensor.wejscie_licznik_energa_okno_ladowania_bess_arbitraz_rce",
+            "energa_55555555_bess_charge_window",
+            "Okno ładowania BESS (Arbitraż RCE)",
+            domain="binary_sensor",
+        ),
+    ]
+
+    import sys
+
+    dr_mod = sys.modules["homeassistant.helpers"].device_registry
+    er_mod = sys.modules["homeassistant.helpers"].entity_registry
+
+    mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_device.return_value = mock_device
+
+    mock_ent_reg = MagicMock()
+
+    mock_hass = MagicMock()
+    with patch.object(dr_mod, "async_get", return_value=mock_dev_reg), \
+         patch.object(er_mod, "async_get", return_value=mock_ent_reg), \
+         patch.object(er_mod, "async_entries_for_device", return_value=mock_entries):
+
+        view = build_meter_view(meter, coeff=0.8, hass=mock_hass)
+
+        # Badges should resolve to sensor.wejscie_licznik_energa_*
+        badge_entities = [b["entity"] for b in view["badges"]]
+        assert "sensor.wejscie_licznik_energa_dotychczasowy_rachunek" in badge_entities
+        assert "sensor.wejscie_licznik_energa_prognoza_rachunku" in badge_entities
+        assert "sensor.wejscie_licznik_energa_bank_wirtualny_kwh" in badge_entities
+        assert "sensor.wejscie_licznik_energa_magazyn_poziom" in badge_entities
+
+        # Rejestry licznika card
+        counter_card = next(c for c in view["cards"] if "Rejestry Licznika" in c.get("title", ""))
+        counter_entities = [e["entity"] for e in counter_card["entities"]]
+        assert "sensor.wejscie_licznik_energa_numer_licznika" in counter_entities
+        assert "sensor.wejscie_licznik_energa_stan_licznika_import" in counter_entities
+
+
+def test_resolve_entity_with_entity_map():
+    entity_map = {
+        ("sensor", "numer_licznika"): "sensor.wejscie_licznik_energa_numer_licznika",
+        "numer_licznika": "sensor.wejscie_licznik_energa_numer_licznika",
+    }
+    # Direct lookup with entity_map
+    res = resolve_entity(
+        None,
+        "sensor.energa_55555555_numer_licznika",
+        ["sensor.licznik_55555555_numer_licznika"],
+        entity_map=entity_map,
+        name_suffix="numer_licznika",
+    )
+    assert res == "sensor.wejscie_licznik_energa_numer_licznika"
+
+
+def test_resolve_entity_suffix_fallback_states():
+    mock_hass = MagicMock()
+    mock_hass.states.get.return_value = None
+    mock_st = MagicMock()
+    mock_st.entity_id = "sensor.kotlownia_moj_licznik_numer_licznika"
+    mock_hass.states.async_all.return_value = [mock_st]
+
+    res = resolve_entity(
+        mock_hass,
+        "sensor.energa_999_numer_licznika",
+        ["sensor.licznik_999_numer_licznika"],
+        name_suffix="numer_licznika",
+    )
+    assert res == "sensor.kotlownia_moj_licznik_numer_licznika"
+
+
+def test_meter_view_with_custom_device_name_and_area_net_billing():
+    """Test net-billing with binary sensors under custom device and area."""
+    import sys
+
+    meter = {
+        "meter_point_id": "55555555",
+        "meter_serial": "55555555",
+        "tariff": "G12w",
+        "zone_count": 2,
+        "is_prosumer": True,
+        "has_export": True,
+        "prosumer_coefficient": 0.0,
+    }
+
+    class MockEntry:
+        def __init__(self, entity_id, unique_id="", original_name="", domain="sensor"):
+            self.entity_id = entity_id
+            self.unique_id = unique_id
+            self.original_name = original_name
+            self.domain = domain
+            self.platform = "energa_mobile"
+
+    mock_entries = [
+        MockEntry("sensor.wejscie_licznik_energa_bank_wirtualny_pln", "energa_55555555_bank_pln", "Bank Wirtualny PLN"),
+        MockEntry("sensor.wejscie_licznik_energa_cena_oddania", "energa_55555555_feed_in_price", "Cena Oddania"),
+        MockEntry("sensor.wejscie_licznik_energa_rcem_auto", "energa_55555555_rcem_auto", "RCEM Auto"),
+        MockEntry("sensor.wejscie_licznik_energa_dynamiczna_cena_energii_rce", "energa_55555555_rce_dynamic_price", "Dynamiczna Cena Energii RCE"),
+        MockEntry("sensor.wejscie_licznik_energa_spread_arbitrazowy_bess_rce", "energa_55555555_bess_arbitrage_spread", "Spread arbitrażowy BESS (RCE)"),
+        MockEntry("binary_sensor.wejscie_licznik_energa_okno_ladowania_bess_arbitraz_rce", "energa_55555555_bess_charge_window", "Okno ładowania BESS (Arbitraż RCE)", domain="binary_sensor"),
+        MockEntry("binary_sensor.wejscie_licznik_energa_okno_rozladowania_bess_szczyt_rce", "energa_55555555_bess_discharge_window", "Okno rozładowania BESS (Szczyt RCE)", domain="binary_sensor"),
+        MockEntry("binary_sensor.wejscie_licznik_energa_cena_ujemna_rce_zagrozenie_eksportu", "energa_55555555_rce_negative_price", "Cena ujemna RCE (Zagrożenie eksportu)", domain="binary_sensor"),
+    ]
+
+    mock_device = MagicMock()
+    mock_device.id = "mock_device_55555555"
+
+    dr_mod = sys.modules["homeassistant.helpers"].device_registry
+    er_mod = sys.modules["homeassistant.helpers"].entity_registry
+
+    mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_device.return_value = mock_device
+    mock_ent_reg = MagicMock()
+
+    mock_hass = MagicMock()
+    with patch.object(dr_mod, "async_get", return_value=mock_dev_reg), \
+         patch.object(er_mod, "async_get", return_value=mock_ent_reg), \
+         patch.object(er_mod, "async_entries_for_device", return_value=mock_entries):
+
+        view = build_meter_view(meter, coeff=0.0, hass=mock_hass)
+
+        # RCE & Arbitrage card
+        rce_card = next(c for c in view["cards"] if "Ceny Dynamiczne RCE" in c.get("title", ""))
+        rce_entities = [e["entity"] for e in rce_card["entities"]]
+        assert "binary_sensor.wejscie_licznik_energa_okno_ladowania_bess_arbitraz_rce" in rce_entities
+        assert "binary_sensor.wejscie_licznik_energa_okno_rozladowania_bess_szczyt_rce" in rce_entities
+        assert "binary_sensor.wejscie_licznik_energa_cena_ujemna_rce_zagrozenie_eksportu" in rce_entities
+        assert "sensor.wejscie_licznik_energa_spread_arbitrazowy_bess_rce" in rce_entities
+
+
+def test_multi_meter_registry_isolation():
+    """Ensure two meters with custom device names do not mix up entities."""
+    import sys
+
+    meter1 = {"meter_point_id": "11111111", "meter_serial": "11111111", "tariff": "G11", "zone_count": 1}
+    meter2 = {"meter_point_id": "22222222", "meter_serial": "22222222", "tariff": "G11", "zone_count": 1}
+
+    class MockEntry:
+        def __init__(self, entity_id, unique_id="", original_name="", domain="sensor"):
+            self.entity_id = entity_id
+            self.unique_id = unique_id
+            self.original_name = original_name
+            self.domain = domain
+            self.platform = "energa_mobile"
+
+    entries_meter1 = [
+        MockEntry("sensor.kuchnia_licznik_kuchnia_numer_licznika", "energa_11111111_numer_licznika_info", "Numer Licznika"),
+        MockEntry("sensor.kuchnia_licznik_kuchnia_taryfa", "energa_11111111_taryfa_info", "Taryfa"),
+    ]
+    entries_meter2 = [
+        MockEntry("sensor.garaz_licznik_garaz_numer_licznika", "energa_22222222_numer_licznika_info", "Numer Licznika"),
+        MockEntry("sensor.garaz_licznik_garaz_taryfa", "energa_22222222_taryfa_info", "Taryfa"),
+    ]
+
+    dev1 = MagicMock(id="dev_11111111")
+    dev2 = MagicMock(id="dev_22222222")
+
+    dr_mod = sys.modules["homeassistant.helpers"].device_registry
+    er_mod = sys.modules["homeassistant.helpers"].entity_registry
+
+    mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_device.side_effect = lambda identifiers: dev1 if ("energa_mobile", "11111111") in identifiers else dev2
+
+    mock_ent_reg = MagicMock()
+    def _mock_entries_for_device(reg, device_id):
+        if device_id == "dev_11111111":
+            return entries_meter1
+        return entries_meter2
+
+    mock_hass = MagicMock()
+    with patch.object(dr_mod, "async_get", return_value=mock_dev_reg), \
+         patch.object(er_mod, "async_get", return_value=mock_ent_reg), \
+         patch.object(er_mod, "async_entries_for_device", side_effect=_mock_entries_for_device):
+
+        view1 = build_meter_view(meter1, hass=mock_hass)
+        view2 = build_meter_view(meter2, hass=mock_hass)
+
+        view1_badges = [b["entity"] for b in view1["badges"]]
+        view2_badges = [b["entity"] for b in view2["badges"]]
+
+        assert "sensor.kuchnia_licznik_kuchnia_taryfa" in view1_badges
+        assert "sensor.garaz_licznik_garaz_taryfa" in view2_badges
+        assert "sensor.garaz_licznik_garaz_taryfa" not in view1_badges
+        assert "sensor.kuchnia_licznik_kuchnia_taryfa" not in view2_badges
+
+
+
+
