@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.8.3 (2026-09-14) — Pełna Obsługa Własnych Nazw Urządzeń i Stref (Issue #2 Follow-up)
+
+### 🚀 Nowości i Poprawki Architektoniczne
+- **Rejestro-Zależne Dopasowywanie Encji (`dashboard_generator.py`):**
+  - Rozszerzono silnik generowania pulpitu o bezpośrednie odpytywanie rejestru urządzeń (`device_registry`) oraz rejestru encji (`entity_registry`) Home Assistant (`_build_device_entity_map`).
+  - Identyfikacja urządzenia odbywa się na podstawie niezmiennych unikalnych identyfikatorów sprzętowych `identifiers={(DOMAIN, str(serial))}` lub `identifiers={(DOMAIN, str(meter_point_id))}`.
+  - Pulpit dynamicznie mapuje aktualne identyfikatory encji niezależnie od:
+    - Zmiany nazwy urządzenia przez użytkownika (np. `"licznik energa"` zamiast domyślnego `"Energa {serial}"`),
+    - Przypisania urządzenia do strefy/obszaru (Area) w Home Assistant (np. strefa `"wejscie"` tworząca encje `sensor.wejscie_licznik_energa_*`),
+    - Ręcznego przemianowania identyfikatorów encji w panelu ustawień Home Assistant.
+  - Zapewniono pełną izolację między wieloma licznikami na jednym koncie — encje z jednego urządzenia nie kolidują z widokami drugiego licznika.
+  - Zachowano wsteczną kompatybilność: fallback do sprawdzania `hass.states` oraz wartości domyślnych przy braku rejestru (np. środowiska testowe).
+
 ## v1.8.2 (2026-09-13) — Dynamiczne Rozpoznawanie Encji Pulpitu, Spójność Urządzeń i Wyciszenie Logów Monotonic Clamp
 
 ### 🐛 Rozwiązanie Zgłoszenia Issue #2 ("no entities")
