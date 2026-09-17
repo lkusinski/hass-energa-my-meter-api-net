@@ -24,7 +24,13 @@ from .api import (
     EnergaConnectionError,
     EnergaTokenExpiredError,
 )
-from .const import CONF_DEVICE_TOKEN, CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .const import (
+    CONF_DEVICE_TOKEN,
+    CONF_PASSWORD,
+    CONF_PROSUMER_COEFFICIENT,
+    CONF_USERNAME,
+    DOMAIN,
+)
 from .dashboard_generator import async_provision_dashboard
 from .services import (
     AUTO_HISTORY_DAYS,
@@ -134,6 +140,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Energa: Initial coordinator refresh successful")
     except Exception as err:
         _LOGGER.warning("Energa: Initial coordinator fetch failed, will retry: %s", err)
+
+    # v1.9.0 backfill: an entry created before v0.3.8 that never stored
+    # `prosumer_coefficient` inherits the 0.8 default, which mislabels a plain
+    # consumer as old net-metering. When the meter list is known and no meter
+    # exports, pin the coefficient to the wizard's "brak" answer (0.0).
+    try:
+        from .settlement import consumer_coefficient_needed
+
+        if consumer_coefficient_needed(
+            getattr(api, "_meters_data", None), entry.options
+        ):
+            _new_opts = dict(entry.options)
+            _new_opts[CONF_PROSUMER_COEFFICIENT] = 0.0
+            hass.config_entries.async_update_entry(entry, options=_new_opts)
+            _LOGGER.info(
+                "Energa: no export prosumer on entry %s — pinned prosumer_coefficient=0.0",
+                entry.entry_id,
+            )
+    except Exception as err:  # noqa: BLE001 - backfill must never break setup
+        _LOGGER.debug("Energa: consumer coefficient backfill skipped: %s", err)
 
     # Close session when HA shuts down
     async def _close_session(_event):

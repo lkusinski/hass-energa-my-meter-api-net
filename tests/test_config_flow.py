@@ -132,3 +132,45 @@ class TestSystemStep:
         assert system_choice_coefficient("stare") == 0.8
         assert system_choice_coefficient(None) == 0.8
         assert system_choice_coefficient("junk") == 0.8
+
+
+class TestConsumerCoefficientBackfill:
+    """v1.9.0: pre-v0.3.8 consumer entries inherit 0.8 → must be pinned to 0.0."""
+
+    CONSUMER = {"meter_point_id": "900001", "total_minus": 0.0, "is_prosumer": False}
+    PROSUMER = {"meter_point_id": "900002", "total_minus": 123.4, "is_prosumer": False}
+
+    def test_consumer_without_key_needs_fix(self):
+        from custom_components.energa_mobile.settlement import (
+            consumer_coefficient_needed,
+        )
+
+        assert consumer_coefficient_needed([self.CONSUMER], {}) is True
+
+    def test_explicit_key_is_respected(self):
+        from custom_components.energa_mobile.settlement import (
+            consumer_coefficient_needed,
+        )
+
+        assert consumer_coefficient_needed(
+            [self.CONSUMER], {"prosumer_coefficient": 0.8}
+        ) is False
+
+    def test_exporter_never_gets_pinned(self):
+        from custom_components.energa_mobile.settlement import (
+            consumer_coefficient_needed,
+        )
+
+        assert consumer_coefficient_needed([self.PROSUMER], {}) is False
+        assert consumer_coefficient_needed(
+            [self.CONSUMER, self.PROSUMER], {}
+        ) is False
+
+    def test_unknown_meter_list_is_a_noop(self):
+        from custom_components.energa_mobile.settlement import (
+            consumer_coefficient_needed,
+        )
+
+        # No meter data yet (API fetch failed) → never guess.
+        assert consumer_coefficient_needed(None, {}) is False
+        assert consumer_coefficient_needed([], {}) is False

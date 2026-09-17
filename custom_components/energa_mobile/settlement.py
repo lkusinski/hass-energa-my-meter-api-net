@@ -640,6 +640,25 @@ def system_choice_coefficient(choice) -> float:
     return 0.8
 
 
+def consumer_coefficient_needed(meters: list | None, options: dict | None) -> bool:
+    """True when a confirmed NON-prosumer entry lacks an explicit coefficient.
+
+    Entries created before v0.3.8 never stored ``prosumer_coefficient`` and
+    inherit DEFAULT_PROSUMER_COEFFICIENT (0.8), which mislabels a plain
+    consumer as old net-metering. Returns True only when the meter list is
+    known, no meter exports, and no coefficient key is present — so the
+    backfill can safely pin it to 0.0 without guessing.
+    """
+    if not meters:
+        return False
+    if options and "prosumer_coefficient" in options:
+        return False
+    try:
+        return not any(is_export_prosumer(m) for m in meters)
+    except (TypeError, AttributeError):
+        return False
+
+
 def deposit_valid_until(year: int, month: int) -> date:
     """Date until which a monthly deposit stays valid (assignment + 12m).
 

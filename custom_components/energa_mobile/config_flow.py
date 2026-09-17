@@ -196,6 +196,12 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return self.async_create_entry(
                         title=attempt_username,
                         data=entry_data,
+                        # Confirmed NON-prosumer (no export): pin the
+                        # coefficient to the "brak" answer (0.0). Without
+                        # this the entry inherits DEFAULT_PROSUMER_COEFFICIENT
+                        # (0.8) and _is_old_system() mislabels a plain
+                        # consumer as old net-metering (Warzywna G11).
+                        options={CONF_PROSUMER_COEFFICIENT: 0.0},
                     )
                 except EnergaAuthError:
                     if attempt_username == normalized_username:
