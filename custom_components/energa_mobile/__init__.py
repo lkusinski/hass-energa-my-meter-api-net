@@ -32,9 +32,12 @@ from .const import (
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
+    CONF_VERIFY_PERIOD_END,
+    CONF_VERIFY_PERIOD_START,
     DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
+    SIGNAL_PERIOD_OPTIONS_UPDATED,
 )
 from .dashboard_generator import DEFAULT_URL_PATH, async_provision_dashboard
 from .services import (
@@ -52,6 +55,7 @@ from .services import (
 __all__ = [
     "AUTO_HISTORY_DAYS",
     "DOMAIN",
+    "PERIOD_OPTION_KEYS",
     "PLATFORMS",
     "TIMEZONE",
     "_has_any_panel_statistics",
@@ -59,6 +63,7 @@ __all__ = [
     "_async_ensure_settlement_dashboard",
     "_import_meter_history",
     "_maybe_auto_backfill",
+    "_only_period_dates_changed",
     "_stat_sum_before",
     "async_provision_dashboard",
     "async_setup_entry",
@@ -69,6 +74,37 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor", "button", "binary_sensor", "date"]
 
 ERGO5_ISSUE_ID = "ergo5_detected"
+
+# Options that only affect the verification period picker. A change limited to
+# these keys must not trigger a full config-entry reload (it would briefly make
+# every entity of the integration unavailable).
+PERIOD_OPTION_KEYS = frozenset({CONF_VERIFY_PERIOD_START, CONF_VERIFY_PERIOD_END})
+
+# Key under ``hass.data[DOMAIN][entry_id]`` holding the last seen options.
+_OPTIONS_SNAPSHOT_KEY = "_options_snapshot"
+
+
+def _only_period_dates_changed(old_options, new_options) -> bool:
+    """True when the only changed option keys are the period dates.
+
+    Conservative by design: a missing previous snapshot returns ``False`` so
+    the caller falls back to the safe full reload.
+    """
+    if old_options is None:
+        return False
+    old = dict(old_options)
+    new = dict(new_options or {})
+    changed = {key for key in set(old) | set(new) if old.get(key) != new.get(key)}
+    return bool(changed) and changed <= PERIOD_OPTION_KEYS
+
+
+def _entry_domain_data(hass: HomeAssistant, entry_id: str) -> dict | None:
+    """Return the mutable per-entry data dict, or ``None`` when absent."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if not isinstance(domain_data, dict):
+        return None
+    entry_data = domain_data.get(entry_id)
+    return entry_data if isinstance(entry_data, dict) else None
 
 
 def _hacs_installs_ergo5(path: str) -> bool:
@@ -319,6 +355,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register domain services
     await async_register_services(hass)
 
+    # Snapshot the options currently in effect so the update listener can tell
+    # apart "only the verification period dates changed" (no reload) from any
+    # other option change (full reload). Taken after the coefficient backfill
+    # so a later date edit does not compare against a stale snapshot.
+    entry_data = hass.data[DOMAIN].get(entry.entry_id)
+    if isinstance(entry_data, dict):
+        entry_data[_OPTIONS_SNAPSHOT_KEY] = dict(entry.options)
+
     # Reload integration when options change (e.g. prices updated)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
@@ -361,6 +405,42 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload integration when options are updated."""
+    """React to an options update without reloading on period-date edits.
+
+    Editing ``date.*_okres_start``/``date.*_okres_koniec`` only rewrites the
+    ``verify_period_start``/``verify_period_end`` options. Reloading the whole
+    entry for that briefly marked *every* entity of the integration
+    ``unavailable``, so a change limited to those keys updates in-memory state
+    and refreshes entities instead. Any other option change reloads as before.
+    """
+    entry_data = _entry_domain_data(hass, entry.entry_id)
+    snapshot = (
+        entry_data.get(_OPTIONS_SNAPSHOT_KEY) if entry_data is not None else None
+    )
+
+    if _only_period_dates_changed(snapshot, entry.options):
+        _LOGGER.debug(
+            "Energa: only verification period dates changed — updating without reload"
+        )
+        if entry_data is not None:
+            entry_data[_OPTIONS_SNAPSHOT_KEY] = dict(entry.options)
+        coordinator = entry_data.get("coordinator") if entry_data else None
+        if coordinator is not None:
+            try:
+                coordinator.async_update_listeners()
+            except Exception as err:  # noqa: BLE001 - refresh is best effort
+                _LOGGER.debug("Energa: listener refresh skipped: %s", err)
+        try:
+            from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+            async_dispatcher_send(
+                hass, SIGNAL_PERIOD_OPTIONS_UPDATED, entry.entry_id
+            )
+        except Exception as err:  # noqa: BLE001 - signal is best effort
+            _LOGGER.debug("Energa: period update dispatch skipped: %s", err)
+        return
+
+    if entry_data is not None:
+        entry_data[_OPTIONS_SNAPSHOT_KEY] = dict(entry.options)
     _LOGGER.debug("Options updated, reloading: %s", list(entry.options.keys()))
     await hass.config_entries.async_reload(entry.entry_id)

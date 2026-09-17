@@ -98,7 +98,11 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         """Payable amount for the period, or ``None`` when unavailable."""
         result = self._result()
-        if not result or result.get("empty"):
+        if (
+            not result
+            or result.get("empty")
+            or result.get("status") == "calculating"
+        ):
             return None
         try:
             return round(float(result.get("do_zaplaty")), 2)
@@ -110,8 +114,11 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
         result = self._result()
         if not result:
             return {"status": "no_result"}
+        status = result.get("status")
+        if not status:
+            status = "empty" if result.get("empty") else "ok"
         attrs: dict = {
-            "status": "empty" if result.get("empty") else "ok",
+            "status": status,
             "period_start": result.get("period_start"),
             "period_end": result.get("period_end"),
             "source": result.get("source"),

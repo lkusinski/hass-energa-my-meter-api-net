@@ -108,6 +108,10 @@ MAX_HOURLY_RANGE_DAYS = 366
 CONF_VERIFY_PERIOD_START = "verify_period_start"
 CONF_VERIFY_PERIOD_END = "verify_period_end"
 
+# Fired (with the entry_id) when only the verification period dates changed:
+# options listener skips the full integration reload, entities refresh instead.
+SIGNAL_PERIOD_OPTIONS_UPDATED = f"{DOMAIN}_period_options_updated"
+
 # PSE API for RCE (Rynkowa Cena Energii)
 PSE_RCE_API_URL = "https://api.raporty.pse.pl/api/rce-pln"
 CONF_RCE_AUTO_FETCH = "rce_auto_fetch"  # Enable/disable auto RCE fetch

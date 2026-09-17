@@ -81,6 +81,35 @@ from .settlement import is_export_prosumer, system_choice_coefficient
 
 _LOGGER = logging.getLogger(__name__)
 
+# Settlement-system option labels shown in the onboarding wizard. ``vol.In``
+# renders literal labels, so they live here, with the matching PL/EN texts
+# mirrored in strings.json and translations for translators.
+_SYSTEM_CHOICE_LABELS: dict[str, dict[str, str]] = {
+    "pl": {
+        "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
+        "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+        "brak": "Tylko konsument — brak instalacji PV",
+        "brak_detected": "Tylko konsument — brak instalacji PV (wykryto)",
+    },
+    "en": {
+        "nowe": "New rules (net-billing, monthly settlement in PLN)",
+        "stare": "Old rules (net-metering, 0.8 kWh storage, installations before 03.2022)",
+        "brak": "Consumer only — no PV installation",
+        "brak_detected": "Consumer only — no PV (detected)",
+    },
+}
+
+
+def _wizard_language(hass) -> str:
+    """Return ``pl`` unless Home Assistant is explicitly configured for English."""
+    try:
+        language = getattr(getattr(hass, "config", None), "language", None)
+    except Exception:  # noqa: BLE001 - a locale must never break the wizard
+        language = None
+    if isinstance(language, str) and language.lower().startswith("en"):
+        return "en"
+    return "pl"
+
 
 def _tariff_fee_schema(options: dict, tariff: str | None = None) -> dict:
     """Optional tariff fee overrides for the full-bill forecast (v0.2.14).
@@ -134,6 +163,27 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:  # noqa: BLE001 - detection must never break the flow
             _LOGGER.debug("ergo5 scan during config flow failed", exc_info=True)
             return []
+
+    def _system_choice_labels(self, detected_consumer: bool) -> dict:
+        """Return localised settlement-system option labels for the wizard."""
+        labels = _SYSTEM_CHOICE_LABELS[_wizard_language(self.hass)]
+        return {
+            "nowe": labels["nowe"],
+            "stare": labels["stare"],
+            "brak": labels["brak_detected"] if detected_consumer else labels["brak"],
+        }
+
+    async def _async_energy_solar_present(self) -> bool:
+        """Detect a PV source in the native Energy panel; never raises."""
+        try:
+            from .core.energy_sources import async_has_energy_solar
+
+            return await async_has_energy_solar(self.hass)
+        except Exception:  # noqa: BLE001 - detection must never break onboarding
+            _LOGGER.debug(
+                "Energy panel PV detection failed during onboarding", exc_info=True
+            )
+            return False
 
     async def _async_create_entry_with_ergo5_check(self, title, data, options):
         """Create the entry, unless a a copy of the base ergo5 integration must be acknowledged."""
@@ -237,21 +287,22 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self._pending_title = attempt_username
                         self._pending_data = entry_data
                         return await self.async_step_system()
-                    elif _fetch_failed:
+                    if _fetch_failed:
                         self._pending_title = attempt_username
                         self._pending_data = entry_data
                         return await self.async_step_system_fallback()
 
-                    return await self._async_create_entry_with_ergo5_check(
-                        attempt_username,
-                        entry_data,
-                        # Confirmed NON-prosumer (no export): pin the
-                        # coefficient to the "brak" answer (0.0). Without
-                        # this the entry inherits DEFAULT_PROSUMER_COEFFICIENT
-                        # (0.8) and _is_old_system() mislabels a plain
-                        # consumer as old net-metering (Warzywna G11).
-                        {CONF_PROSUMER_COEFFICIENT: 0.0},
-                    )
+                    # Confirmed NON-prosumer (no export): still show the
+                    # settlement-system step, with "consumer only" pre-selected
+                    # and marked as detected so the user sees the justification.
+                    # Seeding the pending options with coefficient 0.0 keeps
+                    # _is_old_system() from mislabelling a plain consumer as old
+                    # net-metering (Warzywna G11) when the default is accepted.
+                    self._pending_title = attempt_username
+                    self._pending_data = entry_data
+                    self._detected_consumer = True
+                    self._pending_options = {CONF_PROSUMER_COEFFICIENT: 0.0}
+                    return await self.async_step_system()
                 except EnergaAuthError:
                     if attempt_username == normalized_username:
                         errors["base"] = "invalid_auth"
@@ -287,7 +338,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         if user_input is not None:
             choice = user_input.get("system")
-            options = {}
+            # Seed from any pre-selected options (a detected one-way consumer
+            # arrives with prosumer_coefficient pinned to 0.0).
+            options = dict(getattr(self, "_pending_options", {}) or {})
             options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
                 user_input.get(
                     CONF_CREATE_SETTLEMENT_DASHBOARD,
@@ -312,23 +365,25 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 getattr(self, "_pending_data", {}),
                 options,
             )
+
+        detected_consumer = bool(getattr(self, "_detected_consumer", False))
+        schema = {
+            vol.Required(
+                "system", default="brak" if detected_consumer else "nowe"
+            ): vol.In(self._system_choice_labels(detected_consumer)),
+            vol.Optional(
+                CONF_CREATE_SETTLEMENT_DASHBOARD,
+                default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+            ): bool,
+        }
+        # A two-way meter with no PV source yet in the Energy panel: nudge the
+        # user to add one. Detection runs once per form render and never blocks
+        # continuing (informational, optional field only).
+        if not detected_consumer and not await self._async_energy_solar_present():
+            schema[vol.Optional("energy_dashboard_pv_hint", default=False)] = bool
         return self.async_show_form(
             step_id="system",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("system", default="nowe"): vol.In(
-                        {
-                            "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
-                            "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
-                            "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
-                        }
-                    ),
-                    vol.Optional(
-                        CONF_CREATE_SETTLEMENT_DASHBOARD,
-                        default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
-                    ): bool,
-                }
-            ),
+            data_schema=vol.Schema(schema),
         )
 
     async def async_step_system_fallback(self, user_input=None):
@@ -364,13 +419,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="system_fallback",
             data_schema=vol.Schema(
                 {
-                    vol.Required("system", default="nowe"): vol.In(
-                        {
-                            "nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
-                            "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
-                            "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
-                        }
-                    ),
+                    vol.Required(
+                        "system", default="nowe"
+                    ): vol.In(self._system_choice_labels(False)),
                     vol.Optional(
                         CONF_CREATE_SETTLEMENT_DASHBOARD,
                         default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,

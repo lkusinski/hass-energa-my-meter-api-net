@@ -14,7 +14,12 @@
         "description": "Your account has solar export. Pick how Energa settles it (check your invoice if unsure — it cannot be detected automatically).",
         "data": {
           "system": "Settlement system",
-          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)",
+          "energy_dashboard_pv_hint": "Detected a two-way meter, but the Energy panel has no PV source. Recommended: add a photovoltaic entity in Settings → Energy panel — it improves readability and self-consumption.",
+          "system_choice_nowe": "New rules (net-billing, monthly settlement in PLN)",
+          "system_choice_stare": "Old rules (net-metering, 0.8 kWh storage, installations before 03.2022)",
+          "system_choice_brak": "Consumer only — no PV installation",
+          "system_choice_brak_detected": "Consumer only — no PV (detected)"
         },
         "data_description": {
           "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
@@ -25,7 +30,11 @@
         "description": "Could not auto-detect solar status from Energa API. Pick how your account is billed.",
         "data": {
           "system": "Settlement system",
-          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)",
+          "system_choice_nowe": "New rules (net-billing, monthly settlement in PLN)",
+          "system_choice_stare": "Old rules (net-metering, 0.8 kWh storage, installations before 03.2022)",
+          "system_choice_brak": "Consumer only — no PV installation",
+          "system_choice_brak_detected": "Consumer only — no PV (detected)"
         },
         "data_description": {
           "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."

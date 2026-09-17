@@ -4,8 +4,9 @@ Two user-editable dates per active meter select the period used by the
 ``button.energa_<id>_przelicz_okres`` button and the
 ``sensor.energa_<id>_weryfikacja_rachunku`` result sensor. Values live in
 ``entry.options`` (``verify_period_start`` / ``verify_period_end``) so they
-survive restarts; editing a date updates the entry and therefore reloads the
-integration through the existing options listener.
+survive restarts. Editing a date updates the entry; the options listener in
+``__init__.py`` recognises that only the period keys changed and refreshes the
+entities *without* reloading the whole entry (so nothing goes ``unavailable``).
 """
 
 from __future__ import annotations

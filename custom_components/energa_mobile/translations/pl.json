@@ -14,7 +14,12 @@
         "description": "Twoje konto oddaje energię do sieci. Wybierz jak rozlicza ją Energa (sprawdź fakturę jeśli nie wiesz — nie da się tego wykryć automatycznie).",
         "data": {
           "system": "System rozliczeń",
-          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)",
+          "energy_dashboard_pv_hint": "Wykryto licznik dwukierunkowy, ale w Panelu Energia nie ma źródła PV. Zalecane: dodaj encję fotowoltaiki w Ustawienia → Panel Energia — zwiększa czytelność i poprawia autokonsumpcję.",
+          "system_choice_nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
+          "system_choice_stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+          "system_choice_brak": "Tylko konsument — brak instalacji PV",
+          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)"
         },
         "data_description": {
           "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
@@ -25,7 +30,11 @@
         "description": "Nie udało się automatycznie ustalić statusu fotowoltaiki z serwerów Energa. Wybierz sposób rozliczenia Twojego punktu poboru.",
         "data": {
           "system": "System rozliczeń",
-          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)",
+          "system_choice_nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
+          "system_choice_stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
+          "system_choice_brak": "Tylko konsument — brak instalacji PV",
+          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)"
         },
         "data_description": {
           "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."

@@ -8,7 +8,12 @@ from zoneinfo import ZoneInfo
 import pytest
 from homeassistant.helpers.entity import EntityCategory
 
+from custom_components.energa_mobile import (
+    _async_options_updated,
+    _only_period_dates_changed,
+)
 from custom_components.energa_mobile.const import (
+    CONF_PROSUMER_COEFFICIENT,
     CONF_VERIFY_PERIOD_END,
     CONF_VERIFY_PERIOD_START,
     DOMAIN,
@@ -558,7 +563,13 @@ class TestVerifyPeriodButton:
                 CONF_VERIFY_PERIOD_END: "2026-08-31",
             }
         )
-        coordinator = SimpleNamespace(_verify_result={}, async_update_listeners=MagicMock())
+        snapshots = []
+        coordinator = SimpleNamespace(_verify_result={})
+        coordinator.async_update_listeners = MagicMock(
+            side_effect=lambda: snapshots.append(
+                dict(coordinator._verify_result.get("10000001") or {})
+            )
+        )
         button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
         result = {
             "empty": False,
@@ -572,7 +583,7 @@ class TestVerifyPeriodButton:
         with patch(
             "custom_components.energa_mobile.services.async_verify_period_data",
             new=AsyncMock(return_value=result),
-        ):
+        ) as service_mock:
             await button._run_verification(
                 {
                     "start": "2026-08-01",
@@ -581,8 +592,83 @@ class TestVerifyPeriodButton:
                     "meter_id": "10000001",
                 }
             )
+        service_mock.assert_awaited_once()
+        # First publish is the immediate "calculating" state, second the result.
+        assert snapshots[0]["status"] == "calculating"
+        assert snapshots[0]["period_start"] == "2026-08-01"
+        assert snapshots[-1]["do_zaplaty"] == 23.0
+        assert snapshots[-1]["status"] == "ok"
         assert coordinator._verify_result["10000001"]["do_zaplaty"] == 23.0
-        coordinator.async_update_listeners.assert_called_once()
+        assert button._verify_running is False
+
+    @pytest.mark.asyncio
+    async def test_double_press_does_not_start_two_tasks(self):
+        entry, button = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            }
+        )
+        coordinator = SimpleNamespace(_verify_result={}, async_update_listeners=MagicMock())
+        button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+        await button.async_press()
+        await button.async_press()
+        entry.async_create_background_task.assert_called_once()
+        # The scheduled coroutine is never awaited by the mock; close it to
+        # avoid a "coroutine was never awaited" warning.
+        args, _ = entry.async_create_background_task.call_args
+        args[1].close()
+        assert button._verify_running is True
+
+    @pytest.mark.asyncio
+    async def test_empty_period_sets_empty_status(self):
+        entry, button = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            }
+        )
+        coordinator = SimpleNamespace(_verify_result={}, async_update_listeners=MagicMock())
+        button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+        result = {
+            "empty": True,
+            "error": "no_data",
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-31",
+            "source": SOURCE_RECORDER,
+        }
+        with patch(
+            "custom_components.energa_mobile.services.async_verify_period_data",
+            new=AsyncMock(return_value=result),
+        ):
+            await button._run_verification(
+                {"start": "2026-08-01", "end": "2026-08-31",
+                 "entry_id": "entry_1", "meter_id": "10000001"}
+            )
+        assert coordinator._verify_result["10000001"]["status"] == "empty"
+        assert button._verify_running is False
+
+    @pytest.mark.asyncio
+    async def test_verification_exception_sets_error_status(self):
+        entry, button = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            }
+        )
+        coordinator = SimpleNamespace(_verify_result={}, async_update_listeners=MagicMock())
+        button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+        with patch(
+            "custom_components.energa_mobile.services.async_verify_period_data",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            await button._run_verification(
+                {"start": "2026-08-01", "end": "2026-08-31",
+                 "entry_id": "entry_1", "meter_id": "10000001"}
+            )
+        assert coordinator._verify_result["10000001"]["status"] == "error"
+        assert coordinator._verify_result["10000001"]["empty"] is True
+        assert button._verify_running is False
 
 
 class TestVerificationSensor:
@@ -636,3 +722,134 @@ class TestVerificationSensor:
         sensor = self._sensor({"empty": True, "error": "no_data"})
         assert sensor.native_value is None
         assert sensor.extra_state_attributes["status"] == "empty"
+
+    def test_calculating_result_reports_progress(self):
+        sensor = self._sensor(
+            {
+                "status": "calculating",
+                "empty": False,
+                "period_start": "2026-08-01",
+                "period_end": "2026-08-31",
+            }
+        )
+        assert sensor.native_value is None
+        assert sensor.available is True
+        attrs = sensor.extra_state_attributes
+        assert attrs["status"] == "calculating"
+        assert attrs["period_start"] == "2026-08-01"
+        assert attrs["period_end"] == "2026-08-31"
+
+
+class TestOnlyPeriodDatesChanged:
+    def test_only_start_changed(self):
+        old = {CONF_VERIFY_PERIOD_START: "2026-08-01"}
+        new = {CONF_VERIFY_PERIOD_START: "2026-08-02"}
+        assert _only_period_dates_changed(old, new) is True
+
+    def test_both_dates_changed(self):
+        old = {
+            CONF_VERIFY_PERIOD_START: "2026-08-01",
+            CONF_VERIFY_PERIOD_END: "2026-08-31",
+        }
+        new = {
+            CONF_VERIFY_PERIOD_START: "2026-09-01",
+            CONF_VERIFY_PERIOD_END: "2026-09-30",
+        }
+        assert _only_period_dates_changed(old, new) is True
+
+    def test_price_change_requires_reload(self):
+        old = {CONF_PROSUMER_COEFFICIENT: 0.8}
+        new = {CONF_PROSUMER_COEFFICIENT: 0.7}
+        assert _only_period_dates_changed(old, new) is False
+
+    def test_mixed_change_requires_reload(self):
+        old = {CONF_VERIFY_PERIOD_START: "2026-08-01", CONF_PROSUMER_COEFFICIENT: 0.8}
+        new = {CONF_VERIFY_PERIOD_START: "2026-08-02", CONF_PROSUMER_COEFFICIENT: 0.7}
+        assert _only_period_dates_changed(old, new) is False
+
+    def test_missing_snapshot_requires_reload(self):
+        assert _only_period_dates_changed(None, {CONF_VERIFY_PERIOD_START: "x"}) is False
+
+
+class TestOptionsUpdatedListener:
+    @pytest.mark.asyncio
+    async def test_period_date_edit_does_not_reload(self):
+        coordinator = SimpleNamespace(async_update_listeners=MagicMock())
+        entry = MagicMock()
+        entry.entry_id = "entry_1"
+        entry.options = {CONF_VERIFY_PERIOD_START: "2026-08-02"}
+        hass = MagicMock()
+        hass.data = {
+            DOMAIN: {
+                "entry_1": {
+                    "coordinator": coordinator,
+                    "_options_snapshot": {CONF_VERIFY_PERIOD_START: "2026-08-01"},
+                }
+            }
+        }
+        await _async_options_updated(hass, entry)
+        hass.config_entries.async_reload.assert_not_called()
+        coordinator.async_update_listeners.assert_called_once()
+        assert hass.data[DOMAIN]["entry_1"]["_options_snapshot"] == {
+            CONF_VERIFY_PERIOD_START: "2026-08-02"
+        }
+
+    @pytest.mark.asyncio
+    async def test_non_period_option_change_reloads(self):
+        coordinator = SimpleNamespace(async_update_listeners=MagicMock())
+        entry = MagicMock()
+        entry.entry_id = "entry_1"
+        entry.options = {CONF_PROSUMER_COEFFICIENT: 0.7}
+        hass = MagicMock()
+        hass.config_entries.async_reload = AsyncMock()
+        hass.data = {
+            DOMAIN: {
+                "entry_1": {
+                    "coordinator": coordinator,
+                    "_options_snapshot": {CONF_PROSUMER_COEFFICIENT: 0.8},
+                }
+            }
+        }
+        await _async_options_updated(hass, entry)
+        hass.config_entries.async_reload.assert_awaited_once_with("entry_1")
+        coordinator.async_update_listeners.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_snapshot_reloads(self):
+        entry = MagicMock()
+        entry.entry_id = "entry_1"
+        entry.options = {CONF_VERIFY_PERIOD_START: "2026-08-02"}
+        hass = MagicMock()
+        hass.config_entries.async_reload = AsyncMock()
+        hass.data = {DOMAIN: {"entry_1": {"coordinator": SimpleNamespace()}}}
+        await _async_options_updated(hass, entry)
+        hass.config_entries.async_reload.assert_awaited_once_with("entry_1")
+
+
+class TestPeriodDatePersistenceAfterRestart:
+    @pytest.mark.asyncio
+    async def test_value_survives_recreation(self):
+        """The persisted option is read back by a freshly created entity."""
+        from custom_components.energa_mobile.date import EnergaPeriodDate
+
+        store = {}
+        entry = MagicMock()
+        entry.options = store
+
+        def _update(_entry, *, options):
+            store.clear()
+            store.update(options)
+
+        entry.options = store
+        meter = {"meter_point_id": "10000001", "meter_serial": "10000001"}
+        entity = EnergaPeriodDate(entry, meter, "start", MagicMock())
+        entity.hass = MagicMock()
+        entity.hass.config_entries.async_update_entry.side_effect = _update
+        with patch.object(entity, "async_write_ha_state", create=True):
+            await entity.async_set_value(date(2026, 9, 1))
+
+        # Simulate an HA restart: a brand-new entity over the stored options.
+        entry2 = MagicMock()
+        entry2.options = dict(store)
+        fresh = EnergaPeriodDate(entry2, meter, "start", MagicMock())
+        assert fresh.native_value == date(2026, 9, 1)

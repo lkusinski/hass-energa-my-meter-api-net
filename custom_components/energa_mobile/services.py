@@ -7,6 +7,7 @@ import functools
 import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from time import monotonic
 from zoneinfo import ZoneInfo
 
 import voluptuous as vol
@@ -24,6 +25,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from .api import EnergaAPI
@@ -32,9 +34,11 @@ from .const import (
     CONF_BANK_INITIAL_KWH_L1,
     CONF_BANK_INITIAL_KWH_L2,
     CONF_BANK_RCE_PRICE,
+    CONF_CREATE_SETTLEMENT_DASHBOARD,
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_PROSUMER_COEFFICIENT,
     DEFAULT_BANK_RCE_PRICE,
+    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
@@ -61,6 +65,15 @@ from .tariff import fees_from_options
 _LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Warsaw")
 AUTO_HISTORY_DAYS = 730
+
+# Backfill progress notifications (restored v1.9.0): one notification per meter,
+# refreshed no more often than every ``BACKFILL_PROGRESS_INTERVAL_S`` seconds,
+# dismissed automatically a while after the import ends.
+BACKFILL_NOTIFICATION_TITLE = "Energa: Import Historii"
+BACKFILL_OVERVIEW_TITLE = "Energa: Pobieranie historii"
+BACKFILL_OVERVIEW_NOTIFICATION_ID = "energa_auto_backfill"
+BACKFILL_PROGRESS_INTERVAL_S = 45.0
+BACKFILL_DISMISS_DELAY_S = 120.0
 
 # Recorder statistic entity names for the per-zone energy series.
 _PERIOD_STAT_NAME = {
@@ -950,6 +963,211 @@ async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
     return await _has_history_statistics(hass, meters, start_date)
 
 
+def _polish_plural(count: int, one: str, few: str, many: str) -> str:
+    """Return the Polish plural form for ``count``.
+
+    Polish has three plural categories: singular (1), few (2-4, but not the
+    12-14 teens) and many (everything else, including 0 and 5+). ``one``,
+    ``few`` and ``many`` are the already-inflected word forms.
+    """
+    try:
+        number = abs(int(count))
+    except (TypeError, ValueError):
+        number = 0
+    if number == 1:
+        return one
+    if number % 10 in (2, 3, 4) and number % 100 not in (12, 13, 14):
+        return few
+    return many
+
+
+def _meter_count_phrase(count: int) -> str:
+    """E.g. ``1 licznik`` / ``2 liczniki`` / ``5 liczników``."""
+    return f"{count} {_polish_plural(count, 'licznik', 'liczniki', 'liczników')}"
+
+
+def _direction_word(count: int, prosumer: bool) -> str:
+    """Inflected direction adjective agreeing with the plural category."""
+    if prosumer:
+        return _polish_plural(
+            count, "dwukierunkowy", "dwukierunkowe", "dwukierunkowych"
+        )
+    return _polish_plural(
+        count, "jednokierunkowy", "jednokierunkowe", "jednokierunkowych"
+    )
+
+
+def describe_active_meters(meters: list) -> str:
+    """Human-readable Polish summary of the meters taking part in a backfill.
+
+    Distinguishes one-way consumers from two-way prosumers (export) so the
+    notification tells the user what kind of meters are being imported.
+    """
+    from .settlement import is_export_prosumer
+
+    total = len(meters or [])
+    if total <= 0:
+        return "0 liczników"
+    prosumers = sum(1 for meter in meters if is_export_prosumer(meter))
+    consumers = total - prosumers
+    if prosumers == total:
+        return (
+            f"{_meter_count_phrase(total)} {_direction_word(total, True)} (prosument)"
+        )
+    if prosumers == 0:
+        return f"{_meter_count_phrase(total)} {_direction_word(total, False)}"
+    return (
+        f"{_meter_count_phrase(total)}: "
+        f"{consumers} {_direction_word(consumers, False)}, "
+        f"{prosumers} {_direction_word(prosumers, True)} (prosument)"
+    )
+
+
+def _settlement_dashboard_clause(entry: ConfigEntry) -> str:
+    """Past-tense clause matching the user's settlement-dashboard choice."""
+    if entry.options.get(
+        CONF_CREATE_SETTLEMENT_DASHBOARD, DEFAULT_CREATE_SETTLEMENT_DASHBOARD
+    ):
+        return (
+            "Panel «Energa — Rozliczenia» utworzono; zostanie zaktualizowany "
+            "po zakończeniu importu."
+        )
+    return (
+        "Panel «Energa — Rozliczenia» nie został utworzony — zgodnie z Twoim wyborem."
+    )
+
+
+def _backfill_overview_message(active: list, entry: ConfigEntry, days: int) -> str:
+    """Start message for the whole backfill (grammar + truthful dashboards)."""
+    years = max(1, round(days / 365))
+    return (
+        f"Pobieranie historii zużycia z ostatnich {years} lat wystartowało w tle "
+        f"— {describe_active_meters(active)} — do bazy statystyk długoterminowych. "
+        "Statystyki będą dostępne do wyboru w konfiguracji energii oraz na pulpicie "
+        "Energa. "
+        f"{_settlement_dashboard_clause(entry)} "
+        "Wbudowany Panel Energia nie jest zmieniany — źródła dobierasz sam."
+    )
+
+
+def _schedule_notification_dismiss(
+    hass: HomeAssistant,
+    notification_id: str,
+    delay: float = BACKFILL_DISMISS_DELAY_S,
+) -> None:
+    """Dismiss a persistent notification after ``delay`` seconds. Never raises."""
+
+    def _dismiss(_now=None) -> None:
+        try:
+            persistent_notification.async_dismiss(hass, notification_id)
+        except Exception as err:  # noqa: BLE001 - cleanup must never break the import
+            _LOGGER.debug("Energa: notification dismiss skipped: %s", err)
+
+    try:
+        async_call_later(hass, delay, _dismiss)
+    except Exception as err:  # noqa: BLE001 - cleanup must never break the import
+        _LOGGER.debug("Energa: could not schedule notification dismiss: %s", err)
+
+
+class _BackfillProgressNotifier:
+    """Single throttled persistent notification showing one meter's progress.
+
+    Idempotent by construction: the notification id is derived from the meter,
+    so repeated imports overwrite the same entry instead of leaking new ones.
+    After :meth:`finish` the notification is dismissed after a short delay.
+    """
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        notification_id: str,
+        serial: str,
+        days: int,
+        start_date: datetime,
+        *,
+        now_fn=monotonic,
+        interval: float = BACKFILL_PROGRESS_INTERVAL_S,
+    ) -> None:
+        self._hass = hass
+        self._notification_id = notification_id
+        self._serial = serial
+        self._days = max(1, int(days or 1))
+        self._start_date = start_date
+        self._now = now_fn
+        self._interval = interval
+        self._last_update = 0.0
+        self.finished = False
+
+    def start(self) -> None:
+        """Post the initial 0/N progress notification."""
+        self._last_update = self._now()
+        self._post(0, self._start_date)
+
+    def update(self, done: int, current_day=None) -> None:
+        """Post progress if the throttle window elapsed (or the import ended)."""
+        if self.finished:
+            return
+        if done < self._days and (self._now() - self._last_update) < self._interval:
+            return
+        self._last_update = self._now()
+        self._post(done, current_day)
+
+    def _post(self, done: int, current_day) -> None:
+        done = max(0, min(int(done), self._days))
+        remaining = max(0, self._days - done)
+        pct = int((done / self._days) * 100)
+        # Progress is visible in the log as well as in the notification, so a
+        # user (or support) can follow a long import from the HA log.
+        _LOGGER.info(
+            "Energa: backfill %s — %d/%d dni (%d%%)",
+            self._serial,
+            done,
+            self._days,
+            pct,
+        )
+        lines = [
+            f"Pobieranie historii dla licznika {self._serial} w toku...",
+            "",
+            f"- Postęp: **{done} / {self._days} dni ({pct}%)**",
+            f"- Pozostało: **{remaining} dni**",
+        ]
+        if current_day is not None:
+            lines.append(f"- Przetwarzany dzień: {current_day}")
+        eta_min = round(remaining * 0.8 / 60)
+        if eta_min > 0:
+            lines.append(f"- Szacowany pozostały czas: ~{eta_min} min")
+        persistent_notification.async_create(
+            self._hass,
+            "\n".join(lines),
+            title=BACKFILL_NOTIFICATION_TITLE,
+            notification_id=self._notification_id,
+        )
+
+    def finish(self, summary: str) -> None:
+        """Replace progress with the final summary and schedule dismissal."""
+        if self.finished:
+            return
+        self.finished = True
+        _LOGGER.info("Energa: backfill %s finished", self._serial)
+        persistent_notification.async_create(
+            self._hass,
+            summary,
+            title=BACKFILL_NOTIFICATION_TITLE,
+            notification_id=self._notification_id,
+        )
+        _schedule_notification_dismiss(self._hass, self._notification_id)
+
+    def dismiss_now(self) -> None:
+        """Drop the notification immediately (used when the task is cancelled)."""
+        if self.finished:
+            return
+        self.finished = True
+        try:
+            persistent_notification.async_dismiss(self._hass, self._notification_id)
+        except Exception as err:  # noqa: BLE001 - cleanup must never raise
+            _LOGGER.debug("Energa: progress dismiss skipped: %s", err)
+
+
 async def _maybe_auto_backfill(
     hass: HomeAssistant, api: EnergaAPI, entry: ConfigEntry
 ) -> None:
@@ -959,6 +1177,9 @@ async def _maybe_auto_backfill(
     energa_mod = sys.modules.get("custom_components.energa_mobile")
     _has_stats_fn = getattr(energa_mod, "_has_history_statistics", _has_history_statistics)
     _import_fn = getattr(energa_mod, "_import_meter_history", _import_meter_history)
+
+    overview_posted = False
+    overview_closed = False
 
     try:
         try:
@@ -978,6 +1199,13 @@ async def _maybe_auto_backfill(
         # Dashboard provisioning is handled by
         # ``_async_ensure_settlement_dashboard`` during ``async_setup_entry``
         # (honours the ``create_settlement_dashboard`` option).
+        #
+        # TODO(v1.9.x): opcjonalna auto-konfiguracja wbudowanego Panelu Energia
+        # po zakończeniu backfillu. Świadomie NIE robimy tego domyślnie:
+        # przycisk „Skonfiguruj Panel Energia" podmienia globalne źródła
+        # grid/battery w `energy_sources`, co na współdzielonej instancji może
+        # nadpisać źródła innych integracji. Bezpieczna wersja wymaga osobnej
+        # opcji opt-in (+ opis, że dotyczy całego Panelu Energia).
 
         # 1b. Synthetic storage statistics
         enable_synth = entry.options.get(
@@ -1026,13 +1254,11 @@ async def _maybe_auto_backfill(
         days = max(1, min(days, AUTO_HISTORY_DAYS + 1))
         persistent_notification.async_create(
             hass,
-            "Pobieranie historii zużycia z ostatnich 2 lat wystartowało w tle "
-            f"({len(active)} liczników) do bazy statystyk długoterminowych. "
-            "Integracja nie modyfikuje Twoich pulpitów ani wbudowanego Panelu Energia — "
-            "statystyki będą dostępne do wyboru w konfiguracji energii oraz na nowym pulpicie Energa.",
-            title="Energa: Pobieranie historii",
-            notification_id="energa_auto_backfill",
+            _backfill_overview_message(active, entry, days),
+            title=BACKFILL_OVERVIEW_TITLE,
+            notification_id=BACKFILL_OVERVIEW_NOTIFICATION_ID,
         )
+        overview_posted = True
         _LOGGER.info(
             "Auto-backfill: importing %d days from %s for %d meter(s)",
             days,
@@ -1047,9 +1273,34 @@ async def _maybe_auto_backfill(
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, "auto_backfill_completed": True}
         )
+        persistent_notification.async_create(
+            hass,
+            f"Pobieranie historii zakończone — {describe_active_meters(active)}. "
+            "Statystyki są już dostępne w bazie długoterminowej.",
+            title=BACKFILL_OVERVIEW_TITLE,
+            notification_id=BACKFILL_OVERVIEW_NOTIFICATION_ID,
+        )
+        _schedule_notification_dismiss(hass, BACKFILL_OVERVIEW_NOTIFICATION_ID)
+        overview_closed = True
         _LOGGER.info("Auto-backfill: successfully completed for all active meters")
     except Exception as err:
         _LOGGER.debug("Auto-backfill skipped: %s", err)
+        persistent_notification.async_create(
+            hass,
+            f"Pobieranie historii nie powiodło się: {err}",
+            title=BACKFILL_OVERVIEW_TITLE,
+            notification_id=BACKFILL_OVERVIEW_NOTIFICATION_ID,
+        )
+        _schedule_notification_dismiss(hass, BACKFILL_OVERVIEW_NOTIFICATION_ID)
+        overview_closed = True
+    finally:
+        if overview_posted and not overview_closed:
+            try:
+                persistent_notification.async_dismiss(
+                    hass, BACKFILL_OVERVIEW_NOTIFICATION_ID
+                )
+            except Exception as err:  # noqa: BLE001 - cleanup must never raise
+                _LOGGER.debug("Energa: overview dismiss skipped: %s", err)
 
 
 async def _import_meter_history(
@@ -1077,16 +1328,16 @@ async def _import_meter_history(
         has_zones,
     )
 
-    persistent_notification.async_create(
+    notifier = _BackfillProgressNotifier(
         hass,
-        f"Rozpoczęto pobieranie historii dla licznika {serial}\n"
-        f"Zakres: {days} dni od {start_date.date()}"
-        + (f"\nTaryfa wielostrefowa: {meter.get('tariff')}" if has_zones else ""),
-        title="Energa: Import Historii",
-        notification_id=f"energa_import_{meter_id}",
+        f"energa_import_{meter_id}",
+        serial,
+        days,
+        start_date,
     )
 
     try:
+        notifier.start()
         import_points = []
         import_1_points = []
         import_2_points = []
@@ -1107,6 +1358,8 @@ async def _import_meter_history(
             day_data = await api.async_get_history_hourly(
                 meter_point_id, target_day, include_timestamps=True
             )
+
+            notifier.update(day_offset + 1, target_day.date())
 
             if day_data:
                 for item in day_data.get("import", []):
@@ -1448,15 +1701,12 @@ async def _import_meter_history(
                     f"`button.energa_{serial}_skonfiguruj_panel_energia` na karcie urządzenia licznika."
                 )
 
-            persistent_notification.async_create(
-                hass,
+            notifier.finish(
                 f"Zakończono import historii dla licznika {serial}.\n"
                 f"Zaimportowano {total_count} punktów danych (Import S1: {count_1}, S2: {count_2}, "
                 f"Export S1: {count_exp1}, S2: {count_exp2}).\n\n"
                 f"📊 Pulpit dostępny pod adresem: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})"
-                + panel_hint,
-                title="Energa: Sukces importu historii",
-                notification_id=f"energa_import_{meter_id}",
+                + panel_hint
             )
         else:
             count_import = await _build_anchored(import_points, "import")
@@ -1483,14 +1733,11 @@ async def _import_meter_history(
                     f"`button.energa_{serial}_skonfiguruj_panel_energia` na karcie urządzenia licznika."
                 )
 
-            persistent_notification.async_create(
-                hass,
+            notifier.finish(
                 f"Zakończono import historii dla licznika {serial}.\n"
                 f"Zaimportowano {total_count} punktów danych (Import: {count_import}, Export: {count_export}).\n\n"
                 f"📊 Pulpit dostępny pod adresem: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})"
-                + panel_hint,
-                title="Energa: Sukces importu historii",
-                notification_id=f"energa_import_{meter_id}",
+                + panel_hint
             )
 
         _LOGGER.info("History import complete for %s: %d points", serial, total_count)
@@ -1775,9 +2022,6 @@ async def _import_meter_history(
 
     except Exception as err:
         _LOGGER.error("History import failed for %s: %s", serial, err, exc_info=True)
-        persistent_notification.async_create(
-            hass,
-            f"Błąd importu historii dla {serial}: {err}",
-            title="Energa: Błąd",
-            notification_id=f"energa_import_{meter_id}",
-        )
+        notifier.finish(f"Błąd importu historii dla {serial}: {err}")
+    finally:
+        notifier.dismiss_now()

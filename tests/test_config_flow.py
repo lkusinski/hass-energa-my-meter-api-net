@@ -4,7 +4,7 @@ These tests verify the exception handling logic in async_step_user
 without instantiating the full HA config flow machinery.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,7 +16,10 @@ from custom_components.energa_mobile.const import (
     CONF_CREATE_SETTLEMENT_DASHBOARD,
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_ENERGY_DASHBOARD_MODE,
+    CONF_PASSWORD,
+    CONF_PROSUMER_COEFFICIENT,
     CONF_PROSUMER_POWER_GROUP,
+    CONF_USERNAME,
     DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
     ENERGY_MODE_VIRTUAL_STORAGE,
     POWER_GROUP_LE_10KW,
@@ -301,3 +304,147 @@ class TestSettlementDashboardOption:
         )
         assert res["data"][CONF_CREATE_SETTLEMENT_DASHBOARD] is True
         assert DEFAULT_CREATE_SETTLEMENT_DASHBOARD is True
+
+
+class TestSystemStepSolarDetection:
+    """v1.9.0: onboarding detects consumers and the Energy panel PV source."""
+
+    SOLAR_PATCH = (
+        "custom_components.energa_mobile.core.energy_sources.async_has_energy_solar"
+    )
+
+    def _make_flow(self):
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow._pending_title = "test@example.com"
+        flow._pending_data = {}
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "title": title,
+                "data": data,
+                "options": options or {},
+            }
+        )
+        return flow
+
+    @staticmethod
+    def _field(result, name):
+        """Return the (marker, validator) pair for a schema field, or None."""
+        schema = result.get("data_schema")
+        if schema is None:
+            return None
+        for marker, validator in schema.schema.items():
+            if getattr(marker, "schema", None) == name:
+                return marker, validator
+        return None
+
+    @pytest.mark.asyncio
+    async def test_detected_consumer_defaults_to_brak_marked_detected(self):
+        flow = self._make_flow()
+        flow._detected_consumer = True
+
+        res = await flow.async_step_system(None)
+
+        marker, validator = self._field(res, "system")
+        assert marker.default() == "brak"
+        assert validator.container["brak"].endswith("(wykryto)")
+        # The other settlement options stay unchanged.
+        assert "wykryto" not in validator.container["nowe"]
+        assert "wykryto" not in validator.container["stare"]
+
+    @pytest.mark.asyncio
+    async def test_prosumer_defaults_to_nowe_without_marker(self):
+        flow = self._make_flow()
+
+        with patch(self.SOLAR_PATCH, AsyncMock(return_value=True)):
+            res = await flow.async_step_system(None)
+
+        marker, validator = self._field(res, "system")
+        assert marker.default() == "nowe"
+        assert "wykryto" not in validator.container["brak"]
+
+    @pytest.mark.asyncio
+    async def test_detected_consumer_accepting_default_pins_zero_coefficient(self):
+        flow = self._make_flow()
+        flow._detected_consumer = True
+        flow._pending_options = {CONF_PROSUMER_COEFFICIENT: 0.0}
+
+        res = await flow.async_step_system({"system": "brak"})
+
+        assert res["type"] == "create_entry"
+        assert res["options"][CONF_PROSUMER_COEFFICIENT] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_two_way_without_solar_shows_pv_recommendation(self):
+        flow = self._make_flow()
+
+        with patch(self.SOLAR_PATCH, AsyncMock(return_value=False)):
+            res = await flow.async_step_system(None)
+
+        assert self._field(res, "energy_dashboard_pv_hint") is not None
+
+    @pytest.mark.asyncio
+    async def test_two_way_with_solar_hides_pv_recommendation(self):
+        flow = self._make_flow()
+
+        with patch(self.SOLAR_PATCH, AsyncMock(return_value=True)):
+            res = await flow.async_step_system(None)
+
+        assert self._field(res, "energy_dashboard_pv_hint") is None
+
+    @pytest.mark.asyncio
+    async def test_detected_consumer_never_shows_pv_recommendation(self):
+        flow = self._make_flow()
+        flow._detected_consumer = True
+
+        with patch(self.SOLAR_PATCH, AsyncMock(return_value=False)) as detect:
+            res = await flow.async_step_system(None)
+
+        detect.assert_not_awaited()
+        assert self._field(res, "energy_dashboard_pv_hint") is None
+
+    @pytest.mark.asyncio
+    async def test_user_step_consumer_goes_to_system_step(self):
+        """A one-way meter now reaches the system step instead of skipping it."""
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "title": title,
+                "data": data,
+                "options": options or {},
+            }
+        )
+
+        with patch(
+            "custom_components.energa_mobile.config_flow.EnergaAPI"
+        ) as mock_api_cls, patch(self.SOLAR_PATCH, AsyncMock(return_value=True)):
+            api = mock_api_cls.return_value
+            api.async_login = AsyncMock(return_value=True)
+            api._fetch_all_meters = AsyncMock(
+                return_value=[{"meter_point_id": "1", "total_plus": 10.0}]
+            )
+
+            res = await flow.async_step_user(
+                {CONF_USERNAME: "test@example.com", CONF_PASSWORD: "secret"}
+            )
+
+        assert res["type"] == "form"
+        assert res["step_id"] == "system"
+        marker, validator = self._field(res, "system")
+        assert marker.default() == "brak"
+        assert validator.container["brak"].endswith("(wykryto)")

@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.0-beta.5 (2026-09-17) — UX kalkulatora, postęp historii, PV w onboardingu
+
+- **Bez migania encji**: zmiana dat okresu nie przeładowuje już integracji (smart update listener).
+- **Feedback kalkulatora**: natychmiastowy status „liczę…" + powiadomienie start/wynik; obsługa pustego okresu/błędu; blokada podwójnych kliknięć.
+- **Postęp pobierania historii przywrócony**: wskaźnik co ~45 s (ile/ile, %, przetwarzany dzień, **ETA**), poprawne „1 licznik / 2 liczniki", kierunek (jedno-/dwukierunkowy) i treść zgodna z wyborem panelu; auto-dismiss; logi info.
+- **Onboarding**: checkbox „Utwórz panel «Energa — Rozliczenia» (zalecane)"; detekcja PV w natywnym Panelu Energia; jednokierunkowy → domyślna opcja „Tylko konsument — brak PV (wykryto)"; dwukierunkowy bez PV → rekomendacja dodania źródła PV.
+
 ## v1.9.0-beta.4 (2026-09-17) — fix encji wyniku (kategoria sensora)
 
 - `sensor.*_weryfikacja_rachunku` („Okres: rozliczenie"): `EntityCategory.DIAGNOSTIC` zamiast `CONFIG`
