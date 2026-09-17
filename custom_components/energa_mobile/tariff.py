@@ -511,6 +511,35 @@ def _options_match_table(options: dict, table: dict) -> bool:
     return True
 
 
+def fee_source(options: dict | None, tariff: str | None = None) -> tuple[str, list[str]]:
+    """Report where a fee table comes from: ``options`` / ``partial`` / ``defaults``.
+
+    Returns ``(source, missing_fee_keys)``. ``options`` means every mapped
+    ``tariff_*`` key is present (the invoice is reproducible to the grosz);
+    ``partial`` means some are missing and the rest silently fall back to the
+    per-tariff default table; ``defaults`` means none were configured. The
+    caller surfaces this honestly instead of pretending the defaults are the
+    user's contract.
+    """
+    opts = options or {}
+    present: list[str] = []
+    missing: list[str] = []
+    for fee, opt_key in _OPTION_KEY_MAP.items():
+        configured = False
+        try:
+            if opt_key in opts and opts.get(opt_key) is not None:
+                float(opts[opt_key])
+                configured = True
+        except (TypeError, ValueError, AttributeError):
+            configured = False
+        (present if configured else missing).append(fee)
+    if not present:
+        return ("defaults", missing)
+    if missing:
+        return ("partial", missing)
+    return ("options", [])
+
+
 def split_cover(total_cover: float, import_day: float, import_night: float) -> tuple[float, float]:
     """Split warehouse coverage across day/night proportionally to import.
 

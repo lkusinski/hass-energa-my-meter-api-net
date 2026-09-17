@@ -18,6 +18,18 @@ import pytest
 
 from custom_components.energa_mobile.const import (
     CONF_PROSUMER_COEFFICIENT,
+    CONF_TARIFF_ABONAMENT,
+    CONF_TARIFF_CAPACITY,
+    CONF_TARIFF_COGEN,
+    CONF_TARIFF_ENERGY_DAY,
+    CONF_TARIFF_ENERGY_NIGHT,
+    CONF_TARIFF_EXCISE_MWH,
+    CONF_TARIFF_GRID_FIXED,
+    CONF_TARIFF_GRID_VAR_DAY,
+    CONF_TARIFF_GRID_VAR_NIGHT,
+    CONF_TARIFF_OZE,
+    CONF_TARIFF_QUALITY,
+    CONF_TARIFF_TRADE_FEE,
     DOMAIN,
 )
 from custom_components.energa_mobile.core.verification import (
@@ -135,12 +147,12 @@ class TestCollectMonthlyFlows:
         hass = MagicMock()
         fake_stats = {
             "id_import": [
-                {"start": datetime(2026, 7, 1, tzinfo=timezone.utc), "state": 3.0},
-                {"start": datetime(2026, 7, 2, tzinfo=timezone.utc), "state": 4.0},
-                {"start": datetime(2026, 8, 1, tzinfo=timezone.utc), "state": 9.0},
+                {"start": datetime(2026, 7, 1, tzinfo=timezone.utc), "change": 3.0},
+                {"start": datetime(2026, 7, 2, tzinfo=timezone.utc), "change": 4.0},
+                {"start": datetime(2026, 8, 1, tzinfo=timezone.utc), "change": 9.0},
             ],
             "id_export": [
-                {"start": datetime(2026, 7, 3, tzinfo=timezone.utc), "state": 5.0},
+                {"start": datetime(2026, 7, 3, tzinfo=timezone.utc), "change": 5.0},
             ],
         }
         with patch.object(
@@ -160,6 +172,76 @@ class TestCollectMonthlyFlows:
         assert monthly[(2026, 7)]["import"] == 7.0
         assert monthly[(2026, 8)]["import"] == 9.0
         assert monthly[(2026, 7)]["export"] == 5.0
+
+    @pytest.mark.asyncio
+    async def test_state_column_is_ignored_change_is_the_flow(self):
+        """Regression (Wiśniowa live bug): daily ``state`` is not the increment."""
+        from custom_components.energa_mobile import services as svc
+
+        hass = MagicMock()
+        # old broken shape: state is the raw sensor value (not the daily flow)
+        fake_stats = {
+            "id_import": [
+                {
+                    "start": datetime(2026, 7, 1, tzinfo=timezone.utc),
+                    "state": 0.0,
+                    "change": 40.0,
+                },
+                {
+                    "start": datetime(2026, 7, 2, tzinfo=timezone.utc),
+                    "state": 0.0,
+                    "change": 43.0,
+                },
+            ],
+            "id_export": [
+                {
+                    "start": datetime(2026, 7, 3, tzinfo=timezone.utc),
+                    "state": 0.0,
+                    "change": 561.0,
+                },
+            ],
+        }
+        with patch.object(
+            svc,
+            "_statistic_id_for",
+            side_effect=lambda hass, mid, serial, suffix: f"id_{suffix}",
+        ), patch.object(svc, "get_instance") as gi:
+            gi.return_value.async_add_executor_job = AsyncMock(
+                return_value=fake_stats
+            )
+            monthly = await svc._collect_monthly_flows(
+                hass,
+                _prosumer_meter(),
+                datetime(2026, 9, 1, tzinfo=TZ),
+            )
+        assert monthly[(2026, 7)]["import"] == 83.0
+        assert monthly[(2026, 7)]["export"] == 561.0
+
+    @pytest.mark.asyncio
+    async def test_sum_fallback_uses_reset_aware_delta(self):
+        from custom_components.energa_mobile import services as svc
+
+        hass = MagicMock()
+        fake_stats = {
+            "id_import": [
+                {"start": datetime(2026, 7, 1, tzinfo=timezone.utc), "sum": 10.0},
+                {"start": datetime(2026, 7, 2, tzinfo=timezone.utc), "sum": 15.0},
+            ]
+        }
+        with patch.object(
+            svc,
+            "_statistic_id_for",
+            side_effect=lambda hass, mid, serial, suffix: f"id_{suffix}",
+        ), patch.object(svc, "get_instance") as gi:
+            gi.return_value.async_add_executor_job = AsyncMock(
+                return_value=fake_stats
+            )
+            monthly = await svc._collect_monthly_flows(
+                hass,
+                _prosumer_meter(),
+                datetime(2026, 9, 1, tzinfo=TZ),
+            )
+        assert monthly[(2026, 7)]["import"] == 5.0
 
     @pytest.mark.asyncio
     async def test_recorder_failure_returns_empty(self):
@@ -309,3 +391,169 @@ class TestVerifyPeriodOpeningBalances:
         assert res["deposit_open"] is None
         assert res["coverage_unknown"] is True
         assert res["warnings"]
+
+
+def _wisniowa_meter() -> dict:
+    return {
+        "meter_point_id": "10000002",
+        "meter_serial": "10000002",
+        "zone_count": 2,
+        "total_plus": 425.0,
+        "total_minus": 1904.0,
+        "is_prosumer": True,
+        "tariff": "G12W",
+    }
+
+
+def _wisniowa_options() -> dict:
+    """Options mirroring the real Wiśniowa G12W net-metering invoice."""
+    return {
+        CONF_PROSUMER_COEFFICIENT: 0.8,
+        CONF_TARIFF_ENERGY_DAY: 0.7125,
+        CONF_TARIFF_ENERGY_NIGHT: 0.4622,
+        CONF_TARIFF_EXCISE_MWH: 5.0,
+        CONF_TARIFF_TRADE_FEE: 16.18,
+        CONF_TARIFF_ABONAMENT: 0.70,
+        CONF_TARIFF_GRID_FIXED: 20.17,
+        CONF_TARIFF_GRID_VAR_DAY: 0.4017,
+        CONF_TARIFF_GRID_VAR_NIGHT: 0.0851,
+        CONF_TARIFF_QUALITY: 0.0332,
+        CONF_TARIFF_OZE: 0.0073,
+        CONF_TARIFF_COGEN: 0.0030,
+        CONF_TARIFF_CAPACITY: 24.05,
+    }
+
+
+def _wisniowa_hourly() -> dict:
+    """Hourly series giving saldo_plus 83/342 and gross import 120/372."""
+
+    def _zone(plus: float, overlap: float, minus: float):
+        imp = {0: float(plus)}
+        exp: dict = {}
+        if overlap or minus:
+            imp[3600] = float(overlap)
+            exp[3600] = float(overlap + minus)
+        return imp, exp
+
+    imp1, exp1 = _zone(83, 37, 63)
+    imp2, exp2 = _zone(342, 30, 20)
+    return {
+        "import_1": imp1,
+        "export_1": exp1,
+        "import_2": imp2,
+        "export_2": exp2,
+    }
+
+
+class TestWisniowaServiceAcceptance:
+    """End-to-end ``verify_period`` on the real Wiśniowa invoice.
+
+    The rates come from ``entry.options`` (no fee-table injection): the
+    service must pick up the product fees (handlowa 16,18 x2, abonament 0,70,
+    energia 0,7125/0,4622) and charge excise on the GROSS import.
+    """
+
+    @pytest.mark.asyncio
+    async def test_full_invoice_from_change_flows_and_options(self):
+        from custom_components.energa_mobile import services as svc
+
+        hass, _ = _hass_with_meter(_wisniowa_meter(), _wisniowa_options())
+        # June flows BEFORE the July-1 period start; ``change`` (not ``state``)
+        # must drive the FIFO warehouse: L1 752 kWh, L2 606 kWh at July 1.
+        june = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        change_stats = {
+            "id_import_1": [{"start": june, "change": 0.0}],
+            "id_export_1": [{"start": june, "change": 940.0}],
+            "id_import_2": [{"start": june, "change": 0.0}],
+            "id_export_2": [{"start": june, "change": 757.5}],
+        }
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value=_wisniowa_hourly()),
+        ), patch.object(
+            svc,
+            "_statistic_id_for",
+            side_effect=lambda hass, mid, serial, suffix: f"id_{suffix}",
+        ), patch.object(svc, "get_instance") as gi:
+            gi.return_value.async_add_executor_job = AsyncMock(
+                return_value=change_stats
+            )
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-07-01",
+                    "end": "2026-08-31",
+                    "meter_id": "10000002",
+                    "rcem_pln": 0.0,
+                },
+            )
+
+        assert res["old_system"] is True
+        assert res["fee_source"] == "options"
+        # FIFO warehouse >= the positive balances, fully covering the period.
+        assert res["kwh"]["bank_open_1"] >= 83.0
+        assert res["kwh"]["bank_open_2"] >= 342.0
+        assert res["kwh"]["cover_1"] == 83.0
+        assert res["kwh"]["cover_2"] == 342.0
+        assert res["coverage_unknown"] is False
+        # Real invoice FES/00042: 129,04 / 29,68 / 158,72.
+        assert res["excise_day"] == 0.60
+        assert res["excise_night"] == 1.86
+        assert res["trade_fee"] == 32.36
+        assert res["netto"] == 129.04
+        assert res["vat"] == 29.68
+        assert res["brutto"] == 158.72
+        assert res["do_zaplaty"] == 158.72
+
+    @pytest.mark.asyncio
+    async def test_zero_bank_on_positive_import_flags_unknown(self):
+        """A 0/0 warehouse reconstruction must not silently overcharge."""
+        hass, _ = _hass_with_meter(_wisniowa_meter(), _wisniowa_options())
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value=_wisniowa_hourly()),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={(2026, 7): {"import_1": 10.0}}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-07-01",
+                    "end": "2026-08-31",
+                    "meter_id": "10000002",
+                    "rcem_pln": 0.0,
+                },
+            )
+        assert res["coverage_unknown"] is True
+        assert res["warnings"]
+        assert res["kwh"]["cover_1"] == 0.0
+        assert res["kwh"]["bank_open_1"] is None
+
+
+class TestServiceFeeSource:
+    @pytest.mark.asyncio
+    async def test_defaults_are_reported_and_warned(self):
+        hass, _ = _hass_with_meter(
+            _prosumer_meter(), {CONF_PROSUMER_COEFFICIENT: 0.8}
+        )
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value={"import_1": {0: 100.0}}),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {"start": "2026-08-01", "end": "2026-08-31", "meter_id": "1"},
+            )
+        assert res["fee_source"] == "defaults"
+        assert any("tabeli domyślnej" in w for w in res["warnings"])
+
+    def test_fee_source_helper_classifies(self):
+        from custom_components.energa_mobile.tariff import fee_source
+
+        assert fee_source({})[0] == "defaults"
+        assert fee_source({"tariff_trade_fee": 16.18})[0] == "partial"
+        assert fee_source(_wisniowa_options())[0] == "options"

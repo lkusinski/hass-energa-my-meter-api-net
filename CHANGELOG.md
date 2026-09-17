@@ -11,6 +11,13 @@
 - **Bramka przycisku „Przelicz okres rozliczeniowy"**: `available = obie daty ustawione AND kompletność == complete`. Przy `incomplete`/`unknown` przycisk jest niedostępny, a ewentualne wywołanie usługi zwraca czytelny błąd/warning (`period_incomplete`) zamiast cichego liczenia na dziurze. Status odświeża się przy zmianie dat (smart listener — bez reloadu integracji).
 - **Nota z recenzji (backfill)**: weryfikacja na labie `wisniowa` — backfill faktycznie wystartował i **zakończył się** (731 dni w statystykach LTS, 70 128 odczytów w magazynie kanonicznym, flaga `auto_backfill_completed=true`). Plik `/config/energa_canonical.db` = 0 B to osierocony artefakt (magazyn działa w `.storage/energa_canonical.db`), bez wpływu na działanie.
 
+### 🛠️ Poprawki z testu na żywo (net-metering, lab `wisniowa`)
+
+- **Magazyn net-meteringu z właściwej kolumny**: `_collect_monthly_flows` czyta teraz dzienny przyrost z `change` (a nie z `state`, który nie jest dobowym przyrostem) i ma fallback `reset_aware_delta` po kolumnie `sum`; rekonstrukcja banku 0/0 przy dodatnich saldach jest jawnie oznaczana jako `coverage_unknown` + `warning` (koniec cichego zawyżania). Regresja Wiśniowej: FIFO daje `bank_open` ≥ salda dodatnie, `cover_1/2 = 83/342` kWh, faktura **129,04 / 29,68 / 158,72**.
+- **Stawki produktu i akcyza net-meteringu**: `verify_period` bierze stawki z **opcji wpisu** (`fees_from_options(entry.options, tariff)`), a wynik niesie `fee_source` (`options`/`partial`/`defaults`) z ostrzeżeniem, gdy brakujące klucze powodują użycie tabeli domyślnej. Dla `old_system=True` akcyza liczy się od **poboru brutto** per strefa (`add_excise=True`, `excise_*` = brutto). Test akceptacyjny bez wstrzykiwania stawek odtwarza fakturę co do grosza.
+- **Kompletność okresu — thread-safety i skuteczna bramka**: zapisy stanu i tworzenie zadań odbywają się wyłącznie w pętli HA (`hass.loop.call_soon_threadsafe`), poprzednie zadanie jest anulowane przy zmianie dat (nowsze wygrywa, licznik generacji), a nieświeży/niepoliczony status jest natychmiast publikowany jako `unknown`. Bramka `button.*_przelicz_okres.available` czyta świeży status dla **bieżącego** zakresu dat; usługa odmawia (`period_incomplete`) także przy statusie `unknown`/braku werdyktu (gdy infrastruktura kompletności istnieje), a nie tylko przy `incomplete`.
+- **ETA liczenia**: `VERIFY_SECONDS_PER_DAY = 3.0` (realny czas ~3 s/dzień na labie `wisniowa`) przy zachowaniu ETA z **zmierzonego** tempa; treść nadal pokazuje liczbę dni.
+
 ## v1.9.0-beta.4 (2026-09-17) — fix encji wyniku (kategoria sensora)
 
 - `sensor.*_weryfikacja_rachunku` („Okres: rozliczenie"): `EntityCategory.DIAGNOSTIC` zamiast `CONFIG`

@@ -72,7 +72,7 @@ from .dashboard_generator import (
     DEFAULT_URL_PATH,
     async_provision_dashboard,
 )
-from .tariff import fees_from_options
+from .tariff import fee_source, fees_from_options
 
 _LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Warsaw")
@@ -688,21 +688,55 @@ async def _collect_meter_hourly_api(
     return cleaned
 
 
-def period_completeness_get(coordinator, meter_id) -> dict | None:
-    """Return the cached period-completeness result for a meter (or ``None``)."""
-    if coordinator is None or meter_id is None:
+def period_completeness_store(coordinator) -> dict | None:
+    """Return the coordinator's completeness store when the feature is active.
+
+    ``None`` means the integration has no completeness infrastructure (the
+    feature is unavailable, e.g. plain unit-test doubles) — callers must then
+    not gate, since they cannot know anything better. An empty dict means the
+    feature is active but has not produced a verdict yet.
+    """
+    if coordinator is None:
         return None
     store = getattr(coordinator, "_period_completeness", None)
-    if not isinstance(store, dict):
+    return store if isinstance(store, dict) else None
+
+
+def period_completeness_get(coordinator, meter_id) -> dict | None:
+    """Return the cached period-completeness result for a meter (or ``None``)."""
+    store = period_completeness_store(coordinator)
+    if store is None or meter_id is None:
         return None
     result = store.get(str(meter_id))
     return result if isinstance(result, dict) else None
 
 
-def period_completeness_status(coordinator, meter_id) -> str:
-    """Return ``complete`` / ``incomplete`` / ``unknown`` for a meter."""
+def _completeness_matches_period(result: dict, expected_start, expected_end) -> bool:
+    """True when a completeness verdict was computed for the expected bounds."""
+    if not result:
+        return False
+    got_start = format_period_date(result.get("period_start"))
+    got_end = format_period_date(result.get("period_end"))
+    want_start = format_period_date(expected_start) if expected_start else None
+    want_end = format_period_date(expected_end) if expected_end else None
+    if want_start is None or want_end is None:
+        return True
+    return got_start == want_start and got_end == want_end
+
+
+def period_completeness_status(
+    coordinator, meter_id, *, expected_start=None, expected_end=None
+) -> str:
+    """Return ``complete`` / ``incomplete`` / ``unknown`` for a meter.
+
+    When ``expected_start``/``expected_end`` are given a verdict computed for a
+    different window is treated as stale (``unknown``) so the button/service
+    never trusts a cache from before the user edited the period.
+    """
     result = period_completeness_get(coordinator, meter_id)
     if not result:
+        return STATE_UNKNOWN
+    if not _completeness_matches_period(result, expected_start, expected_end):
         return STATE_UNKNOWN
     state = str(result.get("state") or STATE_UNKNOWN)
     return state if state in (STATE_COMPLETE, STATE_INCOMPLETE, STATE_UNKNOWN) else STATE_UNKNOWN
@@ -773,11 +807,18 @@ async def _collect_monthly_flows(
     Used for Faza 3 opening balances: the net-metering warehouse at the start
     of the verified period is the FIFO result over these monthly flows.
 
+    The daily **``change``** column is the only trustworthy daily increment for
+    the integration's ``*_stats`` sensors: their raw daily ``state`` is *not*
+    the day's consumption, so summing it produced ~0 kWh monthly flows and a
+    silently zero warehouse (live Wiśniowa bug). When the recorder has no
+    ``change`` values at all we fall back to the reset-aware delta of the
+    cumulative ``sum`` column (same helper the coordinator uses).
+
     Returns ``{(year, month): {suffix: kWh}}``; an empty dict means the
     recorder has no usable history (the caller then reports ``coverage_unknown``
     instead of guessing).
     """
-    from .settlement import is_export_prosumer
+    from .settlement import is_export_prosumer, reset_aware_delta
 
     meter_point_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_point_id)).lower()
@@ -805,7 +846,7 @@ async def _collect_monthly_flows(
                 list(statistic_ids.values()),
                 "day",
                 None,
-                {"state"},
+                {"change", "sum"},
             )
         ) or {}
     except Exception as err:  # noqa: BLE001 - missing recorder must not raise
@@ -814,18 +855,54 @@ async def _collect_monthly_flows(
 
     monthly: dict = {}
     for suffix, statistic_id in statistic_ids.items():
-        for row in raw.get(statistic_id, []) or []:
+        rows = list(raw.get(statistic_id, []) or [])
+        # Daily increments from ``change`` (preferred, resets are already
+        # handled by the recorder). ``sum`` is kept as a reset-aware fallback
+        # only when not a single row carried ``change``.
+        used_change = False
+        sum_by_month: dict = {}
+        for row in rows:
             moment = _stat_row_moment(row.get("start"))
-            state = row.get("state")
-            if moment is None or state is None:
+            if moment is None:
                 continue
+            change = row.get("change")
+            if change is not None:
+                try:
+                    value = float(change)
+                except (ValueError, TypeError):
+                    value = None
+                if value is not None:
+                    bucket = monthly.setdefault((moment.year, moment.month), {})
+                    bucket[suffix] = bucket.get(suffix, 0.0) + value
+                    used_change = True
+            sum_value = row.get("sum")
+            if sum_value is not None:
+                try:
+                    sum_by_month.setdefault((moment.year, moment.month), []).append(
+                        float(sum_value)
+                    )
+                except (ValueError, TypeError):
+                    continue
+        if not used_change:
+            for key, sums in sum_by_month.items():
+                delta = reset_aware_delta(sums)
+                if delta:
+                    bucket = monthly.setdefault(key, {})
+                    bucket[suffix] = bucket.get(suffix, 0.0) + delta
+    return monthly
+
+
+def _period_has_positive_import(hourly: dict) -> bool:
+    """True when the period window has at least one positive import reading."""
+    for suffix in ("import", "import_1", "import_2"):
+        series = (hourly or {}).get(suffix) or {}
+        for value in series.values():
             try:
-                value = float(state)
+                if float(value) > 0.0:
+                    return True
             except (ValueError, TypeError):
                 continue
-            bucket = monthly.setdefault((moment.year, moment.month), {})
-            bucket[suffix] = bucket.get(suffix, 0.0) + value
-    return monthly
+    return False
 
 
 def _verify_cache_get(coordinator, key: tuple) -> dict | None:
@@ -954,21 +1031,39 @@ async def async_verify_period_data(
     if entry is None:
         return {"empty": True, "error": "no_entry", "source": SOURCE_RECORDER}
 
-    # Bramka kompletności: gdy encja statusu wie już, że okres ma dziury, nie
+    # Bramka kompletności: dopóki świeży status nie jest ``complete``, nie
     # liczymy rachunku "na dziurze" — zwracamy czytelny błąd zamiast wyniku.
+    # Gdy cache nie istnieje wcale (brak infrastruktury), nie blokujemy.
     requested_meter = data.get("meter_id")
     if requested_meter:
+        expected_start = format_period_date(data.get("start"))
+        expected_end = format_period_date(data.get("end"))
+        store = period_completeness_store(coordinator)
         completeness = period_completeness_get(coordinator, requested_meter)
-        if completeness is not None and completeness.get("state") == STATE_INCOMPLETE:
-            return {
-                "empty": True,
-                "error": "period_incomplete",
-                "warning": (
+        state = period_completeness_status(
+            coordinator,
+            requested_meter,
+            expected_start=expected_start,
+            expected_end=expected_end,
+        )
+        if store is not None and state != STATE_COMPLETE:
+            if state == STATE_INCOMPLETE and completeness:
+                warning = (
                     "Dane w wybranym okresie nie są kompletne "
                     f"({completeness.get('available_days')}/"
                     f"{completeness.get('expected_days')} dni). "
                     "Uzupełnij brakujące dni przed przeliczeniem rachunku."
-                ),
+                )
+            else:
+                warning = (
+                    "Status kompletności okresu nie został jeszcze ustalony "
+                    "(albo dotyczy innego zakresu dat). Odczekaj, aż encja "
+                    "„Okres: kompletność danych” przyjmie wartość „complete”."
+                )
+            return {
+                "empty": True,
+                "error": "period_incomplete",
+                "warning": warning,
                 "period_start": start_dt.isoformat(),
                 "period_end": end_dt.isoformat(),
                 "completeness": completeness,
@@ -1084,10 +1179,25 @@ async def async_verify_period_data(
                         period_start=start_dt,
                     )
                 )
+                # Honest reconstruction guard: a 0/0 warehouse on a window with
+                # real positive imports is not a trustworthy opening balance
+                # (the old state-column bug produced exactly this). Fall back to
+                # "unknown" so build_period_invoice sets coverage_unknown and a
+                # warning instead of silently overcharging.
+                if (
+                    not (bank_open_1 or bank_open_2)
+                    and _period_has_positive_import(hourly)
+                ):
+                    bank_open_1 = None
+                    bank_open_2 = None
         else:
             deposit_open = override_deposit
 
-        fees = fees_from_options(dict(entry.options or {}), meter.get("tariff"))
+        entry_options = dict(entry.options or {})
+        fees = fees_from_options(entry_options, meter.get("tariff"))
+        fee_origin, _missing_fee_keys = fee_source(
+            entry_options, meter.get("tariff")
+        )
         invoice = build_period_invoice(
             hourly,
             fees=fees,
@@ -1102,8 +1212,16 @@ async def async_verify_period_data(
             prosumer_coefficient=coefficient,
             tariff=meter.get("tariff"),
         )
+        if fee_origin != "options":
+            invoice.setdefault("warnings", [])
+            invoice["warnings"] = list(invoice["warnings"]) + [
+                "Część stawek taryfowych pochodzi z tabeli domyślnej "
+                f"(źródło: {fee_origin}) — ustaw stawki w opcjach wpisu, aby "
+                "odtworzyć rachunek co do grosza."
+            ]
         result = {
             **invoice,
+            "fee_source": fee_origin,
             "empty": False,
             "meter_point_id": meter_point_id,
             "meter_serial": serial,

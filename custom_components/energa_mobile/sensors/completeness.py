@@ -14,6 +14,7 @@ add and whenever the smart period listener fires (date change without reload).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
@@ -66,7 +67,8 @@ class EnergaPeriodCompletenessSensor(CoordinatorEntity, SensorEntity):
         self._serial = str(serial or meter_id)
         self._state = STATE_UNKNOWN
         self._attrs = self._base_unknown_attributes()
-        self._refresh_running = False
+        self._refresh_generation = 0
+        self._refresh_task = None
         self._attr_unique_id = f"energa_{self._meter_id}_period_completeness"
         self.entity_id = f"sensor.energa_{self._serial}_okres_kompletnosc".lower()
         self._attr_device_info = device_info
@@ -109,41 +111,114 @@ class EnergaPeriodCompletenessSensor(CoordinatorEntity, SensorEntity):
             _LOGGER.debug("Energa: completeness subscription skipped: %s", err)
         self._schedule_refresh()
 
-    def _safe_write_state(self) -> None:
+    def _in_event_loop(self) -> bool:
+        """True when called from a running asyncio event loop (thread-safe)."""
         try:
-            self.async_write_ha_state()
-        except Exception as err:  # noqa: BLE001 - state write is best effort
-            _LOGGER.debug("Energa: completeness state write skipped: %s", err)
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+        return True
+
+    def _call_in_loop(self, func, *args) -> None:
+        """Run ``func`` in the HA event loop, even when called from a worker.
+
+        Writing entity state and creating tasks from a non-loop thread is a
+        hard error in HA 2026.9 (``async_write_ha_state`` / ``async_create_task``
+        outside the loop). Scheduling through ``hass.loop.call_soon_threadsafe``
+        keeps every state write and task creation on the loop.
+        """
+        loop = getattr(self.hass, "loop", None)
+        if loop is None:
+            func(*args)
+            return
+        if self._in_event_loop():
+            func(*args)
+            return
+        try:
+            loop.call_soon_threadsafe(func, *args)
+        except Exception as err:  # noqa: BLE001 - scheduling must never raise
+            _LOGGER.debug("Energa: completeness loop scheduling skipped: %s", err)
+
+    def _safe_write_state(self) -> None:
+        def _write() -> None:
+            try:
+                self.async_write_ha_state()
+            except Exception as err:  # noqa: BLE001 - state write is best effort
+                _LOGGER.debug("Energa: completeness state write skipped: %s", err)
+
+        self._call_in_loop(_write)
 
     def _handle_period_options_updated(self, entry_id: str) -> None:
         if entry_id != getattr(self._entry, "entry_id", None):
             return
+        # Newest wins: drop any in-flight check for the previous window.
+        self._cancel_refresh_task()
         self._attrs = self._base_unknown_attributes()
         self._state = STATE_UNKNOWN
+        # Publish the fresh "unknown" immediately so the button gate never
+        # keeps reading a stale "complete" from before the date change.
+        self._publish()
         self._safe_write_state()
         self._schedule_refresh()
 
-    def _schedule_refresh(self) -> None:
-        """Fire-and-forget a background completeness recompute."""
-        coro = self.async_refresh()
+    def _cancel_refresh_task(self) -> None:
+        """Cancel a previously scheduled completeness task (newest wins)."""
+        task = self._refresh_task
+        self._refresh_task = None
+        if task is None:
+            return
+        try:
+            cancel = getattr(task, "cancel", None)
+            if callable(cancel):
+                cancel()
+        except Exception as err:  # noqa: BLE001 - cancellation is best effort
+            _LOGGER.debug("Energa: completeness task cancel skipped: %s", err)
+
+    def _create_refresh_task(self, coro) -> None:
+        """Create the background task on the event loop and keep a reference."""
         try:
             if hasattr(self._entry, "async_create_background_task"):
-                self._entry.async_create_background_task(
+                self._refresh_task = self._entry.async_create_background_task(
                     self.hass, coro, name=f"energa_completeness_{self._meter_id}"
                 )
                 return
         except Exception as err:  # noqa: BLE001 - scheduling must never raise
             _LOGGER.debug("Energa: completeness background task skipped: %s", err)
         try:
-            self.hass.async_create_task(coro)
+            self._refresh_task = self.hass.async_create_task(coro)
         except Exception as err:  # noqa: BLE001 - scheduling must never raise
             _LOGGER.debug("Energa: completeness task skipped: %s", err)
+            try:
+                coro.close()
+            except Exception:  # noqa: BLE001 - closing must never raise
+                pass
+
+    def _schedule_refresh(self) -> None:
+        """Fire-and-forget a background completeness recompute (newest wins)."""
+        self._cancel_refresh_task()
+        coro = self.async_refresh()
+        if self._in_event_loop():
+            self._create_refresh_task(coro)
+        else:
+            loop = getattr(self.hass, "loop", None)
+            if loop is None:
+                try:
+                    coro.close()
+                except Exception:  # noqa: BLE001 - closing must never raise
+                    pass
+                return
+            loop.call_soon_threadsafe(self._create_refresh_task, coro)
 
     async def async_refresh(self) -> dict:
-        """Recompute and publish the completeness status."""
-        if self._refresh_running:
-            return self._attrs
-        self._refresh_running = True
+        """Recompute and publish the completeness status (newest wins).
+
+        Each call takes a new generation number; a slower check that finishes
+        after a date change has scheduled a newer one is discarded instead of
+        overwriting the fresh verdict.
+        """
+        self._refresh_generation += 1
+        generation = self._refresh_generation
+        result = None
         try:
             from ..services import async_compute_period_completeness
 
@@ -153,8 +228,9 @@ class EnergaPeriodCompletenessSensor(CoordinatorEntity, SensorEntity):
         except Exception as err:  # noqa: BLE001 - never break the entity loop
             _LOGGER.debug("Energa: completeness compute failed: %s", err)
             result = None
-        finally:
-            self._refresh_running = False
+
+        if generation != self._refresh_generation:
+            return self._attrs
 
         if isinstance(result, dict):
             self._apply(result)
@@ -168,6 +244,9 @@ class EnergaPeriodCompletenessSensor(CoordinatorEntity, SensorEntity):
 
     def _publish(self) -> None:
         """Share the status with the button via the coordinator cache + signal."""
+        if not self._in_event_loop():
+            self._call_in_loop(self._publish)
+            return
         coordinator = self.coordinator
         if coordinator is not None:
             store = getattr(coordinator, "_period_completeness", None)

@@ -1,5 +1,6 @@
 """Tests for the period completeness sensor + recalculate button gate (v1.9.0-beta.5)."""
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -311,6 +312,149 @@ class TestCompletenessSensor:
         coordinator.async_update_listeners.assert_called_once()
 
 
+class TestCompletenessThreadSafety:
+    """HA 2026.9: state writes / task creation must stay on the event loop."""
+
+    def _sensor(self, coordinator, options):
+        from custom_components.energa_mobile.sensors.completeness import (
+            EnergaPeriodCompletenessSensor,
+        )
+
+        sensor = EnergaPeriodCompletenessSensor(
+            coordinator=coordinator,
+            meter={"meter_point_id": "1", "meter_serial": "S1", "zone_count": 1},
+            meter_id="1",
+            serial="S1",
+            device_info=MagicMock(),
+            entry=_entry(options),
+        )
+        sensor.hass = SimpleNamespace(loop=None)
+        return sensor
+
+    @pytest.mark.asyncio
+    async def test_worker_thread_state_write_hops_to_loop(self):
+        import threading
+
+        coordinator = SimpleNamespace(
+            _period_completeness={}, async_update_listeners=MagicMock()
+        )
+        sensor = self._sensor(
+            coordinator,
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-03",
+                CONF_VERIFY_PERIOD_END: "2026-08-04",
+            },
+        )
+        loop = asyncio.get_running_loop()
+        sensor.hass = SimpleNamespace(loop=loop)
+        loop_thread = threading.get_ident()
+        written: list[int] = []
+        sensor.async_write_ha_state = lambda: written.append(threading.get_ident())
+
+        # Called from a worker thread: must be re-scheduled on the loop.
+        await asyncio.to_thread(sensor._safe_write_state)
+        await asyncio.sleep(0)
+
+        assert written == [loop_thread]
+
+    @pytest.mark.asyncio
+    async def test_date_change_publishes_unknown_and_reschedules(self):
+        coordinator = SimpleNamespace(
+            _period_completeness={}, async_update_listeners=MagicMock()
+        )
+        sensor = self._sensor(
+            coordinator,
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-03",
+                CONF_VERIFY_PERIOD_END: "2026-08-04",
+            },
+        )
+        previous = {
+            "state": STATE_COMPLETE,
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+        }
+        sensor._state = STATE_COMPLETE
+        sensor._attrs = previous
+        coordinator._period_completeness["1"] = dict(previous)
+
+        cancelled: list[bool] = []
+
+        class _FakeTask:
+            def cancel(self):
+                cancelled.append(True)
+
+        sensor._refresh_task = _FakeTask()
+        scheduled: list[bool] = []
+        sensor._schedule_refresh = lambda: scheduled.append(True)
+
+        sensor._handle_period_options_updated("entry_1")
+
+        # Previous (stale) check cancelled; fresh unknown published at once.
+        assert cancelled == [True]
+        assert sensor.native_value == STATE_UNKNOWN
+        assert coordinator._period_completeness["1"]["state"] == STATE_UNKNOWN
+        assert coordinator._period_completeness["1"]["period_start"] == "2026-08-03"
+        assert scheduled == [True]
+
+    def test_date_change_for_other_entry_is_ignored(self):
+        coordinator = SimpleNamespace(
+            _period_completeness={}, async_update_listeners=MagicMock()
+        )
+        sensor = self._sensor(coordinator, {})
+        scheduled: list[bool] = []
+        sensor._schedule_refresh = lambda: scheduled.append(True)
+        sensor._handle_period_options_updated("other_entry")
+        assert scheduled == []
+
+    @pytest.mark.asyncio
+    async def test_stale_refresh_does_not_overwrite_newer(self):
+        coordinator = SimpleNamespace(
+            _period_completeness={}, async_update_listeners=MagicMock()
+        )
+        sensor = self._sensor(
+            coordinator,
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-03",
+                CONF_VERIFY_PERIOD_END: "2026-08-04",
+            },
+        )
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = {"n": 0}
+
+        async def _fake_compute(hass, entry, meter):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                first_started.set()
+                await release_first.wait()
+                return {
+                    "state": STATE_COMPLETE,
+                    "period_start": "2026-07-01",
+                    "period_end": "2026-07-31",
+                }
+            return {
+                "state": STATE_INCOMPLETE,
+                "period_start": "2026-08-03",
+                "period_end": "2026-08-04",
+            }
+
+        with patch(
+            "custom_components.energa_mobile.services.async_compute_period_completeness",
+            new=_fake_compute,
+        ):
+            older = asyncio.create_task(sensor.async_refresh())
+            await first_started.wait()
+            newer = asyncio.create_task(sensor.async_refresh())
+            await newer
+            assert sensor.native_value == STATE_INCOMPLETE
+            release_first.set()
+            await older
+
+        # The slow older verdict must not clobber the newer one.
+        assert sensor.native_value == STATE_INCOMPLETE
+
+
 class TestButtonGateIntegration:
     def _button(self, options, coordinator):
         from custom_components.energa_mobile.button import EnergaVerifyPeriodButton
@@ -327,12 +471,49 @@ class TestButtonGateIntegration:
             CONF_VERIFY_PERIOD_END: "2026-08-04",
         }
         coordinator = SimpleNamespace(
-            _period_completeness={"1": {"state": STATE_COMPLETE}},
+            _period_completeness={
+                "1": {
+                    "state": STATE_COMPLETE,
+                    "period_start": "2026-08-03",
+                    "period_end": "2026-08-04",
+                }
+            },
             async_update_listeners=MagicMock(),
         )
         assert self._button(options, coordinator).available is True
         coordinator._period_completeness["1"]["state"] = STATE_INCOMPLETE
         assert self._button(options, coordinator).available is False
+        # A verdict for a different window must count as stale -> unavailable.
+        coordinator._period_completeness["1"] = {
+            "state": STATE_COMPLETE,
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+        }
+        assert self._button(options, coordinator).available is False
+
+    @pytest.mark.asyncio
+    async def test_button_worker_thread_state_write_hops_to_loop(self):
+        import threading
+
+        options = {
+            CONF_VERIFY_PERIOD_START: "2026-08-03",
+            CONF_VERIFY_PERIOD_END: "2026-08-04",
+        }
+        coordinator = SimpleNamespace(
+            _period_completeness={"1": {"state": STATE_COMPLETE}},
+            async_update_listeners=MagicMock(),
+        )
+        button = self._button(options, coordinator)
+        loop = asyncio.get_running_loop()
+        button.hass = SimpleNamespace(loop=loop)
+        loop_thread = threading.get_ident()
+        written: list[int] = []
+        button.async_write_ha_state = lambda: written.append(threading.get_ident())
+
+        await asyncio.to_thread(button._safe_write_state)
+        await asyncio.sleep(0)
+
+        assert written == [loop_thread]
 
     def test_status_helper_reads_cache(self):
         coordinator = SimpleNamespace(
@@ -361,6 +542,8 @@ class TestServiceGate:
                     "state": STATE_INCOMPLETE,
                     "expected_days": 2,
                     "available_days": 1,
+                    "period_start": "2026-08-03",
+                    "period_end": "2026-08-04",
                 }
             },
             _verify_cache={},
@@ -380,8 +563,51 @@ class TestServiceGate:
         assert "nie są kompletne" in result["warning"]
 
     @pytest.mark.asyncio
-    async def test_service_proceeds_without_completeness_cache(self):
+    async def test_service_refuses_unknown_or_not_yet_computed_period(self):
+        # Feature active (store exists) but no verdict for this meter yet.
         coordinator = SimpleNamespace(_period_completeness={}, _verify_cache={})
+        hass = self._hass(coordinator)
+        result = await async_verify_period_data(
+            hass,
+            {
+                "start": "2026-08-03",
+                "end": "2026-08-04",
+                "entry_id": "entry_1",
+                "meter_id": "1",
+            },
+        )
+        assert result["empty"] is True
+        assert result["error"] == "period_incomplete"
+        assert "nie został jeszcze ustalony" in result["warning"]
+
+    @pytest.mark.asyncio
+    async def test_service_refuses_stale_period_verdict(self):
+        coordinator = SimpleNamespace(
+            _period_completeness={
+                "1": {
+                    "state": STATE_COMPLETE,
+                    "period_start": "2026-07-01",
+                    "period_end": "2026-07-31",
+                }
+            },
+            _verify_cache={},
+        )
+        hass = self._hass(coordinator)
+        result = await async_verify_period_data(
+            hass,
+            {
+                "start": "2026-08-03",
+                "end": "2026-08-04",
+                "entry_id": "entry_1",
+                "meter_id": "1",
+            },
+        )
+        assert result["error"] == "period_incomplete"
+
+    @pytest.mark.asyncio
+    async def test_service_proceeds_without_completeness_infrastructure(self):
+        # No store at all (feature unavailable) -> do not gate.
+        coordinator = SimpleNamespace(_verify_cache={})
         hass = self._hass(coordinator)
         with patch(
             "custom_components.energa_mobile.services._active_meters_for_period",
@@ -396,7 +622,6 @@ class TestServiceGate:
                     "meter_id": "1",
                 },
             )
-        # No completeness verdict -> not blocked by the gate (no_meter here).
         assert result.get("error") != "period_incomplete"
 
 

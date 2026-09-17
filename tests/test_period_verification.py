@@ -577,7 +577,11 @@ class TestVerifyPeriodButton:
         hass = MagicMock()
         store = {}
         if completeness is not None:
-            store["10000001"] = {"state": completeness}
+            store["10000001"] = {
+                "state": completeness,
+                "period_start": options.get(CONF_VERIFY_PERIOD_START),
+                "period_end": options.get(CONF_VERIFY_PERIOD_END),
+            }
         coordinator = SimpleNamespace(
             _verify_result={}, _period_completeness=store,
             async_update_listeners=MagicMock(),
@@ -730,7 +734,7 @@ class TestVerifyPeriodButton:
         assert messages
         msg = messages[-1]
         assert "Przeliczam rachunek za okres 2026-08-01 – 2026-08-31" in msg
-        assert "szacowany czas: ~37 s" in msg
+        assert "szacowany czas: ~93 s" in msg
         assert "31" in msg
         assert button._progress["total"] == 31
         assert results[-1]["status"] == "calculating"
@@ -894,7 +898,13 @@ class TestVerifyPeriodButton:
         )
         coordinator = SimpleNamespace(
             _verify_result={},
-            _period_completeness={"10000001": {"state": "complete"}},
+            _period_completeness={
+                "10000001": {
+                    "state": "complete",
+                    "period_start": "2026-08-01",
+                    "period_end": "2026-08-31",
+                }
+            },
             async_update_listeners=MagicMock(),
         )
         button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}

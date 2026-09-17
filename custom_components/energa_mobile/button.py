@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -428,7 +429,8 @@ VERIFY_NOTIFICATION_TITLE = "Energa: weryfikacja rachunku"
 VERIFY_RESULT_DISMISS_DELAY_S = 180.0
 # Rough per-day API cost used for the initial "~N s" estimate; the live ETA
 # switches to the *measured* pace after the first progress callback.
-VERIFY_SECONDS_PER_DAY = 1.2
+# Measured live on the Wiśniowa lab: ~3 s per day of hourly API history.
+VERIFY_SECONDS_PER_DAY = 3.0
 # Minimum spacing between two progress notification updates (throttling).
 VERIFY_PROGRESS_THROTTLE_S = 5.0
 # Errors that mean "could not compute" (as opposed to a genuinely empty period).
@@ -549,7 +551,31 @@ class EnergaVerifyPeriodButton(ButtonEntity):
 
     def _handle_period_options_updated(self, entry_id: str) -> None:
         if entry_id == self._entry.entry_id:
-            self.async_write_ha_state()
+            self._safe_write_state()
+
+    def _safe_write_state(self) -> None:
+        """Write availability state, always on the HA event loop."""
+        def _write() -> None:
+            try:
+                self.async_write_ha_state()
+            except Exception as err:  # noqa: BLE001 - state write is best effort
+                _LOGGER.debug("Energa: verify_period state write skipped: %s", err)
+
+        loop = getattr(self.hass, "loop", None)
+        if loop is None:
+            _write()
+            return
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            _write()
+            return
+        try:
+            loop.call_soon_threadsafe(_write)
+        except Exception as err:  # noqa: BLE001 - scheduling best effort
+            _LOGGER.debug("Energa: verify_period loop scheduling skipped: %s", err)
 
     def _period_bounds(self) -> tuple[str | None, str | None]:
         opts = self._entry.options or {}
@@ -559,11 +585,22 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         )
 
     def _completeness_status(self) -> str:
-        """Status published by the completeness sensor (``unknown`` if absent)."""
+        """Fresh completeness status for the CURRENTLY selected period.
+
+        Passing the expected bounds makes a cache from before a date edit count
+        as ``unknown`` instead of a stale ``complete`` (which would leave the
+        button enabled and the service computing on a different window).
+        """
         try:
             from .services import period_completeness_status
 
-            return period_completeness_status(self._coordinator(), self._meter_id)
+            start, end = self._period_bounds()
+            return period_completeness_status(
+                self._coordinator(),
+                self._meter_id,
+                expected_start=start,
+                expected_end=end,
+            )
         except Exception as err:  # noqa: BLE001 - never break availability
             _LOGGER.debug("Energa: completeness status lookup failed: %s", err)
             return "unknown"
