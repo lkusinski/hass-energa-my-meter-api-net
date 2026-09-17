@@ -21,7 +21,17 @@ Integracja posiada w pełni przetestowany i zweryfikowany na 5 środowiskach pro
 * ✅ Precyzyjne bilansowanie wirtualnego magazynu FIFO (Net-metering 0.8 / 0.7 z izolacją stref L1/L2).
 * ✅ Obsługa depozytu prosumenckiego Net-billing z oficjalnymi cenami rynkowymi RCEm PSE.
 * ✅ Autonomiczny pulpit `/energa-rachunek` z adaptacją do profilu instalacji (G11, G12, Net-billing).
-* ✅ 358 zautomatyzowanych testów jednostkowych (`pytest tests`).
+* ✅ 378 zautomatyzowanych testów jednostkowych (`pytest tests`).
+
+### 📌 Zadania do wdrożenia przy okazji najbliższego wydania (Backlog UX & Sensors):
+* [x] **Kompatybilność testów jednostkowych na platformie Windows (Issue #3):**
+  * Zastąpienie `NamedTemporaryFile` przez standardową fixture pytestową `tmp_path` w testach bazy SQLite, eliminując błąd blokady plików (`PermissionError`) na Windowsie.
+* [ ] **Sumaryczny pobór MTD dla taryf strefowych (`sensor.energa_{serial}_pobor_energii_mtd`):**
+  * Obecnie w G12/G12w tworzone są osobne sensory `Pobór Energii Strefa 1 MTD` i `Strefa 2 MTD`.
+  * Dodać także sumaryczny sensor poboru w kWh dla całego miesiąca (biorący wartość z `mtd_import_kwh`), aby użytkownik miał obok siebie `Pobór Energii MTD` (kWh) oraz `Dotychczasowy Rachunek` (PLN).
+* [ ] **Domyślne ukrycie technicznych sensorów statystyk (`_attr_entity_registry_visible_default = False`):**
+  * Dla sensorów `EnergaStatisticsSensor` i `EnergaCostStatisticsSensor` (`Panel Energia...`).
+  * Zapobiegnie to wyświetlaniu mylącego statusu `nieznany` na kartach urządzeń w interfejsie HA, zachowując pełne działanie w tle dla bazy LTS i oficjalnego Panelu Energia.
 
 ---
 

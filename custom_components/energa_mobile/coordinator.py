@@ -550,6 +550,18 @@ class EnergaCoordinator(DataUpdateCoordinator):
                                 for m in self.api._meters_data:
                                     if str(m.get("meter_point_id")) == mid_str and m.get("meter_serial"):
                                         self._mtd[str(m["meter_serial"])] = hydrated_data
+
+                # v1.9.0: hourly-netted salda (OSD "BP") — the base the seller
+                # actually invoices. Attached AFTER hydration so both recorder
+                # and API-hydrated MTD entries get them. Falls back silently to
+                # gross flows when the recorder has no hourly data.
+                _saldos = await self._async_compute_hourly_saldos(_month_start, _now)
+                for mid_str, _s in _saldos.items():
+                    self._mtd.setdefault(mid_str, {}).update(_s)
+                    if self.api._meters_data:
+                        for _m in self.api._meters_data:
+                            if str(_m.get("meter_point_id")) == mid_str and _m.get("meter_serial"):
+                                self._mtd.setdefault(str(_m["meter_serial"]), {}).update(_s)
                 if notify:
                     self.async_update_listeners()
         except Exception as cal_err:
@@ -888,6 +900,53 @@ class EnergaCoordinator(DataUpdateCoordinator):
         except Exception as mem_err:
             _LOGGER.debug("In-memory period sums fallback failed: %s", mem_err)
 
+        return out
+
+    async def _async_compute_hourly_saldos(self, start, end) -> dict:
+        """Hourly-netted invoice bases (net-billing) per meter over [start, end].
+
+        The Energa invoice settles gross import and export **hour by hour**
+        (OSD "BP"/bilansowanie prosumentów): the energy + variable-distribution
+        base is the sum of hourly POSITIVE balances ("salda dodatnie"), the
+        deposit base is the sum of NEGATIVE ones, and excise is charged on the
+        "nakładka" (gross import − salda dodatnie). Recorder hourly statistics
+        of the four zone series are paired per hour via ``tariff.bill_saldos``.
+
+        Returns {meter_id: {saldo_plus_1/2, saldo_minus_1/2, gross_1/2,
+        overlap_1/2, total_plus}}. Fully defensive — empty dict when the
+        recorder has no hourly data (caller then falls back to gross flows).
+        """
+        out: dict = {}
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            from .ha.recorder_adapter import RecorderAdapter
+            from .tariff import bill_saldos
+
+            registry = er.async_get(self.hass)
+            wanted: dict = {}  # meter_id -> {suffix: statistic_id}
+            for mid in list(self._meter_totals.keys()):
+                for suffix in ("import_1", "export_1", "import_2", "export_2"):
+                    uid = f"energa_{mid}_{suffix}_stats"
+                    for entity in list(registry.entities.values()):
+                        if entity.unique_id == uid and entity.platform == DOMAIN:
+                            wanted.setdefault(str(mid), {})[suffix] = entity.entity_id
+                            break
+            if not wanted:
+                return out
+
+            adapter = RecorderAdapter(self.hass)
+            for mid, series_ids in wanted.items():
+                hourly: dict = {}
+                for suffix, stat_id in series_ids.items():
+                    hourly[suffix] = await adapter.async_get_hourly_statistics(
+                        stat_id, start, end
+                    )
+                saldos = bill_saldos(hourly)
+                if saldos:
+                    out[mid] = saldos
+        except Exception as err:
+            _LOGGER.debug("Hourly salda computation failed: %s", err)
         return out
 
     async def _async_compute_monthly_sums(self, end, months: int = 14) -> dict:

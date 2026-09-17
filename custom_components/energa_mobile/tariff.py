@@ -26,7 +26,173 @@ Pure functions only (no Home Assistant imports) so they stay unit-tested.
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 VAT_RATE = 0.23
+_HALF_UP = ROUND_HALF_UP
+
+
+def _r2(x: float) -> float:
+    """Round to grosze using ROUND_HALF_UP (invoice line convention).
+
+    Energa bills every line rounded to grosze and sums the ROUNDED lines
+    (verified: August 2026 net-billing akcyza 0,023 MWh -> 0,115 -> 0,12).
+    Python's built-in ``round`` is banker's rounding, hence Decimal.
+    """
+    return float(Decimal(str(float(x))).quantize(Decimal("0.01"), rounding=_HALF_UP))
+
+
+def hourly_saldo(
+    import_hours: dict, export_hours: dict
+) -> tuple[float, float, float, float]:
+    """Per-hour netting of gross import/export for ONE metering zone.
+
+    The Energa invoice settles each hour separately (``BP`` = bilansowanie
+    prosumentów): import and export are netted hour-by-hour, so the energy
+    and variable-distribution base is the sum of hourly POSITIVE balances
+    ("salda dodatnie"), and the deposit base is the sum of NEGATIVE ones.
+
+    Args:
+        import_hours/export_hours: {hour_epoch: kWh} gross hourly series
+            (missing hours count as 0).
+
+    Returns:
+        (saldo_plus, saldo_minus, gross_import, gross_export) in kWh.
+    """
+    plus = minus = g_imp = g_exp = 0.0
+    for ts in set(import_hours) | set(export_hours):
+        try:
+            imp = float(import_hours.get(ts, 0.0) or 0.0)
+            exp = float(export_hours.get(ts, 0.0) or 0.0)
+        except (ValueError, TypeError):
+            continue
+        g_imp += imp
+        g_exp += exp
+        net = imp - exp
+        if net > 0.0:
+            plus += net
+        elif net < 0.0:
+            minus += -net
+    return plus, minus, g_imp, g_exp
+
+
+def bill_saldos(hourly: dict) -> dict:
+    """Hourly-netted invoice bases for a (possibly two-zone) meter.
+
+    Args:
+        hourly: {"import_1": {ts: kWh}, "export_1": {...},
+                 "import_2": {...}, "export_2": {...}} — one-zone meters
+                 may provide only the ``_1`` keys.
+
+    Returns dict with (kWh, rounded to 3 dp):
+        saldo_plus_1/2   energy + variable distribution + quality base
+        saldo_minus_1/2  export credited to the deposit
+        gross_1/2        gross meter import (excise base helper)
+        overlap_1/2      gross import - saldo plus (EXCISE base)
+        total_plus       saldo_plus_1 + saldo_plus_2 (OZE/cogen base)
+    """
+    out: dict[str, float] = {}
+    for zone in (1, 2):
+        imp = hourly.get(f"import_{zone}") or {}
+        exp = hourly.get(f"export_{zone}") or {}
+        if not imp and not exp:
+            continue
+        plus, minus, g_imp, g_exp = hourly_saldo(imp, exp)
+        out[f"saldo_plus_{zone}"] = round(plus, 3)
+        out[f"saldo_minus_{zone}"] = round(minus, 3)
+        out[f"gross_{zone}"] = round(g_imp, 3)
+        out[f"overlap_{zone}"] = round(max(0.0, g_imp - plus), 3)
+    out["total_plus"] = round(
+        out.get("saldo_plus_1", 0.0) + out.get("saldo_plus_2", 0.0), 3
+    )
+    return out
+
+
+def mtd_invoice_bases(mtd: dict, has_zones: bool, old_system: bool) -> dict:
+    """Pick the invoice bases from a coordinator MTD flow dict.
+
+    NEW net-billing is settled hour by hour by the OSD, so when the
+    coordinator has written hourly-netted salda keys we invoice on:
+        saldo_plus_1/2  -> energy + variable distribution + quality base
+        saldo_minus_1/2 -> export credited to the deposit
+        overlap_1/2     -> excise base ("nakładka", gross import - salda plus)
+    Otherwise (old net-metering, second-zone-less or no hourly data yet) we
+    fall back to the gross meter flows with excise kept informational.
+
+    Returns dict:
+        import_day/import_night/export  kWh for compute_bill
+        excise_day/excise_night         kWh for compute_bill
+        add_excise                      bool
+        export_day/export_night         per-zone credited export (display)
+        source                          "salda_hourly" | "gross_meter"
+    """
+    mtd = mtd or {}
+    has_salda = "saldo_plus_1" in mtd or "saldo_plus_2" in mtd
+    if has_salda:
+        # Hourly-netted bases, billed as WHOLE kWh per zone (Agrestowa
+        # 08.2026: 398,46 -> 398; 434,893 -> 435).
+        if has_zones:
+            plus_d = float(mtd.get("saldo_plus_1", 0.0))
+            plus_n = float(mtd.get("saldo_plus_2", 0.0))
+            minus = float(mtd.get("saldo_minus_1", 0.0)) + float(
+                mtd.get("saldo_minus_2", 0.0)
+            )
+            over_d = float(mtd.get("overlap_1", 0.0))
+            over_n = float(mtd.get("overlap_2", 0.0))
+            gross_d = float(mtd.get("gross_1", mtd.get("import_1", 0.0)))
+            gross_n = float(mtd.get("gross_2", mtd.get("import_2", 0.0)))
+            exp_d = float(mtd.get("saldo_minus_1", 0.0))
+            exp_n = float(mtd.get("saldo_minus_2", 0.0))
+        else:
+            plus_d = float(mtd.get("saldo_plus_1", 0.0))
+            plus_n = 0.0
+            minus = float(mtd.get("saldo_minus_1", 0.0))
+            over_d = float(mtd.get("overlap_1", 0.0))
+            over_n = 0.0
+            gross_d = float(mtd.get("gross_1", mtd.get("import", 0.0)))
+            gross_n = 0.0
+            exp_d = exp_n = 0.0
+        # Excise is a real netto line only for PROSUMERS (a plain consumer
+        # has it inside the energy price — Warzywna FES/00017). Base:
+        #   net-billing  -> "nakładka" (gross import - salda plus)
+        #   net-metering -> gross import (Wiśniowa FES/00042: 0,120+0,372 MWh)
+        is_prosumer = minus > 0.0
+        exc_d, exc_n = (gross_d, gross_n) if old_system else (over_d, over_n)
+        return {
+            "import_day": float(round(plus_d)),
+            "import_night": float(round(plus_n)),
+            "export": float(round(minus)),
+            "excise_day": float(round(exc_d)),
+            "excise_night": float(round(exc_n)),
+            "add_excise": bool(is_prosumer),
+            "export_day": float(round(exp_d)) if has_zones else 0.0,
+            "export_night": float(round(exp_n)) if has_zones else 0.0,
+            "source": "salda_hourly",
+        }
+    if has_zones:
+        imp_d = float(mtd.get("import_1", 0))
+        imp_n = float(mtd.get("import_2", 0))
+        exp = float(mtd.get("export_1", 0)) + float(mtd.get("export_2", 0))
+        if not exp:
+            exp = float(mtd.get("export", 0))
+        exp_d = float(mtd.get("export_1", 0))
+        exp_n = float(mtd.get("export_2", 0))
+    else:
+        imp_d = float(mtd.get("import", 0))
+        imp_n = 0.0
+        exp = float(mtd.get("export", 0))
+        exp_d = exp_n = 0.0
+    return {
+        "import_day": imp_d,
+        "import_night": imp_n,
+        "export": exp,
+        "excise_day": 0.0,
+        "excise_night": 0.0,
+        "add_excise": False,
+        "export_day": exp_d,
+        "export_night": exp_n,
+        "source": "gross_meter",
+    }
 
 # URE 2026 capacity-fee brackets for households (ryczałt, netto PLN/month).
 # Source: Informacja Prezesa URE Nr 58/2025 (30.10.2025) — by ANNUAL
@@ -148,12 +314,18 @@ def compute_bill(
     cover_day: float = 0.0,
     cover_night: float = 0.0,
     deposit_pln: float | None = None,
+    excise_day: float = 0.0,
+    excise_night: float = 0.0,
+    add_excise: bool = False,
 ) -> dict:
     """Full monthly bill from meter flows.
 
     Args:
-        import_day/night: kWh taken from the grid per zone (period).
-        export_kwh: kWh fed into the grid (period, hourly-netted sum).
+        import_day/night: kWh per zone (period). For net-billing pass the
+            HOURLY-NETTED "salda dodatnie" (see :func:`bill_saldos`); for
+            net-metering the gross meter import.
+        export_kwh: kWh fed into the grid (period). For net-billing pass
+            the hourly-netted "salda ujemne".
         rcem: invoiced monthly market price (volume-weighted, PSE table).
         fees: fee table (defaults to G12W_DEFAULT_FEES).
         months: how many monthly fixed fees to include.
@@ -162,10 +334,17 @@ def compute_bill(
             distribution stay on the FULL import).
         deposit_pln: explicit deposit to subtract (new net-billing).
             When None, computed as export_kwh*rcem*1.23.
+        excise_day/night: kWh on which excise is charged — the "nakładka"
+            (gross import - salda dodatnie) for net-billing. Informational
+            when ``add_excise`` is False.
+        add_excise: net-billing only — excise (5 PLN/MWh) is a REAL,
+            separately invoiced line added to the net total (verified on
+            Agrestowa 07-08.2026: 0,35 / 0,31 PLN). For G11 consumers and
+            old net-metering the 5 PLN/MWh is already inside the energy
+            price, so it stays informational.
 
     Returns dict with every invoice line (net PLN) plus totals and
-    ``do_zaplaty`` (gross payable). ``excise`` is informational only
-    (already inside the energy price — proven by the G11 invoice).
+    ``do_zaplaty`` (gross payable).
     """
     f = dict(G12W_DEFAULT_FEES)
     if fees:
@@ -183,71 +362,82 @@ def compute_bill(
     pay_day = max(0.0, import_day - max(0.0, float(cover_day)))
     pay_night = max(0.0, import_night - max(0.0, float(cover_night)))
 
-    sale_energy = pay_day * f["energy_day"] + pay_night * f["energy_night"]
-    # Excise is NOT added: it is already inside the energy price
-    # (G11 consumer invoice matches to the grosz without
-    # it; the "naliczono akcyze" line is informational).
-    excise_info = (import_day + import_night) * f["excise_mwh"] / 1000.0
-    sale_total = sale_energy + f["trade_fee"] * months
+    excise_rate = f["excise_mwh"] / 1000.0  # PLN per kWh
+    if add_excise:
+        line_excise_day = _r2(max(0.0, float(excise_day)) * excise_rate)
+        line_excise_night = _r2(max(0.0, float(excise_night)) * excise_rate)
+        excise_net = _r2(line_excise_day + line_excise_night)
+    else:
+        # Informational only (inside the energy price) — gross import.
+        line_excise_day = line_excise_night = 0.0
+        excise_net = 0.0
+        excise_info = _r2((import_day + import_night) * excise_rate)
 
-    distr_var_day = pay_day * f["grid_var_day"]
-    distr_var_night = pay_night * f["grid_var_night"]
+    # Sale lines, each rounded to grosze, then summed (invoice convention).
+    line_energy_day = _r2(pay_day * f["energy_day"])
+    line_energy_night = _r2(pay_night * f["energy_night"])
+    trade = _r2(f["trade_fee"] * months)
+    sale_total = _r2(line_energy_day + line_energy_night + trade + excise_net)
+
+    # Distribution lines.
+    line_var_day = _r2(pay_day * f["grid_var_day"])
+    line_var_night = _r2(pay_night * f["grid_var_night"])
     pay_total = pay_day + pay_night
     total_kwh = import_day + import_night
-    distr_quality = pay_total * f["quality"]
-    distr_oze = total_kwh * f["oze"]
-    distr_cogen = total_kwh * f["cogen"]
-    distr_total = (
-        distr_var_day
-        + distr_var_night
-        + distr_quality
-        + distr_oze
-        + distr_cogen
-        + (f["abonament"] + f["grid_fixed"] + f["capacity"]) * months
+    line_quality = _r2(pay_total * f["quality"])
+    line_oze = _r2(total_kwh * f["oze"])
+    line_cogen = _r2(total_kwh * f["cogen"])
+    line_fixed = _r2((f["abonament"] + f["grid_fixed"] + f["capacity"]) * months)
+    distr_total = _r2(
+        line_var_day + line_var_night + line_quality + line_oze + line_cogen + line_fixed
     )
 
-    netto = sale_total + distr_total
-    vat = netto * VAT_RATE
-    brutto = netto + vat
+    netto = _r2(sale_total + distr_total)
+    vat = _r2(netto * VAT_RATE)
+    brutto = _r2(netto + vat)
 
-    sale_energy_gross = round(sale_energy * (1.0 + VAT_RATE), 2)
-    sale_gross = round(sale_total * (1.0 + VAT_RATE), 2)
-    distr_gross = round(distr_total * (1.0 + VAT_RATE), 2)
-
+    # Deposit (new net-billing). Ustawa o OZE art. 4 ust. 11 + Agrestowa
+    # 07-08.2026: the deposit is capped at ENERGY SALE gross (energy +
+    # excise when excise is a real line) — never trade fee, never
+    # distribution/grid fees.
     if deposit_pln is None:
         deposit_pln = export_kwh * float(rcem) * 1.23
-    # Ustawa o OZE art. 4 ust. 11 (verified on invoice FES_00027):
-    # Deposit is allocated ONLY to eligible energy sale gross (sale_energy_gross),
-    # never to trade fee (opłata handlowa) and never to distribution/grid fees.
-    applied = min(max(0.0, float(deposit_pln)), sale_energy_gross)
-    do_zaplaty = round(brutto - applied, 2)
+    deposit = _r2(max(0.0, float(deposit_pln)))
+    cap_gross = _r2((line_energy_day + line_energy_night + excise_net) * (1.0 + VAT_RATE))
+    applied = _r2(min(deposit, cap_gross))
+    do_zaplaty = _r2(brutto - applied)
 
-    def _r(x: float) -> float:
-        return round(x, 2)
-
-    return {
-        "sale_energy_day": _r(pay_day * f["energy_day"]),
-        "sale_energy_night": _r(pay_night * f["energy_night"]),
-        "excise": _r(excise_info),
-        "excise_note": "informacyjnie — akcyza jest już w cenie energii (faktura G11)",
-        "trade_fee": _r(f["trade_fee"] * months),
-        "sale_total": _r(sale_total),
-        "sale_gross": _r(sale_gross),
-        "distr_var_day": _r(distr_var_day),
-        "distr_var_night": _r(distr_var_night),
-        "distr_quality": _r(distr_quality),
-        "distr_oze": _r(distr_oze),
-        "distr_cogen": _r(distr_cogen),
-        "distr_fixed": _r((f["abonament"] + f["grid_fixed"] + f["capacity"]) * months),
-        "distr_total": _r(distr_total),
-        "distr_gross": _r(distr_gross),
-        "netto": _r(netto),
-        "vat": _r(vat),
-        "brutto": _r(brutto),
-        "deposit": _r(max(0.0, float(deposit_pln))),
-        "deposit_applied": _r(applied),
+    out = {
+        "sale_energy_day": line_energy_day,
+        "sale_energy_night": line_energy_night,
+        "excise": excise_info if not add_excise else excise_net,
+        "excise_day": line_excise_day,
+        "excise_night": line_excise_night,
+        "excise_added": bool(add_excise),
+        "excise_note": (
+            "doliczana do netto (net-billing)"
+            if add_excise
+            else "informacyjnie — akcyza jest już w cenie energii (G11/net-metering)"
+        ),
+        "trade_fee": trade,
+        "sale_total": sale_total,
+        "sale_gross": _r2((line_energy_day + line_energy_night + excise_net) * (1.0 + VAT_RATE)),
+        "distr_var_day": line_var_day,
+        "distr_var_night": line_var_night,
+        "distr_quality": line_quality,
+        "distr_oze": line_oze,
+        "distr_cogen": line_cogen,
+        "distr_fixed": line_fixed,
+        "distr_total": distr_total,
+        "distr_gross": _r2(distr_total * (1.0 + VAT_RATE)),
+        "netto": netto,
+        "vat": vat,
+        "brutto": brutto,
+        "deposit": deposit,
+        "deposit_applied": applied,
         "do_zaplaty": do_zaplaty,
     }
+    return out
 
 
 def fees_from_options(options: dict | None, tariff: str | None = None) -> dict:

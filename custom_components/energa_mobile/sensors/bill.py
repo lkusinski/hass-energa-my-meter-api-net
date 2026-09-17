@@ -30,6 +30,7 @@ from ..tariff import (
     capacity_for_annual_use,
     compute_bill,
     fees_from_options,
+    mtd_invoice_bases,
     split_cover,
     tariff_family,
 )
@@ -70,35 +71,57 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = "mdi:calendar-clock"
         self._attr_device_info = device_info
 
-    def _mtd_parts(self):
-        """(import_kwh, export_kwh) month-to-date from coordinator cache."""
-        mtd = (
-            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
-            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
+    def _mtd_dict(self) -> dict:
+        """This meter's month-to-date flow cache from the coordinator."""
+        store = getattr(self.coordinator, "_mtd", {}) or {}
+        return (
+            store.get(str(self._meter_id))
+            or store.get(str(getattr(self, "_serial", "")))
             or {}
         )
+
+    def _mtd_parts(self):
+        """(import_kwh, export_kwh) month-to-date from coordinator cache."""
+        mtd = self._mtd_dict()
         imp = mtd.get("import", mtd.get("import_1", 0) + mtd.get("import_2", 0))
         exp = mtd.get("export", mtd.get("export_1", 0) + mtd.get("export_2", 0))
         return float(imp), float(exp)
 
-    def _mtd_zone_flows(self):
-        """(import_day, import_night, export_total) MTD per zone."""
-        mtd = (
-            getattr(self.coordinator, "_mtd", {}).get(str(self._meter_id))
-            or getattr(self.coordinator, "_mtd", {}).get(str(getattr(self, "_serial", "")))
-            or {}
+    def _mtd_bases(self) -> dict:
+        """Invoice bases for this meter (hourly-netted salda when available).
+
+        Pure logic lives in :func:`tariff.mtd_invoice_bases` so it stays
+        unit-tested without Home Assistant.
+        """
+        return mtd_invoice_bases(
+            self._mtd_dict(), self._has_zones, self._is_old_system()
         )
-        if self._has_zones:
-            imp_d = float(mtd.get("import_1", 0))
-            imp_n = float(mtd.get("import_2", 0))
-            exp = float(mtd.get("export_1", 0)) + float(mtd.get("export_2", 0))
-            if not exp:
-                exp = float(mtd.get("export", 0))
-        else:
-            imp_d = float(mtd.get("import", 0))
-            imp_n = 0.0
-            exp = float(mtd.get("export", 0))
-        return imp_d, imp_n, exp
+
+    def _mtd_zone_flows(self):
+        """(import_day, import_night, export_total) MTD per zone.
+
+        v1.9.0: NEW net-billing is settled hour by hour by the seller, so the
+        energy + variable-distribution base is the hourly-netted "salda
+        dodatnie" and the export credited to the deposit is "salda ujemne"
+        (keys written by the coordinator from recorder hourly statistics; see
+        docs/FAKTURY_ROZLICZENIA.md). Old net-metering — and any meter whose
+        hourly salda are unavailable — keeps gross meter flows.
+        """
+        b = self._mtd_bases()
+        return b["import_day"], b["import_night"], b["export"]
+
+    def _mtd_excise(self):
+        """(excise_day, excise_night) MTD = the hourly "nakładka" kWh.
+
+        Net-billing only, and only when hourly salda are known. Excise
+        (5 PLN/MWh) is charged on gross import minus salda dodatnie —
+        verified on Agrestowa 07-08.2026 (0,35 / 0,31 PLN). Returns None
+        when unavailable so callers keep the informational-only path.
+        """
+        b = self._mtd_bases()
+        if b["add_excise"]:
+            return (b["excise_day"], b["excise_night"])
+        return None
 
     def _annual_import_estimate(self):
         """Annual grid import (kWh) for the URE capacity-fee bracket.
@@ -193,6 +216,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             return None
         imp_mtd, exp_mtd = self._mtd_parts()
         imp_d, imp_n, exp_tot = self._mtd_zone_flows()
+        excise = self._mtd_excise()
+        excise_d, excise_n = excise if excise else (0.0, 0.0)
         opts = self._entry.options
         mid = str(self._meter_id)
         ser = str(getattr(self, "_serial", ""))
@@ -242,6 +267,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 imp_d, imp_n, exp_tot, rce, fees,
                 cover_day=cover_d, cover_night=cover_n,
                 deposit_pln=deposit_mtd,
+                excise_day=excise_d, excise_night=excise_n,
+                add_excise=excise is not None,
             )
         except (ValueError, TypeError):
             bill_mtd = None
@@ -334,6 +361,9 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 f_imp_d, f_imp_n, f_exp, rce, fees,
                 cover_day=f_cover_d, cover_night=f_cover_n,
                 deposit_pln=f_deposit,
+                excise_day=excise_d * days_in_month / elapsed,
+                excise_night=excise_n * days_in_month / elapsed,
+                add_excise=excise is not None,
             )
         except (ValueError, TypeError):
             bill_fc = None
@@ -451,9 +481,16 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
         if not mtd:
             return None, {}
         imp_mtd, exp_mtd = self._mtd_parts()
-        imp_d, imp_n, exp_tot = self._mtd_zone_flows()
-        exp_d = float(mtd.get("export_1", 0)) if self._has_zones else 0.0
-        exp_n = float(mtd.get("export_2", 0)) if self._has_zones else 0.0
+        bases = self._mtd_bases()
+        imp_d, imp_n, exp_tot = (
+            bases["import_day"],
+            bases["import_night"],
+            bases["export"],
+        )
+        excise = self._mtd_excise()
+        excise_d, excise_n = excise if excise else (0.0, 0.0)
+        # per-zone credited export (salda ujemne for net-billing)
+        exp_d, exp_n = bases["export_day"], bases["export_night"]
         opts = self._entry.options
         rce = self._rce()
         today = _date.today()
@@ -480,6 +517,8 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
                 imp_d, imp_n, exp_tot, rce, fees,
                 cover_day=cover_d, cover_night=cover_n,
                 deposit_pln=deposit_mtd,
+                excise_day=excise_d, excise_night=excise_n,
+                add_excise=excise is not None,
             )
         except (ValueError, TypeError):
             bill_mtd = None

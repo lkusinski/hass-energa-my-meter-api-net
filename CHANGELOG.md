@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.9.0 (2026-09-17) — Rozliczenie net-billing na saldach godzinowych (zgodne z fakturą)
+
+### 🧮 Wierne odtworzenie faktury Energa (net-billing)
+- **Podstawa rozliczenia = godzinowe salda (OSD „BP"/bilansowanie prosumentów).**
+  Energia czynna, dystrybucja zmienna i jakościowa liczone są od sumy godzinowych
+  sald **dodatnich** per strefa, a depozyt od sumy sald **ujemnych** — tak jak
+  rozlicza sprzedawca. Nowe: `tariff.hourly_saldo`, `tariff.bill_saldos`,
+  `tariff.mtd_invoice_bases`; coordinator liczy je z godzinowych statystyk
+  recordera (`_async_compute_hourly_saldos`) i dokłada do cache MTD.
+- **Akcyza jako realna pozycja netto** dla net-billingu (nakładka = pobór brutto
+  − salda dodatnie, 5 PLN/MWh). Dla G11 i net-meteringu pozostaje informacyjna
+  (w cenie energii). Zaokrąglanie linii faktury wg **ROUND_HALF_UP** (0,023 MWh → 0,12).
+- **Depozyt** nakładany maks. do wysokości energia czynna + akcyza (brutto).
+- Ilości rozliczeniowe w **całych kWh per strefa** (jak na fakturze).
+- **Fallback**: brak danych godzinowych → dotychczasowy tryb brutto (bez regresji
+  dla starego net-meteringu).
+- Weryfikacja co do grosza na realnej fakturze Agrestowa **FES/00045**
+  (VIII 2026: netto 628,55 / VAT 144,57 / brutto 773,12 / depozyt 157,59 / do zapłaty
+  615,53). Testy regresyjne: `TestRealInvoiceAugust2026`, `TestHourlySaldo`,
+  `TestMtdInvoiceBases`.
+
+## Unreleased
+
+### 🧪 Testy Jednostkowe i Kompatybilność Środowiskowa (Issue #3)
+- **Kompatybilność Testów SQLite na Windowsie (`test_storage_sqlite.py`, `test_idempotent_reimport.py`):**
+  - Zastąpiono `tempfile.NamedTemporaryFile` standardową fixture pytestową `tmp_path` w fixture `file_storage` oraz w teście migracji schematu `test_schema_v1_to_v2_migration`.
+  - Rozwiązuje to problem blokowania uchwytu do pliku na poziomie systemu Windows i eliminuje błąd `PermissionError: [Errno 13] Permission denied` przy równoległym otwarciu pliku przez `sqlite3.connect` (podziękowania dla @ergo5 za zgłoszenie i rekomendację!).
+  - Zaktualizowano test `test_idempotent_reimport.py` do używania `tmp_path` dla zachowania spójności.
+
 ## v1.8.3 (2026-09-14) — Pełna Obsługa Własnych Nazw Urządzeń i Stref (Issue #2 Follow-up)
 
 ### 🚀 Nowości i Poprawki Architektoniczne

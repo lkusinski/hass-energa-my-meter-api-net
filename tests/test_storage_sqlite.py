@@ -10,7 +10,6 @@ Tests:
 - Zero float precision loss (Decimal assertions).
 """
 
-import tempfile
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -36,10 +35,10 @@ def storage():
 
 
 @pytest.fixture
-def file_storage():
+def file_storage(tmp_path):
     """Create a temporary file-backed CanonicalStorage instance to test WAL and persistence."""
-    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
-        yield CanonicalStorage(tmp.name)
+    db_file = tmp_path / "test_storage.db"
+    return CanonicalStorage(str(db_file))
 
 
 def test_ppe_crud(storage: CanonicalStorage):
@@ -276,41 +275,41 @@ def test_job_checkpoint(storage: CanonicalStorage):
     assert cp_done["last_success_utc"] is not None
 
 
-def test_schema_v1_to_v2_migration():
+def test_schema_v1_to_v2_migration(tmp_path):
     """Verify that an existing Schema V1 database safely migrates to Schema V2 without data loss."""
     import sqlite3
 
     from custom_components.energa_mobile.storage.sqlite.database import SCHEMA_V1_SQL
 
-    with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
-        # Create explicit V1 database
-        conn = sqlite3.connect(tmp.name)
-        conn.executescript(SCHEMA_V1_SQL)
-        conn.execute(
-            "INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-09-01T00:00:00');"
-        )
-        conn.execute(
-            "INSERT INTO ppe (ppe_id, settlement_type, prosumer_coefficient, timezone) "
-            "VALUES ('PL_MIGRATE_TEST', 'net_billing_rcem', '0.0', 'Europe/Warsaw');"
-        )
-        conn.commit()
-        conn.close()
+    db_file = tmp_path / "test_migration.db"
+    # Create explicit V1 database
+    conn = sqlite3.connect(str(db_file))
+    conn.executescript(SCHEMA_V1_SQL)
+    conn.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (1, '2026-09-01T00:00:00');"
+    )
+    conn.execute(
+        "INSERT INTO ppe (ppe_id, settlement_type, prosumer_coefficient, timezone) "
+        "VALUES ('PL_MIGRATE_TEST', 'net_billing_rcem', '0.0', 'Europe/Warsaw');"
+    )
+    conn.commit()
+    conn.close()
 
-        # Open with CanonicalStorage (triggers V1 -> V2 migration)
-        storage = CanonicalStorage(tmp.name)
+    # Open with CanonicalStorage (triggers V1 -> V2 migration)
+    storage = CanonicalStorage(str(db_file))
 
-        ppe = storage.get_ppe("PL_MIGRATE_TEST")
-        assert ppe is not None
-        assert ppe.ppe_id == "PL_MIGRATE_TEST"
+    ppe = storage.get_ppe("PL_MIGRATE_TEST")
+    assert ppe is not None
+    assert ppe.ppe_id == "PL_MIGRATE_TEST"
 
-        # Verify Schema version is now 2
-        with storage._connection() as c:
-            cur = c.execute("SELECT MAX(version) FROM schema_version;")
-            assert cur.fetchone()[0] == 2
+    # Verify Schema version is now 2
+    with storage._connection() as c:
+        cur = c.execute("SELECT MAX(version) FROM schema_version;")
+        assert cur.fetchone()[0] == 2
 
-            # Verify V2 tables exist
-            cur2 = c.execute("SELECT count(*) FROM market_price;")
-            assert cur2.fetchone()[0] == 0
+        # Verify V2 tables exist
+        cur2 = c.execute("SELECT count(*) FROM market_price;")
+        assert cur2.fetchone()[0] == 0
 
 
 def test_market_prices_crud_and_effective_lookup(storage: CanonicalStorage):
