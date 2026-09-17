@@ -957,7 +957,6 @@ async def _maybe_auto_backfill(
     import sys
 
     energa_mod = sys.modules.get("custom_components.energa_mobile")
-    _prov_fn = getattr(energa_mod, "async_provision_dashboard", async_provision_dashboard)
     _has_stats_fn = getattr(energa_mod, "_has_history_statistics", _has_history_statistics)
     _import_fn = getattr(energa_mod, "_import_meter_history", _import_meter_history)
 
@@ -976,24 +975,9 @@ async def _maybe_auto_backfill(
         if not active:
             return
 
-        # 1. Auto-provision Lovelace dashboard
-        try:
-            coeff = float(
-                entry.options.get(
-                    CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
-                )
-            )
-            await _prov_fn(hass, active, coeff=coeff)
-            persistent_notification.async_create(
-                hass,
-                f"Dedykowany pulpit Energa został utworzony w menu bocznym: [/{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})\n\n"
-                "Historia zużycia pobiera się w tle do statystyk długoterminowych. "
-                "Twój główny pulpit i wbudowany Panel Energia pozostają nienaruszone.",
-                title="Energa: Gotowe!",
-                notification_id="energa_dashboard_ready",
-            )
-        except Exception as d_err:
-            _LOGGER.debug("Auto-provision dashboard skipped: %s", d_err)
+        # Dashboard provisioning is handled by
+        # ``_async_ensure_settlement_dashboard`` during ``async_setup_entry``
+        # (honours the ``create_settlement_dashboard`` option).
 
         # 1b. Synthetic storage statistics
         enable_synth = entry.options.get(

@@ -22,6 +22,7 @@ from .const import (
     CONF_BANK_INITIAL_KWH_L2,
     CONF_BANK_INITIAL_PLN,
     CONF_BANK_RCE_PRICE,
+    CONF_CREATE_SETTLEMENT_DASHBOARD,
     CONF_DEVICE_TOKEN,
     CONF_ENABLE_AUTO_SETTLEMENT,
     CONF_ENABLE_SYNTHETIC_STORAGE,
@@ -56,6 +57,7 @@ from .const import (
     DEFAULT_BANK_INITIAL_KWH_L2,
     DEFAULT_BANK_INITIAL_PLN,
     DEFAULT_BANK_RCE_PRICE,
+    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
     DEFAULT_ENABLE_AUTO_SETTLEMENT,
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_ENERGY_DASHBOARD_MODE,
@@ -286,6 +288,12 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("system")
             options = {}
+            options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
+                user_input.get(
+                    CONF_CREATE_SETTLEMENT_DASHBOARD,
+                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                )
+            )
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -314,7 +322,11 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
                             "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
                         }
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_CREATE_SETTLEMENT_DASHBOARD,
+                        default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                    ): bool,
                 }
             ),
         )
@@ -324,6 +336,12 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("system")
             options = {}
+            options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
+                user_input.get(
+                    CONF_CREATE_SETTLEMENT_DASHBOARD,
+                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                )
+            )
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -352,7 +370,11 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             "stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
                             "brak": "Nie posiadam fotowoltaiki (standardowy odbiorca energii)",
                         }
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_CREATE_SETTLEMENT_DASHBOARD,
+                        default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                    ): bool,
                 }
             ),
         )
@@ -375,6 +397,12 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[CONF_PROSUMER_POWER_GROUP] = power_group
             options[CONF_ENERGY_DASHBOARD_MODE] = dashboard_mode
             options[CONF_ENABLE_SYNTHETIC_STORAGE] = enable_synth
+            options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
+                user_input.get(
+                    CONF_CREATE_SETTLEMENT_DASHBOARD,
+                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                )
+            )
 
             return await self._async_create_entry_with_ergo5_check(
                 getattr(self, "_pending_title", "Energa My Meter"),
@@ -382,6 +410,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 options,
             )
 
+        pending_dash = getattr(self, "_pending_options", {}).get(
+            CONF_CREATE_SETTLEMENT_DASHBOARD, DEFAULT_CREATE_SETTLEMENT_DASHBOARD
+        )
         return self.async_show_form(
             step_id="net_metering_survey",
             data_schema=vol.Schema(
@@ -402,6 +433,9 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             ENERGY_MODE_PHYSICAL_GRID: "Model Tradycyjny — surowy licznik fizyczny (całość importu i eksportu w sekcji Sieć)",
                         }
                     ),
+                    vol.Optional(
+                        CONF_CREATE_SETTLEMENT_DASHBOARD, default=pending_dash
+                    ): bool,
                 }
             ),
         )
@@ -492,6 +526,13 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                 dashboard_mode == ENERGY_MODE_VIRTUAL_STORAGE,
             )
             coeff = 0.8 if power_group == POWER_GROUP_LE_10KW else 0.7
+            create_dash = user_input.get(
+                CONF_CREATE_SETTLEMENT_DASHBOARD,
+                self._config_entry.options.get(
+                    CONF_CREATE_SETTLEMENT_DASHBOARD,
+                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+                ),
+            )
 
             new_options = {
                 **dict(self._config_entry.options),
@@ -499,6 +540,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                 CONF_PROSUMER_COEFFICIENT: coeff,
                 CONF_ENERGY_DASHBOARD_MODE: dashboard_mode,
                 CONF_ENABLE_SYNTHETIC_STORAGE: enable_synth,
+                CONF_CREATE_SETTLEMENT_DASHBOARD: bool(create_dash),
             }
             return self.async_create_entry(title="", data=new_options)
 
@@ -511,6 +553,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
         )
         curr_synth = curr_options.get(
             CONF_ENABLE_SYNTHETIC_STORAGE, DEFAULT_ENABLE_SYNTHETIC_STORAGE
+        )
+        curr_create = curr_options.get(
+            CONF_CREATE_SETTLEMENT_DASHBOARD, DEFAULT_CREATE_SETTLEMENT_DASHBOARD
         )
 
         return self.async_show_form(
@@ -535,6 +580,9 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                     ),
                     vol.Required(
                         CONF_ENABLE_SYNTHETIC_STORAGE, default=curr_synth
+                    ): bool,
+                    vol.Optional(
+                        CONF_CREATE_SETTLEMENT_DASHBOARD, default=curr_create
                     ): bool,
                 }
             ),

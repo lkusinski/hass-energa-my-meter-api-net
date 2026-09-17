@@ -183,8 +183,9 @@ class TestAutoBackfillResilience:
         with patch("custom_components.energa_mobile.async_provision_dashboard", AsyncMock()) as mock_prov, \
              patch("custom_components.energa_mobile._import_meter_history", AsyncMock()) as mock_import:
             await _maybe_auto_backfill(hass, api, entry)
-            # Dashboard is provisioned
-            mock_prov.assert_awaited_once()
+            # Dashboard provisioning moved to async_setup_entry
+            # (_async_ensure_settlement_dashboard); backfill only imports history.
+            mock_prov.assert_not_called()
             # History import is skipped
             mock_import.assert_not_called()
 

@@ -13,14 +13,22 @@
         "title": "System rozliczeń",
         "description": "Twoje konto oddaje energię do sieci. Wybierz jak rozlicza ją Energa (sprawdź fakturę jeśli nie wiesz — nie da się tego wykryć automatycznie).",
         "data": {
-          "system": "System rozliczeń"
+          "system": "System rozliczeń",
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
         }
       },
       "system_fallback": {
         "title": "System rozliczeń",
         "description": "Nie udało się automatycznie ustalić statusu fotowoltaiki z serwerów Energa. Wybierz sposób rozliczenia Twojego punktu poboru.",
         "data": {
-          "system": "System rozliczeń"
+          "system": "System rozliczeń",
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
         }
       },
       "net_metering_survey": {
@@ -28,7 +36,11 @@
         "description": "W starym systemie prosumenckim (net-metering) nadwyżki energii trafiają do wirtualnego magazynu z opustem 20% lub 30% (prowizja operatora). Standardowy Panel Energia Home Assistant traktuje całą produkcję i pobór jako zwykłą sieć, co zaburza wskaźniki samowystarczalności i koszty.\n\nWybierz moc swojej mikroinstalacji oraz preferowany model prezentacji:",
         "data": {
           "prosumer_power_group": "Moc mikroinstalacji fotowoltaicznej",
-          "energy_dashboard_mode": "Model prezentacji w Panelu Energia"
+          "energy_dashboard_mode": "Model prezentacji w Panelu Energia",
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
         }
       },
       "ergo5_warning": {
@@ -80,7 +92,11 @@
         "data": {
           "energy_dashboard_mode": "Model prezentacji",
           "prosumer_power_group": "Moc mikroinstalacji fotowoltaicznej",
-          "enable_synthetic_storage": "Włącz generowanie syntetycznych encji magazynu i sieci"
+          "enable_synthetic_storage": "Włącz generowanie syntetycznych encji magazynu i sieci",
+          "create_settlement_dashboard": "Utwórz panel «Energa — Rozliczenia» (zalecane)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
         }
       },
       "credentials": {

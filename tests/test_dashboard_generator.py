@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.energa_mobile.button import EnergaCreateDashboardButton
+from custom_components.energa_mobile.const import CONF_CREATE_SETTLEMENT_DASHBOARD
 from custom_components.energa_mobile.dashboard_generator import (
     DEFAULT_TITLE,
     DEFAULT_URL_PATH,
@@ -598,6 +599,105 @@ def test_multi_meter_registry_isolation():
         assert "sensor.garaz_licznik_garaz_taryfa" in view2_badges
         assert "sensor.garaz_licznik_garaz_taryfa" not in view1_badges
         assert "sensor.kuchnia_licznik_kuchnia_taryfa" not in view2_badges
+
+
+class TestSettlementDashboardSetupProvisioning:
+    """v1.9.0: setup auto-provisions the dashboard unless opted out."""
+
+    def _entry(self, options):
+        entry = MagicMock()
+        entry.entry_id = "entry_1"
+        entry.options = options
+        return entry
+
+    def _api(self):
+        api = MagicMock()
+        api.async_get_data = AsyncMock(
+            return_value=[
+                {"total_plus": 100.0, "meter_point_id": "1"},
+                {"total_plus": 0.0, "meter_point_id": "2"},
+            ]
+        )
+        return api
+
+    @pytest.mark.asyncio
+    async def test_missing_option_provisions_by_default(self):
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({})
+        with patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov:
+            await _async_ensure_settlement_dashboard(hass, entry, self._api())
+        mock_prov.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_true_option_provisions(self):
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({CONF_CREATE_SETTLEMENT_DASHBOARD: True})
+        with patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov:
+            await _async_ensure_settlement_dashboard(hass, entry, self._api())
+        mock_prov.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_false_option_does_not_provision(self):
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({CONF_CREATE_SETTLEMENT_DASHBOARD: False})
+        with patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov:
+            await _async_ensure_settlement_dashboard(hass, entry, self._api())
+        mock_prov.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_active_meters_does_not_provision(self):
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({})
+        api = MagicMock()
+        api.async_get_data = AsyncMock(return_value=[{"total_plus": 0.0}])
+        with patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov:
+            await _async_ensure_settlement_dashboard(hass, entry, api)
+        mock_prov.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_meter_fetch_error_is_swallowed(self):
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({})
+        api = MagicMock()
+        api.async_get_data = AsyncMock(side_effect=RuntimeError("api down"))
+        with patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov:
+            await _async_ensure_settlement_dashboard(hass, entry, api)
+        mock_prov.assert_not_called()
 
 
 

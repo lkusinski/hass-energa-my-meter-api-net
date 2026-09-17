@@ -13,14 +13,22 @@
         "title": "Settlement system",
         "description": "Your account has solar export. Pick how Energa settles it (check your invoice if unsure — it cannot be detected automatically).",
         "data": {
-          "system": "Settlement system"
+          "system": "Settlement system",
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
         }
       },
       "system_fallback": {
         "title": "Settlement system",
         "description": "Could not auto-detect solar status from Energa API. Pick how your account is billed.",
         "data": {
-          "system": "Settlement system"
+          "system": "Settlement system",
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
         }
       },
       "net_metering_survey": {
@@ -28,7 +36,11 @@
         "description": "Under the net-metering system, solar energy surplus is stored in a virtual warehouse with a 20% or 30% operator discount (in-kind fee). The default Home Assistant Energy Dashboard treats all export and import as raw physical grid exchange, distorting self-consumption and financial balances.\n\nSelect your PV micro-installation capacity and desired presentation model:",
         "data": {
           "prosumer_power_group": "PV Micro-installation Capacity",
-          "energy_dashboard_mode": "Energy Dashboard Presentation Model"
+          "energy_dashboard_mode": "Energy Dashboard Presentation Model",
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
         }
       },
       "ergo5_warning": {
@@ -80,7 +92,11 @@
         "data": {
           "energy_dashboard_mode": "Presentation Model",
           "prosumer_power_group": "PV Micro-installation Capacity",
-          "enable_synthetic_storage": "Enable synthetic virtual storage and net grid entities"
+          "enable_synthetic_storage": "Enable synthetic virtual storage and net grid entities",
+          "create_settlement_dashboard": "Create the «Energa — Settlements» dashboard (recommended)"
+        },
+        "data_description": {
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
         }
       },
       "credentials": {

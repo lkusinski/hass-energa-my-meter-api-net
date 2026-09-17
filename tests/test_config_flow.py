@@ -4,12 +4,23 @@ These tests verify the exception handling logic in async_step_user
 without instantiating the full HA config flow machinery.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 # conftest.py sets up HA module mocks
 from homeassistant.data_entry_flow import AbortFlow
 
 from custom_components.energa_mobile.api import EnergaAuthError, EnergaConnectionError
+from custom_components.energa_mobile.const import (
+    CONF_CREATE_SETTLEMENT_DASHBOARD,
+    CONF_ENABLE_SYNTHETIC_STORAGE,
+    CONF_ENERGY_DASHBOARD_MODE,
+    CONF_PROSUMER_POWER_GROUP,
+    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+    ENERGY_MODE_VIRTUAL_STORAGE,
+    POWER_GROUP_LE_10KW,
+)
 
 
 async def _run_user_step(login_side_effect=None, abort_side_effect=None):
@@ -174,3 +185,119 @@ class TestConsumerCoefficientBackfill:
         # No meter data yet (API fetch failed) → never guess.
         assert consumer_coefficient_needed(None, {}) is False
         assert consumer_coefficient_needed([], {}) is False
+
+
+class TestSettlementDashboardOption:
+    """v1.9.0: create_settlement_dashboard checkbox in wizard/options steps."""
+
+    def _make_flow(self):
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow._pending_title = "test@example.com"
+        flow._pending_data = {}
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "title": title,
+                "data": data,
+                "options": options or {},
+            }
+        )
+        return flow
+
+    @pytest.mark.asyncio
+    async def test_system_form_default_is_true(self):
+        flow = self._make_flow()
+        res = await flow.async_step_system(None)
+        parsed = res["data_schema"]({"system": "nowe"})
+        assert parsed[CONF_CREATE_SETTLEMENT_DASHBOARD] is True
+
+    @pytest.mark.asyncio
+    async def test_system_fallback_form_default_is_true(self):
+        flow = self._make_flow()
+        res = await flow.async_step_system_fallback(None)
+        parsed = res["data_schema"]({"system": "nowe"})
+        assert parsed[CONF_CREATE_SETTLEMENT_DASHBOARD] is True
+
+    @pytest.mark.asyncio
+    async def test_net_metering_survey_form_default_is_true(self):
+        flow = self._make_flow()
+        res = await flow.async_step_net_metering_survey(None)
+        parsed = res["data_schema"](
+            {
+                CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+            }
+        )
+        assert parsed[CONF_CREATE_SETTLEMENT_DASHBOARD] is True
+
+    @pytest.mark.asyncio
+    async def test_system_nowe_persists_default_true(self):
+        flow = self._make_flow()
+        res = await flow.async_step_system({"system": "nowe"})
+        assert res["options"][CONF_CREATE_SETTLEMENT_DASHBOARD] is True
+
+    @pytest.mark.asyncio
+    async def test_system_brak_respects_false(self):
+        flow = self._make_flow()
+        res = await flow.async_step_system(
+            {"system": "brak", CONF_CREATE_SETTLEMENT_DASHBOARD: False}
+        )
+        assert res["options"][CONF_CREATE_SETTLEMENT_DASHBOARD] is False
+
+    @pytest.mark.asyncio
+    async def test_net_metering_survey_persists_false(self):
+        flow = self._make_flow()
+        res = await flow.async_step_net_metering_survey(
+            {
+                CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+                CONF_CREATE_SETTLEMENT_DASHBOARD: False,
+            }
+        )
+        assert res["options"][CONF_CREATE_SETTLEMENT_DASHBOARD] is False
+
+    @pytest.mark.asyncio
+    async def test_options_energy_dashboard_persists_option(self):
+        from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
+
+        entry = MagicMock()
+        entry.options = {}
+        flow = EnergaOptionsFlow(entry)
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data: {"type": "create_entry", "data": data}
+        )
+        res = await flow.async_step_energy_dashboard(
+            {
+                CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+                CONF_ENABLE_SYNTHETIC_STORAGE: True,
+                CONF_CREATE_SETTLEMENT_DASHBOARD: False,
+            }
+        )
+        assert res["data"][CONF_CREATE_SETTLEMENT_DASHBOARD] is False
+
+    @pytest.mark.asyncio
+    async def test_options_energy_dashboard_defaults_true(self):
+        from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
+
+        entry = MagicMock()
+        entry.options = {}
+        flow = EnergaOptionsFlow(entry)
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data: {"type": "create_entry", "data": data}
+        )
+        res = await flow.async_step_energy_dashboard(
+            {
+                CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+                CONF_ENABLE_SYNTHETIC_STORAGE: True,
+            }
+        )
+        assert res["data"][CONF_CREATE_SETTLEMENT_DASHBOARD] is True
+        assert DEFAULT_CREATE_SETTLEMENT_DASHBOARD is True

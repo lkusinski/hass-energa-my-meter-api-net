@@ -27,13 +27,16 @@ from .api import (
     EnergaTokenExpiredError,
 )
 from .const import (
+    CONF_CREATE_SETTLEMENT_DASHBOARD,
     CONF_DEVICE_TOKEN,
     CONF_PASSWORD,
     CONF_PROSUMER_COEFFICIENT,
     CONF_USERNAME,
+    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+    DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
 )
-from .dashboard_generator import async_provision_dashboard
+from .dashboard_generator import DEFAULT_URL_PATH, async_provision_dashboard
 from .services import (
     AUTO_HISTORY_DAYS,
     TIMEZONE,
@@ -53,6 +56,7 @@ __all__ = [
     "TIMEZONE",
     "_has_any_panel_statistics",
     "_has_history_statistics",
+    "_async_ensure_settlement_dashboard",
     "_import_meter_history",
     "_maybe_auto_backfill",
     "_stat_sum_before",
@@ -133,6 +137,64 @@ async def _async_detect_ergo5(hass: HomeAssistant) -> None:
         title="Energa: wykryto integrację ergo5",
         notification_id=ERGO5_ISSUE_ID,
     )
+
+
+async def _async_ensure_settlement_dashboard(
+    hass: HomeAssistant, entry: ConfigEntry, api: EnergaAPI | None = None
+) -> None:
+    """Provision the dedicated "Energa — Rozliczenia" Lovelace dashboard.
+
+    Runs in the background right after setup and honours the
+    ``create_settlement_dashboard`` option (missing key = enabled, so entries
+    created before the option was introduced keep getting their dashboard).
+    Idempotent: ``async_provision_dashboard`` updates an existing dashboard
+    instead of duplicating it. Never raises — setup must not be affected.
+    """
+    if not entry.options.get(
+        CONF_CREATE_SETTLEMENT_DASHBOARD, DEFAULT_CREATE_SETTLEMENT_DASHBOARD
+    ):
+        return
+    try:
+        if api is None:
+            entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            api = entry_data.get("api") if isinstance(entry_data, dict) else None
+        if api is None:
+            return
+        try:
+            meters = await api.async_get_data(force_refresh=False)
+        except Exception as err:  # noqa: BLE001 - never break setup
+            _LOGGER.debug(
+                "Energa: settlement dashboard meter fetch failed: %s", err
+            )
+            return
+        active = [
+            m
+            for m in (meters or [])
+            if m.get("total_plus") and float(m.get("total_plus", 0)) > 0
+        ]
+        if not active:
+            return
+        try:
+            coeff = float(
+                entry.options.get(
+                    CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT
+                )
+            )
+        except (ValueError, TypeError):
+            coeff = DEFAULT_PROSUMER_COEFFICIENT
+        success = await async_provision_dashboard(hass, active, coeff=coeff)
+        if success:
+            persistent_notification.async_create(
+                hass,
+                "Dedykowany pulpit Energa został utworzony w menu bocznym: "
+                f"[{DEFAULT_URL_PATH}](/{DEFAULT_URL_PATH})\n\n"
+                "Znajdziesz w nim prognozę i bieżący rachunek, bank/depozyt, "
+                "taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku.",
+                title="Energa: Pulpit Rozliczeń gotowy",
+                notification_id="energa_dashboard_ready",
+            )
+    except Exception as err:  # noqa: BLE001 - provisioning must never break setup
+        _LOGGER.debug("Energa: settlement dashboard provisioning skipped: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -269,6 +331,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     else:
         hass.async_create_task(_maybe_auto_backfill(hass, api, entry))
+
+    # v1.9.0: auto-provision the dedicated "Energa — Rozliczenia" dashboard
+    # unless the user opted out. Missing option = enabled (backward compatible).
+    if hasattr(entry, "async_create_background_task"):
+        entry.async_create_background_task(
+            hass,
+            _async_ensure_settlement_dashboard(hass, entry, api),
+            name="energa_settlement_dashboard",
+        )
+    else:
+        hass.async_create_task(_async_ensure_settlement_dashboard(hass, entry, api))
 
     return True
 

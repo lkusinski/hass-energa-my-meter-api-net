@@ -26,6 +26,11 @@ CONF_ENERGY_DASHBOARD_MODE = "energy_dashboard_mode"
 CONF_ENABLE_SYNTHETIC_STORAGE = "enable_synthetic_storage"
 CONF_PROSUMER_POWER_GROUP = "prosumer_power_group"
 
+# Dedicated "Energa — Rozliczenia" Lovelace dashboard auto-provisioning (v1.9.0).
+# Missing key on legacy entries is treated as True (backward compatible).
+CONF_CREATE_SETTLEMENT_DASHBOARD = "create_settlement_dashboard"
+DEFAULT_CREATE_SETTLEMENT_DASHBOARD = True
+
 ENERGY_MODE_VIRTUAL_STORAGE = "virtual_storage"
 ENERGY_MODE_PHYSICAL_GRID = "physical_grid"
 
