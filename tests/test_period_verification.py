@@ -624,7 +624,7 @@ class TestVerificationSensor:
         assert attrs["netto"] == 628.55
         assert sensor._attr_state_class is None
         assert sensor._attr_name == "Okres: rozliczenie"
-        assert sensor._attr_entity_category == EntityCategory.CONFIG
+        assert sensor._attr_entity_category == EntityCategory.DIAGNOSTIC
 
     def test_no_result_is_unavailable(self):
         sensor = self._sensor(None)

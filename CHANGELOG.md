@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.0-beta.4 (2026-09-17) — fix encji wyniku (kategoria sensora)
+
+- `sensor.*_weryfikacja_rachunku` („Okres: rozliczenie"): `EntityCategory.DIAGNOSTIC` zamiast `CONFIG`
+  — HA 2026.9 odrzucał `config` na sensorach (encja była `unavailable`). Date/button zostają `config`.
+- `dashboard_generator`: usunięty deprecated fallback `device_registry.async_get_device` (warning).
+
 ## v1.9.0-beta.3 (2026-09-17) — Panel „Sprawdzenie rachunku" (UI)
 
 - Encje kalkulatora przeniesione do grupy **Konfiguracja** (poza „Sterowanie" i „Sensory" na stronie urządzenia).

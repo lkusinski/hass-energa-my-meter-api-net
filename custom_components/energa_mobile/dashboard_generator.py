@@ -39,12 +39,6 @@ def _async_lookup_device(dev_reg: Any, identifier: tuple[str, str]) -> Any:
         if devices:
             return devices[0]
         return None
-    except (AttributeError, TypeError):
-        # Older Home Assistant without async_get_devices.
-        try:
-            return dev_reg.async_get_device(identifiers={identifier})
-        except Exception:  # noqa: BLE001 - lookup must never break the dashboard
-            return None
     except Exception as err:  # noqa: BLE001 - lookup must never break the dashboard
         _LOGGER.debug("Device lookup failed for %s: %s", identifier, err)
         return None

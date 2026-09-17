@@ -59,9 +59,10 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
     _attr_translation_key = "period_verification"
     _attr_icon = "mdi:receipt-text-check-outline"
     _attr_native_unit_of_measurement = "PLN"
-    # Config entity: keeps the result out of the "Sensors" section of the
-    # device page and groups it with the dates/button under "Configuration".
-    _attr_entity_category = EntityCategory.CONFIG
+    # Diagnostic entity: Home Assistant rejects EntityCategory.CONFIG on a
+    # sensor ("cannot be added as the entity category is set to config"), so
+    # the result lives in the Diagnostic section — still outside "Sensors".
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Deliberately no state_class / energy device_class: this is a computed
     # period result, never an Energy Dashboard source (Faza 2 requirement).
     _attr_state_class = None
