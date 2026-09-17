@@ -16,13 +16,22 @@ lub przemianowana). Skaner czyta `custom_components/*/manifest.json` i rozpoznaj
 Efekt widoczny dla użytkownika:
 
 - **Repairs** (Ustawienia → System → Naprawy) — ostrzeżenie `ergo5_detected` z listą ścieżek.
-- **Powiadomienie** trwałe w UI z krótkim komunikatem po polsku.
+- **Powiadomienie** trwałe w UI z krótkim komunikatem po polsku
+  (`notification_id: ergo5_detected`).
 - **Kreator konfiguracji** — przy dodawaniu nowego wpisu pojawia się krok ostrzegawczy z
   checkboxem „Rozumiem, kontynuuj mimo to”; bez zaznaczenia wpis nie zostanie utworzony.
 
 Wykrycie jest tylko ostrzeżeniem: **nie** kasuje encji, nie usuwa wpisu i nie zmienia rozliczeń.
 Jeśli dodatkowo wykryta zostanie instalacja ergo5 przez HACS (`.storage/hacs.repositories`),
 komunikat to sygnalizuje.
+
+> **Weryfikacja (HA 2026.9):** od HA 2023.6 powiadomienia trwałe **nie są już encjami**, więc
+> `GET /api/states` ich nie pokaże. Stan sprawdzisz przez WebSocket: `persistent_notification/get`
+> (lista) oraz `repairs/list_issues` (naprawy). Powiadomienia nie przeżywają restartu HA.
+>
+> **Znane ograniczenie:** gdy obca kopia zniknie bez restartu HA, issue `ergo5_detected` jest
+> usuwany, ale powiadomienie nie jest jawnie odrzucane (`persistent_notification.async_dismiss`)
+> i pozostaje w UI do restartu lub ręcznego zamknięcia. Po restarcie problem nie występuje.
 
 ## 1. Co jest zamieniane
 
@@ -117,7 +126,8 @@ Nie wymaga HACS; przydatne, gdy brak dostępu do sklepu lub chcesz wymusić konk
 3. Brak nowych encji z sufiksem `_2`.
 4. Statystyki LTS: liczba punktów i `sum` dla sensorów Panelu Energia nie spadły do zera.
 5. `/api/error_log` → HTTP 404 (brak błędów). W UI: Ustawienia → System → *Dzienniki*.
-6. Brak naprawy `ergo5_detected` w Ustawienia → System → *Naprawy* po usunięciu obcej kopii.
+6. Brak naprawy `ergo5_detected` w Ustawienia → System → *Naprawy* po usunięciu obcej kopii
+   (powiadomienie w UI zniknie po restarcie — patrz znane ograniczenie w §0).
 
 ## 6. Weryfikacja: co zobaczysz w UI
 
@@ -141,7 +151,9 @@ Po powrocie na ergo5:
    Współdzielony jest tylko `prosumer_coefficient`, jeśli był ustawiony.
 2. Po powrocie z ergo5 na **naszą** pozostaje **1 osierocona encja** (odpowiednik „Nazwa Licznika",
    którego nie mamy). Można ją usunąć: Ustawienia → Urządzenia i usługi → Encje → wybierz encję
-   (stan `unavailable`, `restored`) → *Usuń*.
+   (stan `unavailable`, `restored`) → *Usuń*. Integracja celowo usuwa też nieaktualne encje
+   ergo5 `..._panel_energia_produkcja_strefa_1/2_cost` (`export_1/2_cost_stats` — od v0.3.0
+   koszty produkcji liczone są inaczej); to nie sieroty.
 3. Nie usuwaj encji, które są tylko chwilowo `restored` — to one trzymają ciągłość historii i wrócą
    po powrocie właściwej integracji.
 

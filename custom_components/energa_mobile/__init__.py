@@ -90,6 +90,13 @@ async def _async_detect_ergo5(hass: HomeAssistant) -> None:
     )
     if not hits:
         ir.async_delete_issue(hass, DOMAIN, ERGO5_ISSUE_ID)
+        # Also drop the persistent notification: deleting the issue alone
+        # leaves a stale notification behind when the foreign copy is removed
+        # without a full HA restart (see WNIOSKI_LAB 2026-09-17).
+        try:
+            persistent_notification.async_dismiss(hass, ERGO5_ISSUE_ID)
+        except Exception as err:  # noqa: BLE001 - dismissal must never break setup
+            _LOGGER.debug("Energa: ergo5 notification dismiss skipped: %s", err)
         return
 
     names = ", ".join(

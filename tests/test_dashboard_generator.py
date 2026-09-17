@@ -376,6 +376,7 @@ def test_meter_view_with_custom_device_name_and_area():
     er_mod = sys.modules["homeassistant.helpers"].entity_registry
 
     mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_devices.return_value = [mock_device]
     mock_dev_reg.async_get_device.return_value = mock_device
 
     mock_ent_reg = MagicMock()
@@ -473,6 +474,7 @@ def test_meter_view_with_custom_device_name_and_area_net_billing():
     er_mod = sys.modules["homeassistant.helpers"].entity_registry
 
     mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_devices.return_value = [mock_device]
     mock_dev_reg.async_get_device.return_value = mock_device
     mock_ent_reg = MagicMock()
 
@@ -523,6 +525,9 @@ def test_multi_meter_registry_isolation():
     er_mod = sys.modules["homeassistant.helpers"].entity_registry
 
     mock_dev_reg = MagicMock()
+    mock_dev_reg.async_get_devices.side_effect = (
+        lambda identifiers: [dev1] if ("energa_mobile", "11111111") in identifiers else [dev2]
+    )
     mock_dev_reg.async_get_device.side_effect = lambda identifiers: dev1 if ("energa_mobile", "11111111") in identifiers else dev2
 
     mock_ent_reg = MagicMock()

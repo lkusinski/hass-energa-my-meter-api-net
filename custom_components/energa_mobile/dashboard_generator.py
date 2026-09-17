@@ -26,6 +26,30 @@ def is_export_prosumer(meter: dict[str, Any]) -> bool:
     return bool(meter.get("is_prosumer") or meter.get("has_export"))
 
 
+def _async_lookup_device(dev_reg: Any, identifier: tuple[str, str]) -> Any:
+    """Return a single device entry for ``identifier`` using public HA APIs.
+
+    Uses ``DeviceRegistry.async_get_devices`` (HA 2026.9+), which replaces the
+    deprecated ``async_get_device``; identifiers are unique per config entry,
+    so the first match is sufficient. Defensive: a registry that lacks the new
+    method (older HA) or raises must never break dashboard generation.
+    """
+    try:
+        devices = dev_reg.async_get_devices(identifiers={identifier})
+        if devices:
+            return devices[0]
+        return None
+    except (AttributeError, TypeError):
+        # Older Home Assistant without async_get_devices.
+        try:
+            return dev_reg.async_get_device(identifiers={identifier})
+        except Exception:  # noqa: BLE001 - lookup must never break the dashboard
+            return None
+    except Exception as err:  # noqa: BLE001 - lookup must never break the dashboard
+        _LOGGER.debug("Device lookup failed for %s: %s", identifier, err)
+        return None
+
+
 def _build_device_entity_map(
     hass: HomeAssistant | None,
     serial: str,
@@ -49,9 +73,14 @@ def _build_device_entity_map(
         from homeassistant.helpers import entity_registry as er
 
         dev_reg = dr.async_get(hass)
-        device = dev_reg.async_get_device(identifiers={(DOMAIN, str(serial))})
+        # HA 2026.8+ restricts a device to a single config entry, so the old
+        # `async_get_device(identifiers=...)` lookup is deprecated. Identifiers
+        # are no longer globally unique; `async_get_devices` returns the
+        # (possibly empty) list of matches without ambiguity. Our identifiers
+        # are unique per meter, so the first match is the right one.
+        device = _async_lookup_device(dev_reg, (DOMAIN, str(serial)))
         if not device and meter_id:
-            device = dev_reg.async_get_device(identifiers={(DOMAIN, str(meter_id))})
+            device = _async_lookup_device(dev_reg, (DOMAIN, str(meter_id)))
 
         ent_reg = er.async_get(hass)
         entries = []

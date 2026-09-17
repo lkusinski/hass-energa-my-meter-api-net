@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -22,7 +22,7 @@ from homeassistant.components.recorder.statistics import (
     statistics_during_period,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -31,24 +31,39 @@ from .const import (
     CONF_BANK_INITIAL_KWH,
     CONF_BANK_INITIAL_KWH_L1,
     CONF_BANK_INITIAL_KWH_L2,
+    CONF_BANK_RCE_PRICE,
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_PROSUMER_COEFFICIENT,
+    DEFAULT_BANK_RCE_PRICE,
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
     MAX_HOURLY_KWH,
     get_price_for_key,
+    get_prosumer_coefficient,
 )
+from .core.verification import PERIOD_KWH_KEYS, build_period_invoice
 from .dashboard_generator import (
     DEFAULT_ICON,
     DEFAULT_TITLE,
     DEFAULT_URL_PATH,
     async_provision_dashboard,
 )
+from .tariff import fees_from_options
 
 _LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Warsaw")
 AUTO_HISTORY_DAYS = 730
+
+# Recorder statistic entity names for the per-zone energy series.
+_PERIOD_STAT_NAME = {
+    "import": "panel_energia_zuzycie",
+    "import_1": "panel_energia_strefa_1",
+    "import_2": "panel_energia_strefa_2",
+    "export": "panel_energia_produkcja",
+    "export_1": "panel_energia_produkcja_strefa_1",
+    "export_2": "panel_energia_produkcja_strefa_2",
+}
 
 
 def _get_entry_and_api(
@@ -339,12 +354,362 @@ async def async_register_services(hass: HomeAssistant) -> None:
         ),
     )
 
+    async def verify_period_service(call: ServiceCall) -> dict:
+        """Recompute a full invoice for [start, end] from recorder statistics.
+
+        Faza 1: recorder hourly statistics only (no API), no opening deposit /
+        warehouse balance, RCEm from the call, coordinator cache, Options or
+        the last-known default. Always returns a JSON-serialisable dict; an
+        empty window yields ``empty: true`` with an ``error`` and zeros.
+        """
+        return await _async_verify_period(hass, call)
+
+    hass.services.async_register(
+        DOMAIN,
+        "verify_period",
+        verify_period_service,
+        schema=vol.Schema(
+            {
+                vol.Required("start"): vol.Coerce(str),
+                vol.Required("end"): vol.Coerce(str),
+                vol.Optional("entry_id"): str,
+                vol.Optional("meter_id"): str,
+                vol.Optional("rcem_pln"): vol.Coerce(float),
+                vol.Optional("rcem"): vol.Coerce(float),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+
 
 async def async_unregister_services(hass: HomeAssistant) -> None:
     """Unregister domain services when all entries are removed."""
-    for service_name in ("fetch_history", "generate_dashboard", "reconcile_invoice"):
+    for service_name in (
+        "fetch_history",
+        "generate_dashboard",
+        "reconcile_invoice",
+        "verify_period",
+    ):
         if hass.services.has_service(DOMAIN, service_name):
             hass.services.async_remove(DOMAIN, service_name)
+
+
+def _parse_period_datetime(value) -> tuple[datetime, bool]:
+    """Parse a service ``start``/``end`` value into a tz-aware datetime.
+
+    Returns ``(datetime, is_date_only)``. Date-only values are treated as
+    local midnight; the caller decides whether to extend an end date to the
+    exclusive next midnight.
+    """
+    if isinstance(value, datetime):
+        dt = value
+        is_date_only = False
+    elif isinstance(value, date):
+        dt = datetime.combine(value, time.min)
+        is_date_only = True
+    else:
+        text = str(value or "").strip()
+        if len(text) == 10 and text[4] == "-" and text[7] == "-":
+            dt = datetime.strptime(text, "%Y-%m-%d")
+            is_date_only = True
+        else:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            is_date_only = False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TIMEZONE)
+    return dt, is_date_only
+
+
+def _period_months(start: datetime, end: datetime) -> int:
+    """Number of monthly fixed fees for a period (at least 1)."""
+    months = (end.year - start.year) * 12 + (end.month - start.month)
+    if end.day > start.day:
+        months += 1
+    return max(1, months)
+
+
+def _resolve_verify_entry(
+    hass: HomeAssistant, entry_id: str | None
+) -> tuple[ConfigEntry | None, object | None, EnergaAPI | None]:
+    """Resolve the config entry plus coordinator/API for verify_period."""
+    domain_data = hass.data.get(DOMAIN, {})
+    entries = hass.config_entries.async_entries(DOMAIN)
+    entry: ConfigEntry | None = None
+    if entry_id:
+        entry = next((e for e in entries if e.entry_id == entry_id), None)
+    if entry is None and entries:
+        entry = entries[0]
+    if entry is None:
+        return None, None, None
+    edata = domain_data.get(entry.entry_id, {})
+    return entry, edata.get("coordinator"), edata.get("api")
+
+
+def _resolve_period_rcem(entry: ConfigEntry, coordinator, data: dict) -> float:
+    """RCEm from call data, then coordinator cache, then Options/default."""
+    for key in ("rcem_pln", "rcem"):
+        val = (data or {}).get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                pass
+    cached = getattr(coordinator, "_rce_cache", None) if coordinator is not None else None
+    if cached is not None:
+        try:
+            return float(cached)
+        except (ValueError, TypeError):
+            pass
+    try:
+        return float(
+            (entry.options or {}).get(CONF_BANK_RCE_PRICE, DEFAULT_BANK_RCE_PRICE)
+        )
+    except (ValueError, TypeError):
+        return float(DEFAULT_BANK_RCE_PRICE)
+
+
+def _meter_old_system(entry: ConfigEntry, meter: dict) -> bool:
+    """True for old net-metering (coefficient >= 0.7)."""
+    meter_id = str(meter.get("meter_point_id", ""))
+    serial = str(meter.get("meter_serial", meter_id))
+    try:
+        coeff = get_prosumer_coefficient(
+            dict(entry.options or {}), meter_id, serial=serial
+        )
+    except Exception:  # noqa: BLE001 - never break a service call on bad options
+        coeff = DEFAULT_PROSUMER_COEFFICIENT
+    return coeff >= 0.7
+
+
+async def _active_meters_for_period(
+    hass: HomeAssistant,
+    api: EnergaAPI | None,
+    coordinator,
+    meter_id: str | None,
+) -> list[dict]:
+    """Return active meters from the coordinator cache (or the API)."""
+    meters = getattr(coordinator, "data", None) if coordinator is not None else None
+    if not meters and api is not None:
+        try:
+            meters = await api.async_get_data(force_refresh=False)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("verify_period meter fetch failed: %s", err)
+            meters = []
+    active = [
+        m
+        for m in (meters or [])
+        if m.get("total_plus") and float(m.get("total_plus", 0) or 0) > 0
+    ]
+    if meter_id:
+        active = [
+            m
+            for m in active
+            if str(m.get("meter_serial")) == str(meter_id)
+            or str(m.get("meter_point_id")) == str(meter_id)
+        ]
+    return active
+
+
+def _statistic_id_for(
+    hass: HomeAssistant, meter_point_id: str, serial: str, suffix: str
+) -> str:
+    """Resolve the recorder statistic_id for a meter zone.
+
+    Prefers the entity registry (handles renamed entities) via the known
+    ``energa_<mid>_<suffix>_stats`` unique_id, then falls back to the
+    conventional ``sensor.energa_<serial>_panel_energia_*`` id.
+    """
+    uid = f"energa_{meter_point_id}_{suffix}_stats"
+    try:
+        eid = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, uid)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("verify_period registry lookup failed for %s: %s", uid, err)
+        eid = None
+    if eid:
+        return eid
+    name = _PERIOD_STAT_NAME.get(suffix, f"panel_{suffix}")
+    return f"sensor.energa_{serial}_{name}".lower()
+
+
+async def _collect_meter_hourly(
+    hass: HomeAssistant, meter: dict, start: datetime, end: datetime
+) -> dict:
+    """Build {zone: {epoch_hour: kWh}} from recorder hourly statistics."""
+    from .settlement import is_export_prosumer
+
+    meter_point_id = str(meter.get("meter_point_id", ""))
+    serial = str(meter.get("meter_serial", meter_point_id)).lower()
+    has_zones = meter.get("zone_count", 1) > 1
+
+    if has_zones:
+        suffixes = ["import_1", "import_2"]
+        if is_export_prosumer(meter):
+            suffixes += ["export_1", "export_2"]
+    else:
+        suffixes = ["import"]
+        if is_export_prosumer(meter):
+            suffixes.append("export")
+
+    statistic_ids = {
+        suffix: _statistic_id_for(hass, meter_point_id, serial, suffix)
+        for suffix in suffixes
+    }
+
+    raw: dict = {}
+    try:
+        raw = await get_instance(hass).async_add_executor_job(
+            functools.partial(
+                statistics_during_period,
+                hass,
+                start,
+                end,
+                list(statistic_ids.values()),
+                "hour",
+                None,
+                {"state"},
+            )
+        ) or {}
+    except Exception as err:  # noqa: BLE001 - missing recorder must not raise
+        _LOGGER.debug("verify_period statistics query failed: %s", err)
+
+    collected: dict[str, dict[int, float]] = {}
+    for suffix, statistic_id in statistic_ids.items():
+        hour_map: dict[int, float] = {}
+        for row in raw.get(statistic_id, []) or []:
+            ts = row.get("start")
+            state = row.get("state")
+            if ts is None or state is None:
+                continue
+            try:
+                hour_map[int(float(ts))] = float(state)
+            except (ValueError, TypeError):
+                continue
+        collected[suffix] = hour_map
+
+    hourly: dict[str, dict[int, float]] = {}
+    if has_zones:
+        hourly["import_1"] = collected.get("import_1", {})
+        hourly["import_2"] = collected.get("import_2", {})
+        if "export_1" in collected:
+            hourly["export_1"] = collected["export_1"]
+        if "export_2" in collected:
+            hourly["export_2"] = collected["export_2"]
+    else:
+        hourly["import_1"] = collected.get("import", {})
+        if "export" in collected:
+            hourly["export_1"] = collected["export"]
+    return hourly
+
+
+def _empty_period_result(meter: dict, old_system: bool) -> dict:
+    """Zeroed, JSON-safe breakdown for a meter with no data in the window."""
+    meter_point_id = str(meter.get("meter_point_id", ""))
+    serial = str(meter.get("meter_serial", meter_point_id))
+    return {
+        "empty": True,
+        "error": "no_data",
+        "meter_point_id": meter_point_id,
+        "meter_serial": serial,
+        "old_system": bool(old_system),
+        "sale_energy_day": 0.0,
+        "sale_energy_night": 0.0,
+        "excise_day": 0.0,
+        "excise_night": 0.0,
+        "excise": 0.0,
+        "trade_fee": 0.0,
+        "distr_var_day": 0.0,
+        "distr_var_night": 0.0,
+        "distr_quality": 0.0,
+        "distr_oze": 0.0,
+        "distr_cogen": 0.0,
+        "distr_fixed": 0.0,
+        "netto": 0.0,
+        "vat": 0.0,
+        "brutto": 0.0,
+        "deposit": 0.0,
+        "deposit_applied": 0.0,
+        "do_zaplaty": 0.0,
+        "kwh": {key: 0.0 for key in PERIOD_KWH_KEYS},
+    }
+
+
+async def _async_verify_period(hass: HomeAssistant, call: ServiceCall) -> dict:
+    """Implementation of the ``energa_mobile.verify_period`` service."""
+    data = dict(call.data or {})
+    try:
+        start_dt, _ = _parse_period_datetime(data.get("start"))
+        end_dt, end_is_date = _parse_period_datetime(data.get("end"))
+    except (ValueError, TypeError):
+        return {"empty": True, "error": "invalid_period", "source": "recorder_hourly"}
+    if end_is_date:
+        end_dt = end_dt + timedelta(days=1)
+    if end_dt <= start_dt:
+        return {"empty": True, "error": "invalid_period", "source": "recorder_hourly"}
+
+    entry, coordinator, api = _resolve_verify_entry(hass, data.get("entry_id"))
+    if entry is None:
+        return {"empty": True, "error": "no_entry", "source": "recorder_hourly"}
+
+    rcem = _resolve_period_rcem(entry, coordinator, data)
+    months = _period_months(start_dt, end_dt)
+    meters = await _active_meters_for_period(
+        hass, api, coordinator, data.get("meter_id")
+    )
+
+    base: dict = {
+        "entry_id": entry.entry_id,
+        "period_start": start_dt.isoformat(),
+        "period_end": end_dt.isoformat(),
+        "source": "recorder_hourly",
+        "rcem": float(rcem),
+        "months": months,
+    }
+
+    if not meters:
+        return {**base, "empty": True, "error": "no_meter", "meters": []}
+
+    results: list[dict] = []
+    for meter in meters:
+        old_system = _meter_old_system(entry, meter)
+        meter_point_id = str(meter.get("meter_point_id", ""))
+        serial = str(meter.get("meter_serial", meter_point_id))
+        hourly = await _collect_meter_hourly(hass, meter, start_dt, end_dt)
+        total_points = sum(len(zone) for zone in hourly.values())
+        if total_points == 0:
+            results.append(_empty_period_result(meter, old_system))
+            continue
+
+        fees = fees_from_options(dict(entry.options or {}), meter.get("tariff"))
+        invoice = build_period_invoice(
+            hourly,
+            fees=fees,
+            rcem=rcem,
+            months=months,
+            old_system=old_system,
+            deposit_open_pln=None,
+            cover_day=0.0,
+            cover_night=0.0,
+        )
+        results.append(
+            {
+                **invoice,
+                "empty": False,
+                "meter_point_id": meter_point_id,
+                "meter_serial": serial,
+                "tariff": meter.get("tariff"),
+                "has_zones": meter.get("zone_count", 1) > 1,
+            }
+        )
+
+    response = {
+        **base,
+        "empty": all(result.get("empty", False) for result in results),
+        "meters": results,
+    }
+    if len(results) == 1:
+        # Single-meter entries get the full breakdown flat as well.
+        response.update(results[0])
+    return response
 
 
 async def _stat_sum_before(

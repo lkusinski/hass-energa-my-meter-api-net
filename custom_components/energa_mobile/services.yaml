@@ -112,4 +112,53 @@ reconcile_invoice:
       selector:
         text:
 
+verify_period:
+  name: Verify period
+  description: >-
+    Recomputes a full Energa invoice for an arbitrary [start, end] period from
+    hourly recorder statistics and returns the breakdown as a service response.
+  fields:
+    start:
+      name: Period start
+      description: First day of the period (YYYY-MM-DD or ISO datetime).
+      required: true
+      selector:
+        date:
+    end:
+      name: Period end
+      description: Last day of the period, inclusive (YYYY-MM-DD or ISO datetime).
+      required: true
+      selector:
+        date:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry; defaults to the first Energa entry.
+      required: false
+      selector:
+        text:
+    meter_id:
+      name: Meter ID / Serial
+      description: Optional meter serial or point id when the account has several.
+      required: false
+      selector:
+        text:
+    rcem_pln:
+      name: RCEm (PLN/kWh)
+      description: >-
+        Market price used to value export. Defaults to the coordinator cache,
+        then Options, then the last-known value.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.00001
+    rcem:
+      name: RCEm (PLN/kWh, alias)
+      description: Alias of rcem_pln.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.00001
+
 

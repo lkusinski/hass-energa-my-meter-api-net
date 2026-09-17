@@ -1,6 +1,9 @@
 """Unit tests for foreign ergo5 install detection (pure helpers, no HA)."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from custom_components.energa_mobile.settlement import (
     ergo5_marker_from_manifest,
@@ -141,3 +144,36 @@ class TestScanForErgo5:
         _write_manifest(tmp_path / "broken", None, raw="[")
         hits = scan_for_ergo5(str(tmp_path))
         assert {h["path"].rsplit("/", 1)[-1] for h in hits} == {"ergo5_a", "ergo5_b"}
+
+
+class TestErgo5NotificationDismiss:
+    """The API-less cleanup path must drop the stale persistent notification."""
+
+    @pytest.mark.asyncio
+    async def test_no_hits_deletes_issue_and_dismisses_notification(self):
+        import custom_components.energa_mobile as mod
+
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(return_value=[])
+
+        with patch.object(mod.ir, "async_delete_issue") as del_issue, patch.object(
+            mod.persistent_notification, "async_dismiss"
+        ) as dismiss:
+            await mod._async_detect_ergo5(hass)
+
+        del_issue.assert_called_once_with(hass, mod.DOMAIN, mod.ERGO5_ISSUE_ID)
+        dismiss.assert_called_once_with(hass, mod.ERGO5_ISSUE_ID)
+
+    @pytest.mark.asyncio
+    async def test_dismiss_failure_never_breaks_setup(self):
+        import custom_components.energa_mobile as mod
+
+        hass = MagicMock()
+        hass.async_add_executor_job = AsyncMock(return_value=[])
+
+        with patch.object(mod.ir, "async_delete_issue"), patch.object(
+            mod.persistent_notification,
+            "async_dismiss",
+            side_effect=RuntimeError("no notification backend"),
+        ):
+            await mod._async_detect_ergo5(hass)  # must not raise
