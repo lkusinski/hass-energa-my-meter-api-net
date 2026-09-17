@@ -37,6 +37,8 @@ from .const import (
     CONF_CREATE_SETTLEMENT_DASHBOARD,
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_PROSUMER_COEFFICIENT,
+    CONF_VERIFY_PERIOD_END,
+    CONF_VERIFY_PERIOD_START,
     DEFAULT_BANK_RCE_PRICE,
     DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
@@ -46,12 +48,21 @@ from .const import (
     get_price_for_key,
     get_prosumer_coefficient,
 )
+from .core.completeness import (
+    STATE_COMPLETE,
+    STATE_INCOMPLETE,
+    STATE_UNKNOWN,
+    evaluate_completeness,
+    registers_for_meter,
+    unknown_result,
+)
 from .core.verification import (
     PERIOD_KWH_KEYS,
     SOURCE_ENERGA_API,
     SOURCE_RECORDER,
     build_period_invoice,
     choose_period_source,
+    format_period_date,
     opening_bank_from_monthly_flows,
     period_is_historical,
 )
@@ -637,12 +648,16 @@ async def _collect_meter_hourly(
 
 
 async def _collect_meter_hourly_api(
-    api: EnergaAPI | None, meter: dict, start: datetime, end: datetime
+    api: EnergaAPI | None, meter: dict, start: datetime, end: datetime,
+    on_progress=None,
 ) -> dict:
     """Build {zone: {epoch_hour: kWh}} from the Energa API (Faza 2).
 
     Best effort: any API error returns ``{}`` so the caller falls back to the
     recorder series. The shape matches :func:`_collect_meter_hourly`.
+
+    ``on_progress(done, total)`` — optional, forwarded to the API range walk
+    so a caller can display day-by-day progress/ETA.
     """
     if api is None:
         return {}
@@ -650,7 +665,9 @@ async def _collect_meter_hourly_api(
     if not meter_point_id:
         return {}
     try:
-        result = await api.async_get_hourly_range(meter_point_id, start, end)
+        result = await api.async_get_hourly_range(
+            meter_point_id, start, end, on_progress=on_progress
+        )
     except Exception as err:  # noqa: BLE001 - API fallback must not break the service
         _LOGGER.debug("verify_period API fetch failed for %s: %s", meter_point_id, err)
         return {}
@@ -669,6 +686,69 @@ async def _collect_meter_hourly_api(
         if hour_map:
             cleaned[zone] = hour_map
     return cleaned
+
+
+def period_completeness_get(coordinator, meter_id) -> dict | None:
+    """Return the cached period-completeness result for a meter (or ``None``)."""
+    if coordinator is None or meter_id is None:
+        return None
+    store = getattr(coordinator, "_period_completeness", None)
+    if not isinstance(store, dict):
+        return None
+    result = store.get(str(meter_id))
+    return result if isinstance(result, dict) else None
+
+
+def period_completeness_status(coordinator, meter_id) -> str:
+    """Return ``complete`` / ``incomplete`` / ``unknown`` for a meter."""
+    result = period_completeness_get(coordinator, meter_id)
+    if not result:
+        return STATE_UNKNOWN
+    state = str(result.get("state") or STATE_UNKNOWN)
+    return state if state in (STATE_COMPLETE, STATE_INCOMPLETE, STATE_UNKNOWN) else STATE_UNKNOWN
+
+
+async def async_compute_period_completeness(
+    hass: HomeAssistant, entry: ConfigEntry, meter: dict
+) -> dict:
+    """Compute per-day coverage for the dates the user selected.
+
+    Recorder long-term statistics are checked first; only when they yield no
+    readings at all for the window is the Energa API queried (matching the
+    ``verify_period`` source preference). Always returns an attribute dict with
+    ``state`` (``complete`` / ``incomplete`` / ``unknown``).
+    """
+    options = getattr(entry, "options", {}) or {}
+    start = format_period_date(options.get(CONF_VERIFY_PERIOD_START))
+    end = format_period_date(options.get(CONF_VERIFY_PERIOD_END))
+    if not start or not end:
+        return unknown_result(period_start=start, period_end=end, source_checked=None)
+
+    try:
+        start_dt, _ = _parse_period_datetime(start)
+        end_dt, end_is_date = _parse_period_datetime(end)
+    except (ValueError, TypeError):
+        return unknown_result(period_start=start, period_end=end)
+    if end_is_date:
+        end_dt = end_dt + timedelta(days=1)
+
+    hourly = await _collect_meter_hourly(hass, meter, start_dt, end_dt)
+    source = "recorder"
+    if sum(len(zone) for zone in (hourly or {}).values()) == 0:
+        entry_data = hass.data.get(DOMAIN, {}).get(getattr(entry, "entry_id", ""), {})
+        api = entry_data.get("api") if isinstance(entry_data, dict) else None
+        hourly = await _collect_meter_hourly_api(api, meter, start_dt, end_dt)
+        source = "api"
+
+    return evaluate_completeness(
+        period_start=start,
+        period_end=end,
+        hourly_by_zone=hourly,
+        registers=registers_for_meter(meter),
+        source_checked=source,
+        tz=TIMEZONE,
+        now=datetime.now(timezone.utc),
+    )
 
 
 def _stat_row_moment(value):
@@ -826,7 +906,9 @@ async def _async_verify_period(hass: HomeAssistant, call: ServiceCall) -> dict:
     return await async_verify_period_data(hass, dict(call.data or {}))
 
 
-async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
+async def async_verify_period_data(
+    hass: HomeAssistant, data: dict, on_progress=None
+) -> dict:
     """Recompute a full invoice for [start, end] for one or all meters.
 
     Faza 1 used hourly recorder statistics only. Faza 2 adds the Energa API
@@ -852,6 +934,10 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
 
     Always returns a JSON-serialisable dict; an empty window yields
     ``empty: true`` with an ``error`` and zeros instead of raising.
+
+    ``on_progress(done, total)`` — optional, forwarded to the day-by-day API
+    fetch (only used when a concrete ``meter_id`` triggers the API source) so
+    the caller can show progress/ETA.
     """
     data = dict(data or {})
     try:
@@ -867,6 +953,27 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
     entry, coordinator, api = _resolve_verify_entry(hass, data.get("entry_id"))
     if entry is None:
         return {"empty": True, "error": "no_entry", "source": SOURCE_RECORDER}
+
+    # Bramka kompletności: gdy encja statusu wie już, że okres ma dziury, nie
+    # liczymy rachunku "na dziurze" — zwracamy czytelny błąd zamiast wyniku.
+    requested_meter = data.get("meter_id")
+    if requested_meter:
+        completeness = period_completeness_get(coordinator, requested_meter)
+        if completeness is not None and completeness.get("state") == STATE_INCOMPLETE:
+            return {
+                "empty": True,
+                "error": "period_incomplete",
+                "warning": (
+                    "Dane w wybranym okresie nie są kompletne "
+                    f"({completeness.get('available_days')}/"
+                    f"{completeness.get('expected_days')} dni). "
+                    "Uzupełnij brakujące dni przed przeliczeniem rachunku."
+                ),
+                "period_start": start_dt.isoformat(),
+                "period_end": end_dt.isoformat(),
+                "completeness": completeness,
+                "source": SOURCE_RECORDER,
+            }
 
     rcem = _resolve_period_rcem(entry, coordinator, data)
     months = _period_months(start_dt, end_dt)
@@ -938,7 +1045,9 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
             recorder_empty=recorder_points == 0,
         )
         if source == SOURCE_ENERGA_API:
-            api_hourly = await _collect_meter_hourly_api(api, meter, start_dt, end_dt)
+            api_hourly = await _collect_meter_hourly_api(
+                api, meter, start_dt, end_dt, on_progress
+            )
             if sum(len(zone) for zone in api_hourly.values()) > 0:
                 hourly = api_hourly
             else:

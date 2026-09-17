@@ -240,7 +240,7 @@ class EnergaAPI:
         return result
 
     async def async_get_hourly_range(
-        self, meter_point_id, start_date, end_date
+        self, meter_point_id, start_date, end_date, on_progress=None
     ) -> dict[str, dict[int, float]]:
         """Fetch hourly per-zone energy for ``[start_date, end_date)``.
 
@@ -259,6 +259,11 @@ class EnergaAPI:
         API failures are skipped (best effort — partial data is better than
         none), with a small delay between requests to avoid rate limits.
         The window is capped at ``MAX_HOURLY_RANGE_DAYS`` days.
+
+        ``on_progress(done, total)`` — optional, called after each day with
+        the number of processed days (successes *and* skipped failures) out of
+        the total window, so a caller can show an ETA. Exceptions raised by
+        the callback are swallowed and never abort the fetch.
         """
         from datetime import date as _date
         from datetime import timedelta as _timedelta
@@ -341,7 +346,17 @@ class EnergaAPI:
                 meter_point_id,
             )
 
-        for offset in range((end - start).days):
+        total_days = (end - start).days
+
+        def _report_progress(done: int) -> None:
+            if on_progress is None:
+                return
+            try:
+                on_progress(done, total_days)
+            except Exception as err:  # noqa: BLE001 - progress must never abort
+                _LOGGER.debug("Energa: hourly range progress callback failed: %s", err)
+
+        for offset in range(total_days):
             day = start + _timedelta(days=offset)
             if offset:
                 await asyncio.sleep(0.3)
@@ -354,12 +369,14 @@ class EnergaAPI:
                     "Energa: hourly range day %s failed for %s: %s",
                     day, meter_point_id, err,
                 )
+                _report_progress(offset + 1)
                 continue
             if not isinstance(day_data, dict):
                 _LOGGER.warning(
                     "Energa: hourly range day %s for %s returned %s, skipping",
                     day, meter_point_id, type(day_data).__name__,
                 )
+                _report_progress(offset + 1)
                 continue
 
             day_points = 0
@@ -389,6 +406,7 @@ class EnergaAPI:
                 day_points,
                 "" if self._meters_data else " (meters_data empty)",
             )
+            _report_progress(offset + 1)
 
         total = sum(len(z) for z in out.values())
         _LOGGER.info(

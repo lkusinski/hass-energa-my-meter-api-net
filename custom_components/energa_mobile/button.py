@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.button import ButtonEntity
@@ -20,9 +21,10 @@ from .const import (
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
+    SIGNAL_PERIOD_COMPLETENESS_UPDATED,
     SIGNAL_PERIOD_OPTIONS_UPDATED,
 )
-from .core.verification import format_period_date
+from .core.verification import format_period_date, parse_period_date
 from .dashboard_generator import (
     DEFAULT_ICON,
     DEFAULT_TITLE,
@@ -424,6 +426,61 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
 
 VERIFY_NOTIFICATION_TITLE = "Energa: weryfikacja rachunku"
 VERIFY_RESULT_DISMISS_DELAY_S = 180.0
+# Rough per-day API cost used for the initial "~N s" estimate; the live ETA
+# switches to the *measured* pace after the first progress callback.
+VERIFY_SECONDS_PER_DAY = 1.2
+# Minimum spacing between two progress notification updates (throttling).
+VERIFY_PROGRESS_THROTTLE_S = 5.0
+# Errors that mean "could not compute" (as opposed to a genuinely empty period).
+VERIFY_ERROR_CODES = {
+    "invalid_period",
+    "no_entry",
+    "no_meter",
+    "period_incomplete",
+    "exception",
+}
+
+# Bilingual notification templates (PL default, EN for English HA instances).
+_VERIFY_START_TEXT = {
+    "pl": (
+        "Przeliczam rachunek za okres {start} – {end}. "
+        "Proszę czekać (szacowany czas: ~{estimate} s).\n\n"
+        "Dni do pobrania: **{days}** (∼{rate} s/dzień)."
+    ),
+    "en": (
+        "Calculating the bill for {start} – {end}. "
+        "Please wait (estimated time: ~{estimate} s).\n\n"
+        "Days to fetch: **{days}** (∼{rate} s/day)."
+    ),
+}
+
+_VERIFY_PROGRESS_TEXT = {
+    "pl": (
+        "Przeliczam rachunek za okres {start} – {end}.\n\n"
+        "Postęp: **{done}/{total} dni ({pct}%)**, pozostało ~**{eta} s**."
+    ),
+    "en": (
+        "Calculating the bill for {start} – {end}.\n\n"
+        "Progress: **{done}/{total} days ({pct}%)**, ~**{eta} s** remaining."
+    ),
+}
+
+_VERIFY_ERROR_TEXT = {
+    "invalid_period": "Nieprawidłowy zakres dat okresu.",
+    "no_entry": "Nie znaleziono konfiguracji integracji.",
+    "no_meter": "Brak aktywnego licznika w wybranym okresie.",
+    "period_incomplete": "Dane w wybranym okresie nie są kompletne.",
+    "exception": "Wystąpił nieoczekiwany błąd podczas liczenia.",
+}
+
+
+def _language(hass) -> str:
+    """Return ``"en"`` for English HA instances, ``"pl"`` otherwise."""
+    try:
+        lang = str(getattr(getattr(hass, "config", None), "language", "pl") or "pl")
+    except Exception:  # noqa: BLE001 - language lookup must never break a notification
+        return "pl"
+    return "en" if lang.lower().startswith("en") else "pl"
 
 
 class EnergaVerifyPeriodButton(ButtonEntity):
@@ -459,6 +516,7 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         ppe = meter.get("ppe", self._meter_id)
         self._verify_running = False
         self._period: dict[str, str | None] = {}
+        self._progress: dict[str, Any] = {}
         self._attr_unique_id = f"energa_{self._meter_id}_verify_period"
         self.entity_id = f"button.energa_{self._serial}_przelicz_okres".lower()
         self._attr_device_info = DeviceInfo(
@@ -470,18 +528,22 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         )
 
     async def async_added_to_hass(self) -> None:
-        """Refresh availability when period dates change without a reload."""
+        """Refresh availability when period dates or completeness change."""
         await super().async_added_to_hass()
         try:
             from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-            self.async_on_remove(
-                async_dispatcher_connect(
-                    self.hass,
-                    SIGNAL_PERIOD_OPTIONS_UPDATED,
-                    self._handle_period_options_updated,
+            for signal in (
+                SIGNAL_PERIOD_OPTIONS_UPDATED,
+                SIGNAL_PERIOD_COMPLETENESS_UPDATED,
+            ):
+                self.async_on_remove(
+                    async_dispatcher_connect(
+                        self.hass,
+                        signal,
+                        self._handle_period_options_updated,
+                    )
                 )
-            )
         except Exception as err:  # noqa: BLE001 - subscription is best effort
             _LOGGER.debug("Energa: period update subscription skipped: %s", err)
 
@@ -496,11 +558,41 @@ class EnergaVerifyPeriodButton(ButtonEntity):
             format_period_date(opts.get(CONF_VERIFY_PERIOD_END)),
         )
 
+    def _completeness_status(self) -> str:
+        """Status published by the completeness sensor (``unknown`` if absent)."""
+        try:
+            from .services import period_completeness_status
+
+            return period_completeness_status(self._coordinator(), self._meter_id)
+        except Exception as err:  # noqa: BLE001 - never break availability
+            _LOGGER.debug("Energa: completeness status lookup failed: %s", err)
+            return "unknown"
+
     @property
     def available(self) -> bool:
-        """Both period dates must be set before the button can be pressed."""
+        """Both dates set AND the period readings are complete."""
         start, end = self._period_bounds()
-        return bool(start and end)
+        if not (start and end):
+            return False
+        return self._completeness_status() == "complete"
+
+    def _incomplete_message(self, status: str, start, end) -> str:
+        """Readable refusal for a button press on an incomplete period."""
+        if status == "incomplete":
+            detail = (
+                "Dane w wybranym okresie nie są kompletne — uzupełnij brakujące "
+                "dni (statystyki długoterminowe/API), aby raport był poprawny."
+            )
+        else:
+            detail = (
+                "Status kompletności okresu nie został jeszcze ustalony. "
+                "Odczekaj chwilę, aż encja „Okres: kompletność danych” "
+                "przyjmie wartość „complete”."
+            )
+        return (
+            f"Nie można przeliczyć rachunku dla licznika {self._serial} "
+            f"({start} – {end}).\n\n{detail}"
+        )
 
     def _notification_id(self) -> str:
         return f"energa_verify_period_{self._meter_id}"
@@ -559,14 +651,93 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         except Exception as err:  # noqa: BLE001 - cleanup is best effort
             _LOGGER.debug("Energa: verify_period dismiss scheduling skipped: %s", err)
 
+    def _period_day_count(self, start, end) -> int:
+        """Number of inclusive calendar days in the selected period (0 if unset)."""
+        start_date = parse_period_date(start)
+        end_date = parse_period_date(end)
+        if start_date is None or end_date is None:
+            return 0
+        days = (end_date - start_date).days + 1
+        return days if days > 0 else 0
+
+    def _start_message(self, start, end, days: int) -> str:
+        """Initial 'calculating' notification with the time estimate."""
+        if not days:
+            return f"Przeliczam rachunek za okres {start} – {end}. Proszę czekać…"
+        estimate = max(1, int(round(days * VERIFY_SECONDS_PER_DAY)))
+        return _VERIFY_START_TEXT[_language(self.hass)].format(
+            start=start, end=end, estimate=estimate, days=days,
+            rate=VERIFY_SECONDS_PER_DAY,
+        )
+
+    def _progress_message(self, done: int, total: int) -> str:
+        """Progress notification with an ETA from the measured pace."""
+        pct = int(round(done * 100 / total)) if total else 0
+        started = float((self._progress or {}).get("started_at") or 0.0)
+        elapsed = max(0.0, time.monotonic() - started)
+        per_day = (elapsed / done) if done else VERIFY_SECONDS_PER_DAY
+        remaining = max(0.0, (total - done) * per_day)
+        return _VERIFY_PROGRESS_TEXT[_language(self.hass)].format(
+            start=self._period.get("period_start") or "?",
+            end=self._period.get("period_end") or "?",
+            done=done,
+            total=total,
+            pct=pct,
+            eta=int(round(remaining)),
+        )
+
+    def _on_progress(self, done: int, total: int) -> None:
+        """Throttled progress callback from the day-by-day API fetch."""
+        try:
+            done = int(done)
+            total = int(total)
+        except (TypeError, ValueError):
+            return
+        if total <= 0:
+            return
+        done = max(0, min(done, total))
+        progress = self._progress if isinstance(self._progress, dict) else {}
+        progress.update(
+            {
+                "total": total,
+                "done": done,
+                "started_at": progress.get("started_at") or time.monotonic(),
+            }
+        )
+        self._progress = progress
+        now = time.monotonic()
+        last = float(progress.get("last_notified") or 0.0)
+        # Throttle intermediate updates; always publish the final day.
+        if done < total and (now - last) < VERIFY_PROGRESS_THROTTLE_S:
+            return
+        progress["last_notified"] = now
+        self._store_result(
+            {
+                **self._period,
+                "status": "calculating",
+                "empty": False,
+                "progress_done": done,
+                "progress_total": total,
+            }
+        )
+        self._post_notification(self._progress_message(done, total))
+
     def _mark_calculating(self, start, end) -> None:
         """Immediate feedback: sensor attribute + 'calculating' notification."""
         self._period = {"period_start": start, "period_end": end}
-        self._store_result({**self._period, "status": "calculating", "empty": False})
-        self._post_notification(
-            f"Liczę rachunek za okres {start} – {end}…\n\n"
-            "Pobieranie danych (API/recorder) może potrwać kilkadziesiąt sekund."
-        )
+        days = self._period_day_count(start, end)
+        self._progress = {
+            "total": days,
+            "done": 0,
+            "started_at": time.monotonic(),
+            "last_notified": 0.0,
+        }
+        payload = {**self._period, "status": "calculating", "empty": False}
+        if days:
+            payload["progress_done"] = 0
+            payload["progress_total"] = days
+        self._store_result(payload)
+        self._post_notification(self._start_message(start, end, days))
 
     async def async_press(self) -> None:
         """Start the verification in the background (one per meter at a time)."""
@@ -575,6 +746,18 @@ class EnergaVerifyPeriodButton(ButtonEntity):
             _LOGGER.debug(
                 "Energa: verify_period button pressed without both dates set"
             )
+            return
+        status = self._completeness_status()
+        if status != "complete":
+            _LOGGER.warning(
+                "Energa: verify_period blocked for meter %s — period "
+                "completeness=%s (%s..%s)",
+                self._meter_id,
+                status,
+                start,
+                end,
+            )
+            self._post_notification(self._incomplete_message(status, start, end))
             return
         if self._verify_running:
             _LOGGER.debug(
@@ -615,7 +798,9 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         self._verify_running = True
         self._mark_calculating(start, end)
         try:
-            result = await async_verify_period_data(self.hass, data)
+            result = await async_verify_period_data(
+                self.hass, data, on_progress=self._on_progress
+            )
         except Exception as err:  # noqa: BLE001 - background task must not explode
             _LOGGER.warning(
                 "Energa: verify_period failed for meter %s: %s", self._meter_id, err
@@ -644,9 +829,7 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         """Publish a successful or empty result and update the notification."""
         if result.get("empty"):
             error = result.get("error")
-            status = (
-                "error" if error in ("invalid_period", "no_entry") else "empty"
-            )
+            status = "error" if error in VERIFY_ERROR_CODES else "empty"
             payload = {**self._period, **result, "status": status}
             if status == "error":
                 _LOGGER.warning(
@@ -685,10 +868,27 @@ class EnergaVerifyPeriodButton(ButtonEntity):
 
     def _result_message(self, result: dict) -> str:
         if result.get("empty"):
+            start = (
+                result.get("period_start")
+                or self._period.get("period_start")
+                or "?"
+            )
+            end = (
+                result.get("period_end") or self._period.get("period_end") or "?"
+            )
+            error = result.get("error")
+            status = result.get("status")
+            if status == "error" or error in VERIFY_ERROR_CODES:
+                detail = result.get("warning") or _VERIFY_ERROR_TEXT.get(
+                    error, "Nie udało się przeliczyć rachunku."
+                )
+                return (
+                    f"Nie udało się przeliczyć rachunku dla licznika "
+                    f"{self._serial} ({start} – {end}).\n\n{detail}"
+                )
             return (
                 f"Nie znaleziono danych dla licznika {self._serial} "
-                f"w okresie {result.get('period_start') or '?'} – "
-                f"{result.get('period_end') or '?'}."
+                f"w okresie {start} – {end}."
             )
         start = result.get("period_start", "?")
         end = result.get("period_end", "?")

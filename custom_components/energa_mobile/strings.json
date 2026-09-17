@@ -221,10 +221,18 @@
         "name": "Period End"
       }
     },
-    "sensor": {
-      "period_verification": {
-        "name": "Period: Settlement"
+  "sensor": {
+    "period_completeness": {
+      "name": "Period: Data completeness",
+      "state": {
+        "complete": "Complete",
+        "incomplete": "Incomplete",
+        "unknown": "No data"
       }
+    },
+    "period_verification": {
+      "name": "Period: Settlement"
     }
+  }
   }
 }

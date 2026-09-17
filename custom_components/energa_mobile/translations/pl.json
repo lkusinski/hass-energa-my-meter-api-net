@@ -221,10 +221,18 @@
         "name": "Okres Koniec"
       }
     },
-    "sensor": {
-      "period_verification": {
-        "name": "Okres: rozliczenie"
+  "sensor": {
+    "period_completeness": {
+      "name": "Okres: kompletność danych",
+      "state": {
+        "complete": "Kompletne",
+        "incomplete": "Niekompletne",
+        "unknown": "Brak danych"
       }
+    },
+    "period_verification": {
+      "name": "Okres: rozliczenie"
     }
+  }
   }
 }

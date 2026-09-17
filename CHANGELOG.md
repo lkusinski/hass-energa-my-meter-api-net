@@ -1,18 +1,15 @@
 # Changelog
 
-## v1.9.0-beta.6 (2026-09-17) — kalkulator: pełna faktura + salda początkowe (Faza 3)
-
-- **Net-metering**: odtworzenie stanu magazynu (FIFO 12 m-cy) na początek okresu i pokrycie energii/dystrybucji zmiennej/jakościowej — faktura Wiśniowa 07–08.2026 odtwarzana co do grosza (129,04/29,68/158,72).
-- **Net-billing**: saldo depozytu na początek okresu (wejście `deposit_open_pln` lub odtworzenie), `deposit_applied = min(open+generated, cap)`.
-- **Pełny zestaw pozycji** faktury w wyniku/atrybutach (sprzedaż, dystrybucja per pozycja, akcyza, depozyt, magazyn open/close, cover, warnings) + czytelniejsze powiadomienie.
-- Brak historii → `coverage_unknown=true` i ostrzeżenie zamiast cichego zawyżenia.
-
 ## v1.9.0-beta.5 (2026-09-17) — UX kalkulatora, postęp historii, PV w onboardingu
 
 - **Bez migania encji**: zmiana dat okresu nie przeładowuje już integracji (smart update listener).
 - **Feedback kalkulatora**: natychmiastowy status „liczę…" + powiadomienie start/wynik; obsługa pustego okresu/błędu; blokada podwójnych kliknięć.
+- **Powiadomienie o liczeniu z ETA i postępem**: start podaje „Przeliczam rachunek za okres … – …. Proszę czekać (szacowany czas: ~N s)" z liczbą dni (`~1,2 s/dzień`); w trakcie dzień-po-dniu wątek API raportuje postęp przez `on_progress(done, total)`, a powiadomienie odświeża się co ~5 s: „Postęp: X/Y dni (Z%), pozostało ~M s" z ETA liczonym z **zmierzonego** tempa; zakończenie/błąd/pusty okres pokazuje dotychczasowy czytelny wynik. Jedno idempotentne powiadomienie na licznik (`energa_verify_period_<mid>`), auto-dismiss.
 - **Postęp pobierania historii przywrócony**: wskaźnik co ~45 s (ile/ile, %, przetwarzany dzień, **ETA**), poprawne „1 licznik / 2 liczniki", kierunek (jedno-/dwukierunkowy) i treść zgodna z wyborem panelu; auto-dismiss; logi info.
 - **Onboarding**: checkbox „Utwórz panel «Energa — Rozliczenia» (zalecane)"; detekcja PV w natywnym Panelu Energia; jednokierunkowy → domyślna opcja „Tylko konsument — brak PV (wykryto)"; dwukierunkowy bez PV → rekomendacja dodania źródła PV.
+- **Kompletność okresu (nowa encja)**: `sensor.energa_<serial>_okres_kompletnosc` („Okres: kompletność danych", `diagnostic`, stany `complete`/`incomplete`/`unknown`) sprawdza pokrycie dni w wybranym zakresie — najpierw statystyki długoterminowe recordera, potem API; atrybuty: `period_start`, `period_end`, `expected_days`, `available_days`, `missing_days`, `completeness_pct`, `source_checked`, `checked_at`. Weekend bez odczytu nie fałszuje „incomplete".
+- **Bramka przycisku „Przelicz okres rozliczeniowy"**: `available = obie daty ustawione AND kompletność == complete`. Przy `incomplete`/`unknown` przycisk jest niedostępny, a ewentualne wywołanie usługi zwraca czytelny błąd/warning (`period_incomplete`) zamiast cichego liczenia na dziurze. Status odświeża się przy zmianie dat (smart listener — bez reloadu integracji).
+- **Nota z recenzji (backfill)**: weryfikacja na labie `wisniowa` — backfill faktycznie wystartował i **zakończył się** (731 dni w statystykach LTS, 70 128 odczytów w magazynie kanonicznym, flaga `auto_backfill_completed=true`). Plik `/config/energa_canonical.db` = 0 B to osierocony artefakt (magazyn działa w `.storage/energa_canonical.db`), bez wpływu na działanie.
 
 ## v1.9.0-beta.4 (2026-09-17) — fix encji wyniku (kategoria sensora)
 

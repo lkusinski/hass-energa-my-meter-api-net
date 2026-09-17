@@ -333,6 +333,62 @@ class TestApiHourlyRange:
     async def test_bad_window_returns_empty(self, api):
         assert await api.async_get_hourly_range("m1", date(2026, 8, 2), date(2026, 8, 1)) == {}
 
+    @pytest.mark.asyncio
+    async def test_reports_day_by_day_progress_callback(self, api):
+        api._meters_data = [
+            {
+                "meter_point_id": "m1",
+                "zone_count": 1,
+                "obis_plus": "1-0:1.8.0*255",
+                "obis_minus": "1-0:2.8.0*255",
+                "is_prosumer": False,
+                "total_minus": 0.0,
+            }
+        ]
+
+        async def fake_hourly(meter_point_id, day, include_timestamps=False):
+            return {"import": [(1.0, 3600)]}
+
+        api.async_get_history_hourly = fake_hourly
+        seen = []
+        with patch("asyncio.sleep", new=AsyncMock()):
+            await api.async_get_hourly_range(
+                "m1",
+                date(2026, 8, 1),
+                date(2026, 8, 4),
+                on_progress=lambda done, total: seen.append((done, total)),
+            )
+
+        assert seen == [(1, 3), (2, 3), (3, 3)]
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_error_is_swallowed(self, api):
+        api._meters_data = [
+            {
+                "meter_point_id": "m1",
+                "zone_count": 1,
+                "obis_plus": "1-0:1.8.0*255",
+                "obis_minus": "1-0:2.8.0*255",
+                "is_prosumer": False,
+                "total_minus": 0.0,
+            }
+        ]
+
+        async def fake_hourly(meter_point_id, day, include_timestamps=False):
+            return {"import": [(1.0, 3600)]}
+
+        api.async_get_history_hourly = fake_hourly
+
+        def boom(done, total):
+            raise RuntimeError("progress boom")
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            out = await api.async_get_hourly_range(
+                "m1", date(2026, 8, 1), date(2026, 8, 3), on_progress=boom
+            )
+
+        assert sum(out["import_1"].values()) > 0
+
 
 def _coordinator():
     meter = {
@@ -511,29 +567,58 @@ class TestPeriodDateEntity:
 
 
 class TestVerifyPeriodButton:
-    def _button(self, options):
+    def _button(self, options, completeness=None):
         from custom_components.energa_mobile.button import EnergaVerifyPeriodButton
 
         entry = MagicMock()
         entry.entry_id = "entry_1"
         entry.options = options
         meter = {"meter_point_id": "10000001", "meter_serial": "10000001"}
-        button = EnergaVerifyPeriodButton(hass=MagicMock(), entry=entry, meter=meter)
+        hass = MagicMock()
+        store = {}
+        if completeness is not None:
+            store["10000001"] = {"state": completeness}
+        coordinator = SimpleNamespace(
+            _verify_result={}, _period_completeness=store,
+            async_update_listeners=MagicMock(),
+        )
+        hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+        button = EnergaVerifyPeriodButton(hass=hass, entry=entry, meter=meter)
         return entry, button
 
-    def test_unavailable_without_both_dates(self):
+    def test_availability_requires_dates_and_complete_period(self):
         _, button = self._button({CONF_VERIFY_PERIOD_START: "2026-08-01"})
         assert button.available is False
-        _, button2 = self._button(
+        # Both dates but completeness unknown -> gated off.
+        _, button_unknown = self._button(
             {
                 CONF_VERIFY_PERIOD_START: "2026-08-01",
                 CONF_VERIFY_PERIOD_END: "2026-08-31",
-            }
+            },
+            completeness="unknown",
         )
-        assert button2.available is True
-        assert button2.entity_id == "button.energa_10000001_przelicz_okres"
-        assert button2._attr_name == "Przelicz okres rozliczeniowy"
-        assert button2._attr_entity_category == EntityCategory.CONFIG
+        assert button_unknown.available is False
+        # Both dates but incomplete -> gated off.
+        _, button_incomplete = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            },
+            completeness="incomplete",
+        )
+        assert button_incomplete.available is False
+        # Both dates and complete -> available.
+        _, button_complete = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            },
+            completeness="complete",
+        )
+        assert button_complete.available is True
+        assert button_complete.entity_id == "button.energa_10000001_przelicz_okres"
+        assert button_complete._attr_name == "Przelicz okres rozliczeniowy"
+        assert button_complete._attr_entity_category == EntityCategory.CONFIG
 
     @pytest.mark.asyncio
     async def test_press_schedules_background_task(self):
@@ -541,13 +626,26 @@ class TestVerifyPeriodButton:
             {
                 CONF_VERIFY_PERIOD_START: "2026-08-01",
                 CONF_VERIFY_PERIOD_END: "2026-08-31",
-            }
+            },
+            completeness="complete",
         )
         await button.async_press()
         entry.async_create_background_task.assert_called_once()
         args, kwargs = entry.async_create_background_task.call_args
         args[1].close()  # the coroutine is executed by HA in production
         assert kwargs["name"] == "energa_verify_period_10000001"
+
+    @pytest.mark.asyncio
+    async def test_press_blocked_when_period_incomplete(self):
+        entry, button = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            },
+            completeness="incomplete",
+        )
+        await button.async_press()
+        entry.async_create_background_task.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_press_without_dates_does_nothing(self):
@@ -622,6 +720,124 @@ class TestVerifyPeriodButton:
         assert "157.59 PLN" in msg
         assert "615.53 PLN" in msg
 
+    def test_start_notification_has_estimate_and_days(self):
+        _, button = self._button({})
+        messages = []
+        results = []
+        button._post_notification = messages.append
+        button._store_result = results.append
+        button._mark_calculating("2026-08-01", "2026-08-31")
+        assert messages
+        msg = messages[-1]
+        assert "Przeliczam rachunek za okres 2026-08-01 – 2026-08-31" in msg
+        assert "szacowany czas: ~37 s" in msg
+        assert "31" in msg
+        assert button._progress["total"] == 31
+        assert results[-1]["status"] == "calculating"
+        assert results[-1]["progress_total"] == 31
+        assert results[-1]["progress_done"] == 0
+
+    def test_progress_updates_content_and_throttles(self):
+        _, button = self._button({})
+        button._period = {
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-31",
+        }
+        button._progress = {
+            "total": 31,
+            "done": 0,
+            "started_at": 1000.0,
+            "last_notified": 0.0,
+        }
+        messages = []
+        button._post_notification = messages.append
+        button._store_result = lambda payload: None
+
+        with patch(
+            "custom_components.energa_mobile.button.time.monotonic",
+            side_effect=[1006.0, 1006.0],
+        ):
+            button._on_progress(5, 31)
+        assert len(messages) == 1
+        assert "5/31 dni (16%)" in messages[0]
+        # measured pace: 6 s / 5 days * 26 remaining ≈ 31 s
+        assert "pozostało ~**31 s**" in messages[0]
+
+        # Another callback inside the throttle window must not re-notify.
+        with patch(
+            "custom_components.energa_mobile.button.time.monotonic",
+            return_value=1008.0,
+        ):
+            button._on_progress(8, 31)
+        assert len(messages) == 1
+
+        # The final day always publishes, even inside the window.
+        with patch(
+            "custom_components.energa_mobile.button.time.monotonic",
+            side_effect=[1010.0, 1010.0],
+        ):
+            button._on_progress(31, 31)
+        assert len(messages) == 2
+        assert "31/31 dni (100%)" in messages[1]
+
+    def test_notification_id_is_stable_per_meter(self):
+        _, button = self._button({})
+        assert button._notification_id() == "energa_verify_period_10000001"
+        assert button._notification_id() == button._notification_id()
+
+    def test_empty_and_error_messages_are_readable(self):
+        _, button = self._button({})
+        button._period = {
+            "period_start": "2026-08-01",
+            "period_end": "2026-08-31",
+        }
+        empty = button._result_message({"empty": True, "error": "no_data"})
+        assert "Nie znaleziono danych" in empty
+        error = button._result_message(
+            {
+                "empty": True,
+                "error": "period_incomplete",
+                "status": "error",
+                "warning": "Dane niekompletne (10/31 dni).",
+            }
+        )
+        assert "Nie udało się przeliczyć" in error
+        assert "10/31" in error
+        assert "2026-08-01" in error and "2026-08-31" in error
+
+    @pytest.mark.asyncio
+    async def test_run_verification_passes_progress_callback(self):
+        entry, button = self._button(
+            {
+                CONF_VERIFY_PERIOD_START: "2026-08-01",
+                CONF_VERIFY_PERIOD_END: "2026-08-31",
+            }
+        )
+        coordinator = SimpleNamespace(
+            _verify_result={}, async_update_listeners=MagicMock()
+        )
+        button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
+        result = {
+            "empty": False,
+            "do_zaplaty": 1.0,
+            "period_start": "2026-08-01",
+            "period_end": "2026-09-01",
+            "source": SOURCE_ENERGA_API,
+        }
+        with patch(
+            "custom_components.energa_mobile.services.async_verify_period_data",
+            new=AsyncMock(return_value=result),
+        ) as service_mock:
+            await button._run_verification(
+                {
+                    "start": "2026-08-01",
+                    "end": "2026-08-31",
+                    "entry_id": "entry_1",
+                    "meter_id": "10000001",
+                }
+            )
+        assert service_mock.await_args.kwargs["on_progress"] == button._on_progress
+
     @pytest.mark.asyncio
     async def test_run_verification_stores_result_and_notifies(self):
         entry, button = self._button(
@@ -676,7 +892,11 @@ class TestVerifyPeriodButton:
                 CONF_VERIFY_PERIOD_END: "2026-08-31",
             }
         )
-        coordinator = SimpleNamespace(_verify_result={}, async_update_listeners=MagicMock())
+        coordinator = SimpleNamespace(
+            _verify_result={},
+            _period_completeness={"10000001": {"state": "complete"}},
+            async_update_listeners=MagicMock(),
+        )
         button.hass.data = {DOMAIN: {"entry_1": {"coordinator": coordinator}}}
         await button.async_press()
         await button.async_press()

@@ -45,6 +45,7 @@ from .sensors.bill import (
     EnergaBillCurrentSensor,
     EnergaBillForecastSensor,
 )
+from .sensors.completeness import EnergaPeriodCompletenessSensor
 from .sensors.live import (
     EnergaAutoconsumptionSensor,
     EnergaCostStatisticsSensor,
@@ -91,6 +92,7 @@ __all__ = [
     "EnergaRceSensor",
     "EnergaStatisticsSensor",
     "EnergaSyntheticStatisticsSensor",
+    "EnergaPeriodCompletenessSensor",
     "EnergaPeriodVerificationSensor",
     "PseRceArbitrageSpreadSensor",
     "PseRceDynamicPriceSensor",
@@ -777,6 +779,19 @@ async def async_setup_entry(
             sensors.append(
                 EnergaPeriodVerificationSensor(
                     coordinator=coordinator,
+                    meter_id=meter_id,
+                    serial=serial,
+                    device_info=device_info,
+                    entry=entry,
+                )
+            )
+
+            # Completeness status gates the "Przelicz okres" button: the
+            # invoice may only be computed once the window has no gaps.
+            sensors.append(
+                EnergaPeriodCompletenessSensor(
+                    coordinator=coordinator,
+                    meter=meter,
                     meter_id=meter_id,
                     serial=serial,
                     device_info=device_info,

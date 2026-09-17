@@ -112,6 +112,10 @@ CONF_VERIFY_PERIOD_END = "verify_period_end"
 # options listener skips the full integration reload, entities refresh instead.
 SIGNAL_PERIOD_OPTIONS_UPDATED = f"{DOMAIN}_period_options_updated"
 
+# Fired (with the entry_id) after the period completeness status is recomputed,
+# so dependent entities (the recalculate button) refresh their ``available``.
+SIGNAL_PERIOD_COMPLETENESS_UPDATED = f"{DOMAIN}_period_completeness_updated"
+
 # PSE API for RCE (Rynkowa Cena Energii)
 PSE_RCE_API_URL = "https://api.raporty.pse.pl/api/rce-pln"
 CONF_RCE_AUTO_FETCH = "rce_auto_fetch"  # Enable/disable auto RCE fetch
