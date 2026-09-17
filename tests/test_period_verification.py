@@ -147,8 +147,181 @@ class TestApiHourlyRange:
                 "m2", date(2026, 8, 1), date(2026, 8, 2)
             )
 
-        assert set(out) == {"import_1"}
+        assert set(out) == {"import_1", "import_2", "export_1", "export_2"}
         assert sum(out["import_1"].values()) == pytest.approx(2.0)
+        assert out["import_2"] == {}
+        assert out["export_1"] == {}
+        assert out["export_2"] == {}
+
+    @pytest.mark.asyncio
+    async def test_maps_zones_hours_and_multiple_days(self, api):
+        plus = "1-0:1.8.0*255"
+        minus = "1-0:2.8.0*255"
+        api._meters_data = [
+            {
+                "meter_point_id": "m1",
+                "zone_count": 2,
+                "obis_plus": plus,
+                "obis_minus": minus,
+                "is_prosumer": True,
+                "total_minus": 5.0,
+            }
+        ]
+        calls = []
+
+        async def fake_chart(
+            meter_id, obis, timestamp, zone_index=None, include_timestamps=False
+        ):
+            calls.append(obis)
+            assert include_timestamps is True
+            base = int(timestamp) // 1000
+            if obis == plus:
+                value = {None: 3.0, 0: 1.0, 1: 2.0}[zone_index]
+            else:
+                value = {None: 0.3, 0: 0.1, 1: 0.2}[zone_index]
+            return [
+                (value, base * 1000),
+                (value + 0.5, (base + 3600) * 1000),
+            ]
+
+        api._fetch_chart = fake_chart
+        day1 = int(datetime(2026, 8, 1, tzinfo=TZ).timestamp())
+        day2 = int(datetime(2026, 8, 2, tzinfo=TZ).timestamp())
+        with patch("asyncio.sleep", new=AsyncMock()):
+            out = await api.async_get_hourly_range(
+                "m1", date(2026, 8, 1), date(2026, 8, 3)
+            )
+
+        assert set(out) == {"import_1", "import_2", "export_1", "export_2"}
+        assert out["import_1"][day1] == pytest.approx(1.0)
+        assert out["import_1"][day1 + 3600] == pytest.approx(1.5)
+        assert out["import_1"][day2] == pytest.approx(1.0)
+        assert len(out["import_1"]) == 4
+        assert out["import_2"][day1] == pytest.approx(2.0)
+        assert out["export_1"][day1] == pytest.approx(0.1)
+        assert out["export_2"][day1] == pytest.approx(0.2)
+        # "import" (total) is fetched too but only per-zone keys are stored.
+        assert plus in calls and minus in calls
+
+    @pytest.mark.asyncio
+    async def test_parses_raw_api_get_tm_string_and_zones(self, api):
+        plus = "1-0:1.8.0*255"
+        minus = "1-0:2.8.0*255"
+        api._meters_data = [
+            {
+                "meter_point_id": "m1",
+                "zone_count": 2,
+                "obis_plus": plus,
+                "obis_minus": minus,
+                "is_prosumer": True,
+                "total_minus": 5.0,
+            }
+        ]
+
+        async def fake_api_get(path, params=None):
+            ts = int(params["mainChartDate"])
+            zones = [1.0, 2.0, None] if params["meterObject"] == plus else [0.1, 0.2, None]
+            return {
+                "response": {
+                    "mainChart": [
+                        {"tm": str(ts), "zones": zones},
+                        {"tm": str(ts + 3600000), "zones": zones},
+                    ]
+                }
+            }
+
+        api._api_get = fake_api_get
+        day1 = int(datetime(2026, 8, 1, tzinfo=TZ).timestamp())
+        out = await api.async_get_hourly_range(
+            "m1", date(2026, 8, 1), date(2026, 8, 2)
+        )
+
+        assert out["import_1"][day1] == pytest.approx(1.0)
+        assert out["import_2"][day1] == pytest.approx(2.0)
+        assert out["export_1"][day1] == pytest.approx(0.1)
+        assert out["export_2"][day1] == pytest.approx(0.2)
+        assert out["import_1"][day1 + 3600] == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_skips_failing_day_and_returns_the_rest(self, api):
+        api._meters_data = [
+            {
+                "meter_point_id": "m1",
+                "zone_count": 2,
+                "obis_plus": "1-0:1.8.0*255",
+                "obis_minus": "1-0:2.8.0*255",
+                "is_prosumer": True,
+                "total_minus": 5.0,
+            }
+        ]
+        bad_day = date(2026, 8, 2)
+
+        async def fake_hourly(meter_point_id, day, include_timestamps=False):
+            if day == bad_day:
+                raise RuntimeError("boom")
+            ts = int(datetime(day.year, day.month, day.day, tzinfo=TZ).timestamp())
+            return {
+                "import_1": [(1.0, ts * 1000)],
+                "import_2": [(2.0, ts * 1000)],
+                "export_1": [(0.1, ts * 1000)],
+                "export_2": [(0.2, ts * 1000)],
+            }
+
+        api.async_get_history_hourly = fake_hourly
+        with patch("asyncio.sleep", new=AsyncMock()):
+            out = await api.async_get_hourly_range(
+                "m1", date(2026, 8, 1), date(2026, 8, 4)
+            )
+
+        assert set(out) == {"import_1", "import_2", "export_1", "export_2"}
+        # 3 requested days, middle one fails -> two days survive, no raise.
+        assert len(out["import_1"]) == 2
+        assert len(out["import_2"]) == 2
+        assert len(out["export_1"]) == 2
+        assert len(out["export_2"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_meters_data_triggers_refresh(self, api):
+        api._meters_data = []
+        meter = {
+            "meter_point_id": "m1",
+            "zone_count": 2,
+            "obis_plus": "1-0:1.8.0*255",
+            "obis_minus": "1-0:2.8.0*255",
+            "is_prosumer": True,
+            "total_minus": 5.0,
+        }
+
+        async def refresh():
+            api._meters_data = [meter]
+            return [meter]
+
+        async def fake_chart(
+            meter_id, obis, timestamp, zone_index=None, include_timestamps=False
+        ):
+            base = int(timestamp) // 1000
+            return [(1.0, base * 1000)]
+
+        api.async_get_data = AsyncMock(side_effect=refresh)
+        api._fetch_chart = fake_chart
+        out = await api.async_get_hourly_range(
+            "m1", date(2026, 8, 1), date(2026, 8, 2)
+        )
+
+        api.async_get_data.assert_awaited_once()
+        assert sum(out["import_1"].values()) > 0
+        assert sum(out["import_2"].values()) > 0
+
+    @pytest.mark.asyncio
+    async def test_unknown_meter_returns_empty(self, api):
+        api._meters_data = []
+        api.async_get_data = AsyncMock(return_value=[])
+        with patch("asyncio.sleep", new=AsyncMock()):
+            out = await api.async_get_hourly_range(
+                "ghost", date(2026, 8, 1), date(2026, 8, 3)
+            )
+        assert out == {}
+        api.async_get_data.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_bad_window_returns_empty(self, api):

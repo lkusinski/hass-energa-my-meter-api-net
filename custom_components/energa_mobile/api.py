@@ -231,7 +231,7 @@ class EnergaAPI:
 
         _LOGGER.debug(
             "History %s (ts=%s): Import=%d pts, Export=%d pts",
-            date.date(),
+            day,
             ts,
             len(result["import"]),
             len(result["export"]),
@@ -253,8 +253,10 @@ class EnergaAPI:
             {"import_1": {ts: kWh}, "import_2": {...},
              "export_1": {...}, "export_2": {...}}
 
-        Single-zone meters only get the ``_1`` keys. Missing days and API
-        failures are skipped (best effort — partial data is better than
+        All four zone keys are always present; zones a meter does not have
+        (or cannot export to) stay empty dicts. Keys are epoch seconds, the
+        same hourly bucket shape the recorder series uses. Missing days and
+        API failures are skipped (best effort — partial data is better than
         none), with a small delay between requests to avoid rate limits.
         The window is capped at ``MAX_HOURLY_RANGE_DAYS`` days.
         """
@@ -311,18 +313,34 @@ class EnergaAPI:
             return {}
 
         has_zones = meter.get("zone_count", 1) > 1
-        # Map the keys returned by async_get_history_hourly to invoice zones.
-        key_map: dict[str, str] = {
+
+        # Always expose all four invoice zones; absent ones stay empty so the
+        # downstream consumer can rely on the shape.
+        out: dict[str, dict[int, float]] = {
+            "import_1": {},
+            "import_2": {},
+            "export_1": {},
+            "export_2": {},
+        }
+        # Map invoice zone -> key returned by async_get_history_hourly.
+        # Single-zone meters return "import"/"export"; multi-zone meters
+        # return the per-zone "import_1"/"import_2" keys.
+        source_map: dict[str, str] = {
             "import_1": "import_1" if has_zones else "import"
         }
         if has_zones:
-            key_map["import_2"] = "import_2"
+            source_map["import_2"] = "import_2"
         if is_export_prosumer(meter):
-            key_map["export_1"] = "export_1" if has_zones else "export"
+            source_map["export_1"] = "export_1" if has_zones else "export"
             if has_zones:
-                key_map["export_2"] = "export_2"
+                source_map["export_2"] = "export_2"
 
-        out: dict[str, dict[int, float]] = {zone: {} for zone in key_map}
+        if not self._meters_data:
+            _LOGGER.warning(
+                "Energa: meters_data empty while fetching hourly range for %s",
+                meter_point_id,
+            )
+
         for offset in range((end - start).days):
             day = start + _timedelta(days=offset)
             if offset:
@@ -332,14 +350,20 @@ class EnergaAPI:
                     meter_point_id, day, include_timestamps=True
                 )
             except Exception as err:  # noqa: BLE001 - keep partial results
-                _LOGGER.debug(
+                _LOGGER.warning(
                     "Energa: hourly range day %s failed for %s: %s",
                     day, meter_point_id, err,
                 )
                 continue
             if not isinstance(day_data, dict):
+                _LOGGER.warning(
+                    "Energa: hourly range day %s for %s returned %s, skipping",
+                    day, meter_point_id, type(day_data).__name__,
+                )
                 continue
-            for zone, source_key in key_map.items():
+
+            day_points = 0
+            for zone, source_key in source_map.items():
                 for item in day_data.get(source_key, []) or []:
                     if not isinstance(item, (list, tuple)) or len(item) != 2:
                         continue
@@ -351,22 +375,27 @@ class EnergaAPI:
                         kwh = float(value)
                     except (TypeError, ValueError):
                         continue
+                    # Hour bucket key is epoch seconds, matching the recorder
+                    # series shape used by build_period_invoice.
                     if ts <= 0 or kwh < 0:
                         continue
                     out[zone][ts] = kwh
+                    day_points += 1
+
+            _LOGGER.debug(
+                "Energa: hourly range day %s for %s: %d points%s",
+                day,
+                meter_point_id,
+                day_points,
+                "" if self._meters_data else " (meters_data empty)",
+            )
 
         total = sum(len(z) for z in out.values())
         _LOGGER.info(
             "Energa: hourly range %s..%s for %s: %d points%s",
             start, end, meter_point_id, total,
-            (
-                f" (imp_z1={len(out.get('import_1', {}))}, "
-                f"imp_z2={len(out.get('import_2', {}))}, "
-                f"exp_z1={len(out.get('export_1', {}))}, "
-                f"exp_z2={len(out.get('export_2', {}))})"
-            )
-            if has_zones
-            else "",
+            f" (imp_z1={len(out['import_1'])}, imp_z2={len(out['import_2'])}, "
+            f"exp_z1={len(out['export_1'])}, exp_z2={len(out['export_2'])})",
         )
         return out
 
