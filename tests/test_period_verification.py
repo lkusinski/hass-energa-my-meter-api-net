@@ -555,6 +555,73 @@ class TestVerifyPeriodButton:
         await button.async_press()
         entry.async_create_background_task.assert_not_called()
 
+    def test_result_message_includes_full_summary(self):
+        _, button = self._button({})
+        msg = button._result_message(
+            {
+                "empty": False,
+                "period_start": "2026-07-01",
+                "period_end": "2026-09-01",
+                "netto": 129.04,
+                "vat": 29.68,
+                "brutto": 158.72,
+                "do_zaplaty": 158.72,
+                "old_system": True,
+                "kwh": {
+                    "cover_1": 83.0,
+                    "cover_2": 342.0,
+                    "bank_open_1": 500.0,
+                    "bank_open_2": 500.0,
+                },
+                "coverage_unknown": False,
+                "source": "energa_api",
+            }
+        )
+        assert "129.04 PLN" in msg
+        assert "29.68 PLN" in msg
+        assert "158.72 PLN" in msg
+        assert "83 kWh" in msg and "342 kWh" in msg
+        assert "energa_api" in msg
+
+    def test_result_message_warns_on_unknown_coverage(self):
+        _, button = self._button({})
+        msg = button._result_message(
+            {
+                "empty": False,
+                "period_start": "2026-07-01",
+                "period_end": "2026-09-01",
+                "netto": 300.0,
+                "vat": 69.0,
+                "brutto": 369.0,
+                "do_zaplaty": 369.0,
+                "old_system": True,
+                "coverage_unknown": True,
+                "warnings": ["Brak historii magazynu."],
+                "source": "energa_api",
+            }
+        )
+        assert "Uwaga" in msg
+        assert "Brak historii magazynu." in msg
+
+    def test_result_message_net_billing_shows_deposit(self):
+        _, button = self._button({})
+        msg = button._result_message(
+            {
+                "empty": False,
+                "netto": 628.55,
+                "vat": 144.57,
+                "brutto": 773.12,
+                "do_zaplaty": 615.53,
+                "deposit_applied": 157.59,
+                "old_system": False,
+                "coverage_unknown": False,
+                "source": "energa_api",
+            }
+        )
+        assert "Depozyt" in msg
+        assert "157.59 PLN" in msg
+        assert "615.53 PLN" in msg
+
     @pytest.mark.asyncio
     async def test_run_verification_stores_result_and_notifies(self):
         entry, button = self._button(
@@ -722,6 +789,46 @@ class TestVerificationSensor:
         sensor = self._sensor({"empty": True, "error": "no_data"})
         assert sensor.native_value is None
         assert sensor.extra_state_attributes["status"] == "empty"
+
+    def test_full_breakdown_attributes_include_new_lines(self):
+        sensor = self._sensor(
+            {
+                "empty": False,
+                "do_zaplaty": 158.72,
+                "netto": 129.04,
+                "vat": 29.68,
+                "brutto": 158.72,
+                "deposit_applied": 0.0,
+                "deposit_generated": 0.0,
+                "deposit_open": 0.0,
+                "deposit_close": 0.0,
+                "distr_abonament": 1.40,
+                "distr_grid_fixed": 40.34,
+                "distr_capacity": 48.10,
+                "coverage_unknown": False,
+                "warnings": [],
+                "old_system": True,
+                "system": "net_metering",
+                "prosumer_coefficient": 0.8,
+                "kwh": {"cover_1": 83.0, "bank_open_1": 500.0},
+                "source": SOURCE_ENERGA_API,
+                "period_start": "2026-07-01",
+                "period_end": "2026-09-01",
+            }
+        )
+        attrs = sensor.extra_state_attributes
+        assert attrs["distr_abonament"] == 1.40
+        assert attrs["distr_grid_fixed"] == 40.34
+        assert attrs["distr_capacity"] == 48.10
+        assert attrs["deposit_open"] == 0.0
+        assert attrs["deposit_generated"] == 0.0
+        assert attrs["deposit_close"] == 0.0
+        assert attrs["coverage_unknown"] is False
+        assert attrs["warnings"] == []
+        assert attrs["system"] == "net_metering"
+        assert attrs["prosumer_coefficient"] == 0.8
+        assert attrs["kwh"]["cover_1"] == 83.0
+        assert attrs["kwh"]["bank_open_1"] == 500.0
 
     def test_calculating_result_reports_progress(self):
         sensor = self._sensor(

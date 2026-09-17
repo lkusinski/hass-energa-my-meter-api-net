@@ -238,3 +238,176 @@ class TestDefensive:
         # Even with export, old net-metering must not create a PLN deposit.
         assert res["deposit"] == 0.0
         assert res["do_zaplaty"] == res["brutto"]
+
+
+class TestWisniowaNetMeteringOpeningBank:
+    """Faza 3: Wiśniowa 07-08.2026 with an opening warehouse (bank_open)."""
+
+    FEES = {
+        "energy_day": 0.7125,
+        "energy_night": 0.4622,
+        "excise_mwh": 5.0,
+        "trade_fee": 16.18,
+        "abonament": 0.70,
+        "grid_fixed": 20.17,
+        "grid_var_day": 0.4017,
+        "grid_var_night": 0.0851,
+        "quality": 0.0332,
+        "oze": 0.0073,
+        "cogen": 0.0030,
+        "capacity": 24.05,
+    }
+
+    def test_opening_bank_covers_and_matches_invoice_to_the_grosz(self):
+        # saldo_plus 83/342, gross import 120/372 (see the pure helper).
+        hourly = _hourly((83, 37, 63), (342, 30, 20))
+        res = build_period_invoice(
+            hourly,
+            fees=self.FEES,
+            rcem=0.0,
+            months=2,
+            old_system=True,
+            bank_open_1=500.0,
+            bank_open_2=500.0,
+            prosumer_coefficient=0.8,
+            tariff="G12W",
+        )
+        # cover = min(bank_open, salda dodatnie) -> fully covered
+        assert res["kwh"]["cover_1"] == 83.0
+        assert res["kwh"]["cover_2"] == 342.0
+        assert res["kwh"]["bank_open_1"] == 500.0
+        assert res["kwh"]["bank_open_2"] == 500.0
+        assert res["kwh"]["gross_import_1"] == 120.0
+        assert res["kwh"]["gross_import_2"] == 372.0
+        # real invoice FES/00042: 129,04 / 29,68 / 158,72
+        assert res["sale_energy_day"] == 0.0
+        assert res["sale_energy_night"] == 0.0
+        assert res["excise_day"] == 0.60
+        assert res["excise_night"] == 1.86
+        assert res["distr_var_day"] == 0.0
+        assert res["distr_var_night"] == 0.0
+        assert res["distr_quality"] == 0.0
+        assert res["distr_oze"] == 3.10
+        assert res["distr_cogen"] == 1.28
+        assert res["netto"] == 129.04
+        assert res["vat"] == 29.68
+        assert res["brutto"] == 158.72
+        assert res["do_zaplaty"] == 158.72
+        assert res["coverage_unknown"] is False
+        assert res["warnings"] == []
+        assert res["old_system"] is True
+        assert res["system"] == "net_metering"
+        # bank close = open + export*opust - cover
+        assert res["kwh"]["bank_close_1"] == round(500.0 + 100.0 * 0.8 - 83.0, 3)
+        assert res["kwh"]["bank_close_2"] == round(500.0 + 50.0 * 0.8 - 342.0, 3)
+
+    def test_fixed_lines_are_split_but_sum_to_distr_fixed(self):
+        hourly = _hourly((83, 37, 63), (342, 30, 20))
+        res = build_period_invoice(
+            hourly,
+            fees=self.FEES,
+            rcem=0.0,
+            months=2,
+            old_system=True,
+            bank_open_1=500.0,
+            bank_open_2=500.0,
+        )
+        assert res["distr_abonament"] == 1.40
+        assert res["distr_grid_fixed"] == 40.34
+        assert res["distr_capacity"] == 48.10
+        assert res["distr_fixed"] == 89.84
+
+    def test_no_bank_history_reports_unknown_and_warns(self):
+        hourly = _hourly((83, 37, 63), (342, 30, 20))
+        res = build_period_invoice(
+            hourly, fees=self.FEES, rcem=0.0, months=2, old_system=True
+        )
+        assert res["coverage_unknown"] is True
+        assert res["warnings"]
+        assert res["kwh"]["cover_1"] == 0.0
+        assert res["kwh"]["bank_open_1"] is None
+        assert res["kwh"]["bank_close_1"] is None
+        # The result is still returned (never an exception), JSON-serialisable.
+        assert res["netto"] > 0.0
+        import json
+
+        json.dumps(res)
+
+
+class TestFullInvoiceFieldSet:
+    """Every invoice line item required by the Faza 3 output contract."""
+
+    REQUIRED = (
+        "sale_energy_day",
+        "sale_energy_night",
+        "excise_day",
+        "excise_night",
+        "excise",
+        "trade_fee",
+        "distr_abonament",
+        "distr_grid_fixed",
+        "distr_var_day",
+        "distr_var_night",
+        "distr_quality",
+        "distr_oze",
+        "distr_cogen",
+        "distr_capacity",
+        "distr_total",
+        "distr_fixed",
+        "netto",
+        "vat",
+        "brutto",
+        "deposit_generated",
+        "deposit_open",
+        "deposit_applied",
+        "deposit_close",
+        "do_zaplaty",
+        "coverage_unknown",
+        "warnings",
+        "old_system",
+        "system",
+        "prosumer_coefficient",
+        "tariff",
+        "rcem",
+        "months",
+        "kwh_source",
+    )
+
+    def test_net_billing_result_has_all_lines(self):
+        hourly = _hourly((398, 38, 238), (309, 23, 197))
+        res = build_period_invoice(
+            hourly,
+            fees=G12W_DEFAULT_FEES,
+            rcem=0.29453,
+            months=1,
+            old_system=False,
+            deposit_open_pln=0.0,
+            prosumer_coefficient=0.0,
+            tariff="G12W",
+        )
+        for key in self.REQUIRED:
+            assert key in res, key
+        assert res["deposit_generated"] == 157.59
+        assert res["deposit_open"] == 0.0
+        assert res["deposit_applied"] == 157.59
+        assert res["deposit_close"] == 0.0
+        assert res["coverage_unknown"] is False
+        assert res["netto"] == 628.55
+        assert res["brutto"] == 773.12
+        assert res["do_zaplaty"] == 615.53
+
+    def test_net_billing_unknown_opening_keeps_numbers_but_flags(self):
+        # No explicit opening deposit -> honest null + coverage_unknown, yet
+        # the single-month amount (Agrestowa 08.2026) is still exact.
+        hourly = _hourly((398, 38, 238), (309, 23, 197))
+        res = build_period_invoice(
+            hourly, fees=G12W_DEFAULT_FEES, rcem=0.29453, months=1,
+            old_system=False,
+        )
+        assert res["deposit_open"] is None
+        assert res["coverage_unknown"] is True
+        assert res["warnings"]
+        assert res["brutto"] == 773.12
+        assert res["deposit_applied"] == 157.59
+        assert res["do_zaplaty"] == 615.53
+

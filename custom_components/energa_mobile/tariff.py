@@ -314,6 +314,7 @@ def compute_bill(
     cover_day: float = 0.0,
     cover_night: float = 0.0,
     deposit_pln: float | None = None,
+    deposit_generated: float | None = None,
     excise_day: float = 0.0,
     excise_night: float = 0.0,
     add_excise: bool = False,
@@ -332,8 +333,14 @@ def compute_bill(
         cover_day/night: kWh covered by the virtual warehouse (old
             net-metering only; energy charge drops, excise and
             distribution stay on the FULL import).
-        deposit_pln: explicit deposit to subtract (new net-billing).
+        deposit_pln: explicit TOTAL available deposit to subtract (new
+            net-billing), i.e. opening balance + this period's generation.
             When None, computed as export_kwh*rcem*1.23.
+        deposit_generated: this period's freshly generated deposit
+            (export_kwh*rcem*1.23) for the breakdown. When None it is derived
+            from ``export_kwh`` and ``rcem``; callers that pass an explicit
+            total in ``deposit_pln`` (opening + generated) should pass it too
+            so ``deposit_open`` is reported correctly.
         excise_day/night: kWh on which excise is charged — the "nakładka"
             (gross import - salda dodatnie) for net-billing. Informational
             when ``add_excise`` is False.
@@ -387,7 +394,13 @@ def compute_bill(
     line_quality = _r2(pay_total * f["quality"])
     line_oze = _r2(total_kwh * f["oze"])
     line_cogen = _r2(total_kwh * f["cogen"])
-    line_fixed = _r2((f["abonament"] + f["grid_fixed"] + f["capacity"]) * months)
+    # Fixed monthly lines, each rounded to grosze (the invoice prints them
+    # separately: abonament / sieciowa stała / mocowa). ``distr_fixed`` is
+    # kept as their sum for backward compatibility.
+    line_abonament = _r2(f["abonament"] * months)
+    line_grid_fixed = _r2(f["grid_fixed"] * months)
+    line_capacity = _r2(f["capacity"] * months)
+    line_fixed = _r2(line_abonament + line_grid_fixed + line_capacity)
     distr_total = _r2(
         line_var_day + line_var_night + line_quality + line_oze + line_cogen + line_fixed
     )
@@ -400,11 +413,18 @@ def compute_bill(
     # 07-08.2026: the deposit is capped at ENERGY SALE gross (energy +
     # excise when excise is a real line) — never trade fee, never
     # distribution/grid fees.
+    if deposit_generated is None:
+        deposit_generated = _r2(export_kwh * float(rcem) * 1.23)
+    else:
+        deposit_generated = _r2(max(0.0, float(deposit_generated)))
     if deposit_pln is None:
-        deposit_pln = export_kwh * float(rcem) * 1.23
+        deposit_pln = deposit_generated
     deposit = _r2(max(0.0, float(deposit_pln)))
+    # Opening balance = total available minus what this period generated.
+    deposit_open = _r2(max(0.0, deposit - deposit_generated))
     cap_gross = _r2((line_energy_day + line_energy_night + excise_net) * (1.0 + VAT_RATE))
     applied = _r2(min(deposit, cap_gross))
+    deposit_close = _r2(max(0.0, deposit - applied))
     do_zaplaty = _r2(brutto - applied)
 
     out = {
@@ -427,6 +447,9 @@ def compute_bill(
         "distr_quality": line_quality,
         "distr_oze": line_oze,
         "distr_cogen": line_cogen,
+        "distr_abonament": line_abonament,
+        "distr_grid_fixed": line_grid_fixed,
+        "distr_capacity": line_capacity,
         "distr_fixed": line_fixed,
         "distr_total": distr_total,
         "distr_gross": _r2(distr_total * (1.0 + VAT_RATE)),
@@ -434,7 +457,10 @@ def compute_bill(
         "vat": vat,
         "brutto": brutto,
         "deposit": deposit,
+        "deposit_generated": deposit_generated,
+        "deposit_open": deposit_open,
         "deposit_applied": applied,
+        "deposit_close": deposit_close,
         "do_zaplaty": do_zaplaty,
     }
     return out

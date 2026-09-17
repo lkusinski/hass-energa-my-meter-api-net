@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from time import monotonic
 from zoneinfo import ZoneInfo
@@ -52,6 +52,7 @@ from .core.verification import (
     SOURCE_RECORDER,
     build_period_invoice,
     choose_period_source,
+    opening_bank_from_monthly_flows,
     period_is_historical,
 )
 from .dashboard_generator import (
@@ -380,8 +381,10 @@ async def async_register_services(hass: HomeAssistant) -> None:
         Faza 2: when ``entry_id`` + ``meter_id`` are supplied and the period
         is historical (or the recorder has no data), the Energa API is the
         preferred source; otherwise the hourly recorder statistics are used.
-        The response reports ``source`` and ``cached``. No opening deposit /
-        warehouse balance; RCEm from the call, coordinator cache, Options or
+        The response reports ``source`` and ``cached``. Faza 3 opening
+        balances: the net-metering warehouse is reconstructed from prior
+        monthly flows; ``bank_open_1/2`` and ``deposit_open_pln`` are optional
+        manual overrides. RCEm from the call, coordinator cache, Options or
         the last-known default. Always returns a JSON-serialisable dict; an
         empty window yields ``empty: true`` with an ``error`` and zeros.
         """
@@ -399,6 +402,9 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 vol.Optional("meter_id"): str,
                 vol.Optional("rcem_pln"): vol.Coerce(float),
                 vol.Optional("rcem"): vol.Coerce(float),
+                vol.Optional("bank_open_1"): vol.Coerce(float),
+                vol.Optional("bank_open_2"): vol.Coerce(float),
+                vol.Optional("deposit_open_pln"): vol.Coerce(float),
             }
         ),
         supports_response=SupportsResponse.ONLY,
@@ -491,17 +497,23 @@ def _resolve_period_rcem(entry: ConfigEntry, coordinator, data: dict) -> float:
         return float(DEFAULT_BANK_RCE_PRICE)
 
 
-def _meter_old_system(entry: ConfigEntry, meter: dict) -> bool:
-    """True for old net-metering (coefficient >= 0.7)."""
+def _meter_coefficient(entry: ConfigEntry, meter: dict) -> float:
+    """Prosumer opust coefficient for a meter (never raises)."""
     meter_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_id))
     try:
-        coeff = get_prosumer_coefficient(
-            dict(entry.options or {}), meter_id, serial=serial
+        return float(
+            get_prosumer_coefficient(
+                dict(entry.options or {}), meter_id, serial=serial
+            )
         )
     except Exception:  # noqa: BLE001 - never break a service call on bad options
-        coeff = DEFAULT_PROSUMER_COEFFICIENT
-    return coeff >= 0.7
+        return float(DEFAULT_PROSUMER_COEFFICIENT)
+
+
+def _meter_old_system(entry: ConfigEntry, meter: dict) -> bool:
+    """True for old net-metering (coefficient >= 0.7)."""
+    return _meter_coefficient(entry, meter) >= 0.7
 
 
 async def _active_meters_for_period(
@@ -659,6 +671,83 @@ async def _collect_meter_hourly_api(
     return cleaned
 
 
+def _stat_row_moment(value):
+    """Normalise a statistics ``start`` field (datetime or epoch) to local."""
+    try:
+        if isinstance(value, datetime):
+            moment = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            return moment.astimezone(TIMEZONE)
+        moment = dt_util.utc_from_timestamp(float(value))
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone(TIMEZONE)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+async def _collect_monthly_flows(
+    hass: HomeAssistant, meter: dict, start: datetime, *, months: int = 14
+) -> dict:
+    """Monthly import/export flows preceding ``start`` from recorder stats.
+
+    Used for Faza 3 opening balances: the net-metering warehouse at the start
+    of the verified period is the FIFO result over these monthly flows.
+
+    Returns ``{(year, month): {suffix: kWh}}``; an empty dict means the
+    recorder has no usable history (the caller then reports ``coverage_unknown``
+    instead of guessing).
+    """
+    from .settlement import is_export_prosumer
+
+    meter_point_id = str(meter.get("meter_point_id", ""))
+    serial = str(meter.get("meter_serial", meter_point_id)).lower()
+    has_zones = meter.get("zone_count", 1) > 1
+
+    if has_zones:
+        suffixes = ["import_1", "import_2"]
+    else:
+        suffixes = ["import"]
+    if is_export_prosumer(meter):
+        suffixes += [s.replace("import", "export") for s in list(suffixes)]
+
+    statistic_ids = {
+        suffix: _statistic_id_for(hass, meter_point_id, serial, suffix)
+        for suffix in suffixes
+    }
+    lookback_start = start - timedelta(days=31 * max(1, int(months)))
+    try:
+        raw = await get_instance(hass).async_add_executor_job(
+            functools.partial(
+                statistics_during_period,
+                hass,
+                lookback_start,
+                start,
+                list(statistic_ids.values()),
+                "day",
+                None,
+                {"state"},
+            )
+        ) or {}
+    except Exception as err:  # noqa: BLE001 - missing recorder must not raise
+        _LOGGER.debug("verify_period monthly statistics query failed: %s", err)
+        return {}
+
+    monthly: dict = {}
+    for suffix, statistic_id in statistic_ids.items():
+        for row in raw.get(statistic_id, []) or []:
+            moment = _stat_row_moment(row.get("start"))
+            state = row.get("state")
+            if moment is None or state is None:
+                continue
+            try:
+                value = float(state)
+            except (ValueError, TypeError):
+                continue
+            bucket = monthly.setdefault((moment.year, moment.month), {})
+            bucket[suffix] = bucket.get(suffix, 0.0) + value
+    return monthly
+
+
 def _verify_cache_get(coordinator, key: tuple) -> dict | None:
     """Return a cached invoice for ``key`` when a real dict cache exists."""
     cache = getattr(coordinator, "_verify_cache", None)
@@ -691,12 +780,16 @@ def _empty_period_result(meter: dict, old_system: bool) -> dict:
     """Zeroed, JSON-safe breakdown for a meter with no data in the window."""
     meter_point_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_point_id))
+    kwh = {key: 0.0 for key in PERIOD_KWH_KEYS}
+    kwh.update({"bank_open_1": None, "bank_open_2": None,
+                "bank_close_1": None, "bank_close_2": None})
     return {
         "empty": True,
         "error": "no_data",
         "meter_point_id": meter_point_id,
         "meter_serial": serial,
         "old_system": bool(old_system),
+        "system": "net_metering" if old_system else "net_billing",
         "sale_energy_day": 0.0,
         "sale_energy_night": 0.0,
         "excise_day": 0.0,
@@ -708,14 +801,23 @@ def _empty_period_result(meter: dict, old_system: bool) -> dict:
         "distr_quality": 0.0,
         "distr_oze": 0.0,
         "distr_cogen": 0.0,
+        "distr_abonament": 0.0,
+        "distr_grid_fixed": 0.0,
+        "distr_capacity": 0.0,
         "distr_fixed": 0.0,
+        "distr_total": 0.0,
         "netto": 0.0,
         "vat": 0.0,
         "brutto": 0.0,
         "deposit": 0.0,
+        "deposit_generated": 0.0,
+        "deposit_open": None,
         "deposit_applied": 0.0,
+        "deposit_close": 0.0,
         "do_zaplaty": 0.0,
-        "kwh": {key: 0.0 for key in PERIOD_KWH_KEYS},
+        "coverage_unknown": True,
+        "warnings": ["Brak danych w wybranym okresie."],
+        "kwh": kwh,
     }
 
 
@@ -734,11 +836,19 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
     recorder series is used as fallback. RCEm resolution, fee tables and the
     invoice math (``core.verification.build_period_invoice``) are unchanged.
 
+    Faza 3 resolves the opening balances: for net-metering the service
+    reconstructs the kWh warehouse at the start of the period from the prior
+    monthly recorder flows (FIFO 12-month); for net-billing the opening
+    deposit is taken from ``deposit_open_pln`` when provided (per-month
+    historical RCEm is Faza 4). Manual overrides ``bank_open_1/2`` and
+    ``deposit_open_pln`` are honoured. Missing balances yield
+    ``coverage_unknown=true`` plus a warning, never a fake invoice parity.
+
     The response carries ``source`` (``energa_api`` | ``recorder_hourly`` |
-    ``mixed``) and ``cached``. Results are memoised per (meter, period) in an
-    in-memory coordinator cache for the session; cross-restart persistence in
-    the canonical SQLite store is a Faza 3 follow-up (never reported as
-    cached when it is not).
+    ``mixed``) and ``cached``. Results are memoised per (meter, period, RCEm,
+    opening balances) in an in-memory coordinator cache for the session;
+    cross-restart persistence in the canonical SQLite store is a follow-up
+    (never reported as cached when it is not).
 
     Always returns a JSON-serialisable dict; an empty window yields
     ``empty: true`` with an ``error`` and zeros instead of raising.
@@ -785,13 +895,36 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
     api_available = api is not None and bool(data.get("meter_id"))
     historical = period_is_historical(start_dt, end_dt)
 
+    def _optional_float(key):
+        value = data.get(key)
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    override_bank_1 = _optional_float("bank_open_1")
+    override_bank_2 = _optional_float("bank_open_2")
+    override_deposit = _optional_float("deposit_open_pln")
+
     results: list[dict] = []
     for meter in meters:
         old_system = _meter_old_system(entry, meter)
+        coefficient = _meter_coefficient(entry, meter)
+        has_zones = meter.get("zone_count", 1) > 1
         meter_point_id = str(meter.get("meter_point_id", ""))
         serial = str(meter.get("meter_serial", meter_point_id))
 
-        cache_key = (meter_point_id, start_dt.isoformat(), end_dt.isoformat())
+        cache_key = (
+            meter_point_id,
+            start_dt.isoformat(),
+            end_dt.isoformat(),
+            float(rcem),
+            override_bank_1,
+            override_bank_2,
+            override_deposit,
+        )
         cached = _verify_cache_get(coordinator, cache_key)
         if cached is not None:
             results.append({**cached, "cached": True})
@@ -822,6 +955,29 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
             )
             continue
 
+        # Faza 3 opening balances: net-metering warehouse (kWh) from the
+        # recorder's prior monthly flows; net-billing deposit only when the
+        # caller provides it (per-month historical RCEm is Faza 4).
+        bank_open_1: float | None = None
+        bank_open_2: float | None = None
+        deposit_open: float | None = None
+        if old_system:
+            if override_bank_1 is not None or override_bank_2 is not None:
+                bank_open_1 = override_bank_1 if override_bank_1 is not None else 0.0
+                bank_open_2 = override_bank_2 if override_bank_2 is not None else 0.0
+            else:
+                monthly = await _collect_monthly_flows(hass, meter, start_dt)
+                bank_open_1, bank_open_2, _bank_detail = (
+                    opening_bank_from_monthly_flows(
+                        monthly,
+                        coefficient,
+                        has_zones=has_zones,
+                        period_start=start_dt,
+                    )
+                )
+        else:
+            deposit_open = override_deposit
+
         fees = fees_from_options(dict(entry.options or {}), meter.get("tariff"))
         invoice = build_period_invoice(
             hourly,
@@ -829,9 +985,13 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
             rcem=rcem,
             months=months,
             old_system=old_system,
-            deposit_open_pln=None,
+            deposit_open_pln=deposit_open,
             cover_day=0.0,
             cover_night=0.0,
+            bank_open_1=bank_open_1,
+            bank_open_2=bank_open_2,
+            prosumer_coefficient=coefficient,
+            tariff=meter.get("tariff"),
         )
         result = {
             **invoice,
@@ -839,7 +999,10 @@ async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
             "meter_point_id": meter_point_id,
             "meter_serial": serial,
             "tariff": meter.get("tariff"),
-            "has_zones": meter.get("zone_count", 1) > 1,
+            "has_zones": has_zones,
+            "prosumer_coefficient": coefficient,
+            "period_start": base["period_start"],
+            "period_end": base["period_end"],
             "source": source,
             "cached": False,
         }

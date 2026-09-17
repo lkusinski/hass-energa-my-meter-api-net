@@ -690,14 +690,49 @@ class EnergaVerifyPeriodButton(ButtonEntity):
                 f"w okresie {result.get('period_start') or '?'} – "
                 f"{result.get('period_end') or '?'}."
             )
-        return (
-            f"Okres: {result.get('period_start', '?')} – "
-            f"{result.get('period_end', '?')}\n\n"
-            f"- Netto: **{_pln(result.get('netto'))}**\n"
-            f"- Brutto: **{_pln(result.get('brutto'))}**\n"
-            f"- Do zapłaty: **{_pln(result.get('do_zaplaty'))}**\n\n"
-            f"Źródło danych: {result.get('source', '?')}."
-        )
+        start = result.get("period_start", "?")
+        end = result.get("period_end", "?")
+        lines = [
+            f"Okres: {start} – {end}",
+            "",
+            f"- Netto: **{_pln(result.get('netto'))}**",
+            f"- VAT: **{_pln(result.get('vat'))}**",
+            f"- Brutto: **{_pln(result.get('brutto'))}**",
+        ]
+        if result.get("old_system"):
+            kwh = result.get("kwh") or {}
+            cover_1 = kwh.get("cover_1")
+            cover_2 = kwh.get("cover_2")
+            if cover_1 is not None or cover_2 is not None:
+                lines.append(
+                    "- Pokrycie z magazynu: "
+                    f"**{_kwh(cover_1)}** L1 + **{_kwh(cover_2)}** L2"
+                )
+            bank_open_1 = kwh.get("bank_open_1")
+            if bank_open_1 is not None:
+                lines.append(
+                    "- Stan magazynu na start: "
+                    f"**{_kwh(bank_open_1)}** L1 + **{_kwh(kwh.get('bank_open_2'))}** L2"
+                )
+        else:
+            deposit_applied = result.get("deposit_applied")
+            if deposit_applied is not None:
+                lines.append(f"- Depozyt: **{_pln(deposit_applied)}**")
+        lines.append(f"- Do zapłaty: **{_pln(result.get('do_zaplaty'))}**")
+        if result.get("coverage_unknown"):
+            warnings = result.get("warnings") or []
+            lines.append("")
+            lines.append(
+                "Uwaga: "
+                + (
+                    warnings[0]
+                    if warnings
+                    else "niepełne dane o saldzie początkowym — wynik przybliżony."
+                )
+            )
+        lines.append("")
+        lines.append(f"Źródło danych: {result.get('source', '?')}.")
+        return "\n".join(lines)
 
 
 def _pln(value) -> str:
@@ -707,3 +742,10 @@ def _pln(value) -> str:
     except (ValueError, TypeError):
         return "brak danych"
 
+
+def _kwh(value) -> str:
+    """Format a kWh amount defensively for the notification."""
+    try:
+        return f"{float(value):.0f} kWh"
+    except (ValueError, TypeError):
+        return "brak danych"

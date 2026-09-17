@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.0-beta.6 (2026-09-17) — kalkulator: pełna faktura + salda początkowe (Faza 3)
+
+- **Net-metering**: odtworzenie stanu magazynu (FIFO 12 m-cy) na początek okresu i pokrycie energii/dystrybucji zmiennej/jakościowej — faktura Wiśniowa 07–08.2026 odtwarzana co do grosza (129,04/29,68/158,72).
+- **Net-billing**: saldo depozytu na początek okresu (wejście `deposit_open_pln` lub odtworzenie), `deposit_applied = min(open+generated, cap)`.
+- **Pełny zestaw pozycji** faktury w wyniku/atrybutach (sprzedaż, dystrybucja per pozycja, akcyza, depozyt, magazyn open/close, cover, warnings) + czytelniejsze powiadomienie.
+- Brak historii → `coverage_unknown=true` i ostrzeżenie zamiast cichego zawyżenia.
+
 ## v1.9.0-beta.5 (2026-09-17) — UX kalkulatora, postęp historii, PV w onboardingu
 
 - **Bez migania encji**: zmiana dat okresu nie przeładowuje już integracji (smart update listener).
