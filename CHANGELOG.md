@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.9.0-beta.2 (2026-09-17) — Weryfikacja rachunku (kalkulator) + detekcja ergo5
+
+### 🧾 Weryfikacja rachunku za dowolny okres (beta)
+- **Usługa `energa_mobile.verify_period`** (start, end, opcjonalnie `rcem_pln`): liczy rachunek jak sprzedawca
+  i **zwraca pełne rozbicie** (netto/VAT/brutto/depozyt/do zapłaty + pozycje i salda).
+- **Źródło danych**: API Energa (miesiące wstecz) z fallbackiem na statystyki recordera; `source` w odpowiedzi.
+- **UI**: `date.energa_<serial>_okres_start`, `date.energa_<serial>_okres_koniec`,
+  `button.energa_<serial>_przelicz_okres` oraz `sensor.energa_<serial>_weryfikacja_rachunku`
+  (stan = `do zaplaty`, ~35 atrybutów z rozbiciem).
+- Weryfikacja na żywo: odtwarza realną fakturę (różnica ≤ ~0,7 zł = ±1 kWh danych OSD).
+
+### 🔎 Detekcja obcej instalacji ergo5
+- Skan `custom_components/*/manifest.json` + `.storage/hacs.repositories` → **Repairs** (`ergo5_detected`)
+  i powiadomienie z listą ścieżek; automatyczne domknięcie, gdy kopii już nie ma.
+- Kreator: krok ostrzegawczy z potwierdzeniem przed utworzeniem wpisu.
+- `docs/MIGRACJA_ergo5.md`: przewodnik migracji i revertu (oparty na testach na labach).
+
+### 🛠️ Poprawki
+- Onboarding konsumenta: wpis dostaje jawnie `prosumer_coefficient = 0.0` (+ backfill istniejących wpisów).
+- `async_get_hourly_range` zwracał 0 punktów (AttributeError w logu) — naprawione.
+- Poprawne selectory `number` w `services.yaml`; `device_registry` bez deprecacji.
+
 ## v1.9.0 (2026-09-17) — Rozliczenie net-billing na saldach godzinowych (zgodne z fakturą)
 
 ### 🧮 Wierne odtworzenie faktury Energa (net-billing)
