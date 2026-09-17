@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.0-beta.3 (2026-09-17) — Panel „Sprawdzenie rachunku" (UI)
+
+- Encje kalkulatora przeniesione do grupy **Konfiguracja** (poza „Sterowanie" i „Sensory" na stronie urządzenia).
+- Nazwy: **Okres Start**, **Okres Koniec**, **Przelicz okres rozliczeniowy**, **Okres: rozliczenie**.
+- Generowany pulpit: sekcja **„Sprawdzenie rachunku"** z encjami w kolejności (start → koniec → przelicz → wynik).
+- Wording: ergo5 to **integracja bazowa** (usunięto „obca"); usługa API zwraca dane, poprawki onboardingu konsumenta.
+
 ## v1.9.0-beta.2 (2026-09-17) — Weryfikacja rachunku (kalkulator) + detekcja ergo5
 
 ### 🧾 Weryfikacja rachunku za dowolny okres (beta)

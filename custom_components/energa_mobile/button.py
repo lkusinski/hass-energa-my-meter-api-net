@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -431,9 +431,11 @@ class EnergaVerifyPeriodButton(ButtonEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Przelicz Okres"
+    _attr_name = "Przelicz okres rozliczeniowy"
     _attr_translation_key = "verify_period"
     _attr_icon = "mdi:calculator-variant-outline"
+    # Config entity: shown under "Configuration", not under "Controls".
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,

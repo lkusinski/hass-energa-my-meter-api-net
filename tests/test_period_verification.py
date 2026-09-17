@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from homeassistant.helpers.entity import EntityCategory
 
 from custom_components.energa_mobile.const import (
     CONF_VERIFY_PERIOD_END,
@@ -464,6 +465,20 @@ class TestPeriodDateEntity:
         assert entity.native_value == date(2026, 8, 1)
         assert entity.entity_id == "date.energa_10000001_okres_start"
         assert entity._attr_unique_id == "energa_10000001_period_start"
+        assert entity._attr_name == "Okres Start"
+        assert entity._attr_entity_category == EntityCategory.CONFIG
+
+    def test_end_entity_name_and_category(self):
+        from custom_components.energa_mobile.date import EnergaPeriodDate
+
+        entry = MagicMock()
+        entry.options = {}
+        meter = {"meter_point_id": "10000001", "meter_serial": "10000001"}
+        entity = EnergaPeriodDate(entry, meter, "end", MagicMock())
+        assert entity._attr_name == "Okres Koniec"
+        assert entity.entity_id == "date.energa_10000001_okres_koniec"
+        assert entity._attr_entity_category == EntityCategory.CONFIG
+        assert entity._attr_icon == "mdi:calendar-range"
 
     def test_unset_returns_none(self):
         _, entity = self._entity({})
@@ -512,6 +527,8 @@ class TestVerifyPeriodButton:
         )
         assert button2.available is True
         assert button2.entity_id == "button.energa_10000001_przelicz_okres"
+        assert button2._attr_name == "Przelicz okres rozliczeniowy"
+        assert button2._attr_entity_category == EntityCategory.CONFIG
 
     @pytest.mark.asyncio
     async def test_press_schedules_background_task(self):
@@ -606,6 +623,8 @@ class TestVerificationSensor:
         assert attrs["kwh"]["saldo_plus_1"] == 398.0
         assert attrs["netto"] == 628.55
         assert sensor._attr_state_class is None
+        assert sensor._attr_name == "Okres: rozliczenie"
+        assert sensor._attr_entity_category == EntityCategory.CONFIG
 
     def test_no_result_is_unavailable(self):
         sensor = self._sensor(None)

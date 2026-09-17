@@ -1,7 +1,7 @@
 """Period verification result sensor for Energa My Meter (Faza 2).
 
 Renders the latest ``energa_mobile.verify_period`` result computed by the
-``Przelicz Okres`` button. The state is the amount payable (PLN) for the
+``Przelicz okres rozliczeniowy`` button. The state is the amount payable (PLN) for the
 chosen period; the full invoice breakdown lives in the attributes. No
 ``state_class``/``device_class`` energy is set, so this entity can never
 pollute the Home Assistant Energy Dashboard statistics.
@@ -14,6 +14,7 @@ import logging
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,10 +55,13 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
     """Latest arbitrary-period invoice verification result."""
 
     _attr_has_entity_name = True
-    _attr_name = "Weryfikacja Rachunku"
+    _attr_name = "Okres: rozliczenie"
     _attr_translation_key = "period_verification"
     _attr_icon = "mdi:receipt-text-check-outline"
     _attr_native_unit_of_measurement = "PLN"
+    # Config entity: keeps the result out of the "Sensors" section of the
+    # device page and groups it with the dates/button under "Configuration".
+    _attr_entity_category = EntityCategory.CONFIG
     # Deliberately no state_class / energy device_class: this is a computed
     # period result, never an Energy Dashboard source (Faza 2 requirement).
     _attr_state_class = None

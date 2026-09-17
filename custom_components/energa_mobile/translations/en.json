@@ -185,7 +185,7 @@
         "name": "Configure Energy Dashboard"
       },
       "verify_period": {
-        "name": "Recalculate Period"
+        "name": "Recalculate Billing Period"
       }
     },
     "date": {
@@ -198,7 +198,7 @@
     },
     "sensor": {
       "period_verification": {
-        "name": "Invoice Verification"
+        "name": "Period: Settlement"
       }
     }
   }

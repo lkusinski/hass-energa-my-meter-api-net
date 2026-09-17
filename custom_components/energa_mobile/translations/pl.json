@@ -185,7 +185,7 @@
         "name": "Skonfiguruj Panel Energia"
       },
       "verify_period": {
-        "name": "Przelicz Okres"
+        "name": "Przelicz okres rozliczeniowy"
       }
     },
     "date": {
@@ -198,7 +198,7 @@
     },
     "sensor": {
       "period_verification": {
-        "name": "Weryfikacja Rachunku"
+        "name": "Okres: rozliczenie"
       }
     }
   }

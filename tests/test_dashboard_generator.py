@@ -264,6 +264,53 @@ def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
     assert "Ceny Dynamiczne RCE" in rce_card["title"]
 
 
+def test_verification_section_added_in_order(mock_meter_net_billing):
+    verification_ids = {
+        "date.energa_10000001_okres_start",
+        "date.energa_10000001_okres_koniec",
+        "button.energa_10000001_przelicz_okres",
+        "sensor.energa_10000001_weryfikacja_rachunku",
+    }
+    mock_hass = MagicMock()
+    mock_hass.states.get.side_effect = (
+        lambda eid: MagicMock() if eid in verification_ids else None
+    )
+
+    view = build_meter_view(mock_meter_net_billing, coeff=0.0, hass=mock_hass)
+    section = next(
+        c for c in view["cards"] if c.get("title") == "Sprawdzenie rachunku"
+    )
+    assert section["type"] == "entities"
+    entities = section["entities"]
+    assert [e["entity"] for e in entities] == [
+        "date.energa_10000001_okres_start",
+        "date.energa_10000001_okres_koniec",
+        "button.energa_10000001_przelicz_okres",
+        "sensor.energa_10000001_weryfikacja_rachunku",
+    ]
+    assert [e["name"] for e in entities] == [
+        "Okres Start",
+        "Okres Koniec",
+        "Przelicz okres rozliczeniowy",
+        "Okres: rozliczenie",
+    ]
+
+
+def test_verification_section_skipped_without_entities(mock_meter_pure_consumer):
+    mock_hass = MagicMock()
+    mock_hass.states.get.return_value = None
+
+    view = build_meter_view(mock_meter_pure_consumer, coeff=0.0, hass=mock_hass)
+    titles = [c.get("title") for c in view["cards"]]
+    assert "Sprawdzenie rachunku" not in titles
+
+
+def test_verification_section_skipped_when_hass_is_none(mock_meter_net_billing):
+    view = build_meter_view(mock_meter_net_billing, coeff=0.0, hass=None)
+    titles = [c.get("title") for c in view["cards"]]
+    assert "Sprawdzenie rachunku" not in titles
+
+
 def test_resolve_entity():
     # When hass is None, returns primary
     assert resolve_entity(None, "sensor.energa_123_test", ["sensor.licznik_123_test"]) == "sensor.energa_123_test"

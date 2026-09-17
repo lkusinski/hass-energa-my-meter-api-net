@@ -216,6 +216,29 @@ def resolve_entity(
     return primary
 
 
+def _entity_exists(hass: HomeAssistant | None, entity_id: str) -> bool:
+    """Best-effort check whether ``entity_id`` exists in states or registry.
+
+    Used to add the "Sprawdzenie rachunku" section only for installs that
+    actually expose the Faza 2 verification entities; older dashboards are
+    left untouched. Never raises.
+    """
+    if hass is None or not entity_id:
+        return False
+    try:
+        if hass.states.get(entity_id) is not None:
+            return True
+    except Exception:  # noqa: BLE001 - existence probe must never break generation
+        pass
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        reg = er.async_get(hass)
+        return entity_id in reg.entities
+    except Exception:  # noqa: BLE001 - existence probe must never break generation
+        return False
+
+
 def build_meter_view(
     meter: dict[str, Any], coeff: float = 0.8, hass: HomeAssistant | None = None
 ) -> dict[str, Any]:
@@ -559,6 +582,29 @@ def build_meter_view(
                     {"entity": _eid("okno_rozladowania_bess_szczyt_rce", domain="binary_sensor"), "name": "Okno szczytu rozładowania"},
                     {"entity": _eid("cena_ujemna_rce_zagrozenie_eksportu", domain="binary_sensor"), "name": "Ostrzeżenie: ujemna cena RCE"},
                 ],
+            }
+        )
+
+    # 8. Card: Invoice verification ("Sprawdzenie rachunku"). Added only when
+    # the Faza 2 verification entities exist, so dashboards generated for
+    # older installs keep their original layout. Order matters: start, end,
+    # recalculate button, result.
+    verification_entities = [
+        {"entity": _eid("okres_start", "date"), "name": "Okres Start"},
+        {"entity": _eid("okres_koniec", "date"), "name": "Okres Koniec"},
+        {
+            "entity": _eid("przelicz_okres", "button"),
+            "name": "Przelicz okres rozliczeniowy",
+        },
+        {"entity": _eid("weryfikacja_rachunku"), "name": "Okres: rozliczenie"},
+    ]
+    if any(_entity_exists(hass, item["entity"]) for item in verification_entities):
+        cards.append(
+            {
+                "type": "entities",
+                "title": "Sprawdzenie rachunku",
+                "icon": "mdi:receipt-text-check-outline",
+                "entities": verification_entities,
             }
         )
 

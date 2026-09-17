@@ -771,8 +771,9 @@ async def async_setup_entry(
                         )
 
             # === PERIOD VERIFICATION RESULT (Faza 2) ===
-            # State = do_zaplaty from the latest Przelicz Okres run; full
-            # breakdown in attributes. No energy statistics (deliberate).
+            # State = do_zaplaty from the latest "Przelicz okres
+            # rozliczeniowy" run; full breakdown in attributes. No energy
+            # statistics (deliberate).
             sensors.append(
                 EnergaPeriodVerificationSensor(
                     coordinator=coordinator,
