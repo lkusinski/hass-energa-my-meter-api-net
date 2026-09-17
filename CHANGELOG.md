@@ -11,7 +11,7 @@
   (stan = `do zaplaty`, ~35 atrybutów z rozbiciem).
 - Weryfikacja na żywo: odtwarza realną fakturę (różnica ≤ ~0,7 zł = ±1 kWh danych OSD).
 
-### 🔎 Detekcja obcej instalacji ergo5
+### 🔎 Detekcja równoległej kopii bazowej integracji ergo5
 - Skan `custom_components/*/manifest.json` + `.storage/hacs.repositories` → **Repairs** (`ergo5_detected`)
   i powiadomienie z listą ścieżek; automatyczne domknięcie, gdy kopii już nie ma.
 - Kreator: krok ostrzegawczy z potwierdzeniem przed utworzeniem wpisu.

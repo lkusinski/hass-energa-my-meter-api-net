@@ -32,7 +32,7 @@
         }
       },
       "ergo5_warning": {
-        "title": "Wykryto obcą integrację ergo5",
+        "title": "Wykryto równoległą kopię bazowej integracji ergo5",
         "description": "Na tym systemie znaleziono kopię integracji ergo5 (`ergo5/hass-energa-my-meter-api`):\n{paths}\n\nUżywa ona tego samego domain `energa_mobile` co ta integracja. Trzymanie obu kopii może powodować konflikty oraz duplikaty encji i statystyk. Zalecane jest usunięcie kopii ergo5; istniejące encje i statystyki długoterminowe zostaną zachowane.\n\nZaznacz pole, aby kontynuować mimo to.",
         "data": {
           "acknowledge": "Rozumiem, kontynuuj mimo to"
@@ -50,7 +50,7 @@
       "cannot_connect": "Błąd połączenia z API",
       "invalid_auth": "Błędne hasło lub login",
       "unknown": "Nieznany błąd",
-      "ergo5_not_acknowledged": "Potwierdź, aby kontynuować przy zainstalowanej obcej kopii ergo5"
+      "ergo5_not_acknowledged": "Potwierdź, aby kontynuować przy zainstalowanej równoległej kopii bazowej integracji ergo5"
     },
     "abort": {
       "already_configured": "To konto jest już skonfigurowane",
@@ -59,7 +59,7 @@
   },
   "issues": {
     "ergo5_detected": {
-      "title": "Wykryto obcą integrację ergo5",
+      "title": "Wykryto równoległą kopię bazowej integracji ergo5",
       "description": "Wykryto kopię integracji ergo5 (`ergo5/hass-energa-my-meter-api`) zainstalowaną obok tej integracji:\n\n{names}\n{paths}\n\nMa ona ten sam domain `energa_mobile` co ta integracja. Trzymanie obu kopii może powodować konflikty oraz duplikaty encji i statystyk. Zalecane jest usunięcie kopii ergo5; istniejące encje i statystyki długoterminowe zostaną zachowane. Wykryte źródło: {source}."
     }
   },

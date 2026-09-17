@@ -1,4 +1,4 @@
-"""Unit tests for foreign ergo5 install detection (pure helpers, no HA)."""
+"""Unit tests for base ergo5 install detection (pure helpers, no HA)."""
 
 import json
 from unittest.mock import AsyncMock, MagicMock, patch

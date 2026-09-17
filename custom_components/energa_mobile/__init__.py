@@ -78,7 +78,7 @@ def _hacs_installs_ergo5(path: str) -> bool:
 
 
 async def _async_detect_ergo5(hass: HomeAssistant) -> None:
-    """Scan custom_components for a foreign ergo5 copy and warn the user.
+    """Scan custom_components for a a copy of the base ergo5 integration and warn the user.
 
     ergo5 and this integration share ``domain = energa_mobile``; keeping both
     copies can cause conflicts/duplicates. Raises only via the caller's guard.
@@ -213,7 +213,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as err:
         _LOGGER.warning("Energa: Initial coordinator fetch failed, will retry: %s", err)
 
-    # Warn (Repairs + notification) when a foreign ergo5 copy shares our domain.
+    # Warn (Repairs + notification) when a a copy of the base ergo5 integration shares our domain.
     # Fully guarded: detection must never break setup.
     try:
         await _async_detect_ergo5(hass)

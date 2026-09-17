@@ -7,9 +7,9 @@
 >
 > Dokument nie zawiera danych osobowych, numerów PPE ani haseł.
 
-## 0. Automatyczne wykrywanie obcej kopii ergo5
+## 0. Automatyczne wykrywanie równoległej kopii bazowej integracji ergo5
 
-Ta integracja potrafi sama wykryć, że w `custom_components/` leży **obca kopia ergo5** (skopiowana
+Ta integracja potrafi sama wykryć, że w `custom_components/` leży **równoległa kopia bazowej integracji ergo5** (skopiowana
 lub przemianowana). Skaner czyta `custom_components/*/manifest.json` i rozpoznaje ergo5 po
 `codeowners: ["@ergo5"]` albo po adresie repo `ergo5/hass-energa-my-meter-api`.
 
@@ -29,7 +29,7 @@ komunikat to sygnalizuje.
 > `GET /api/states` ich nie pokaże. Stan sprawdzisz przez WebSocket: `persistent_notification/get`
 > (lista) oraz `repairs/list_issues` (naprawy). Powiadomienia nie przeżywają restartu HA.
 >
-> **Znane ograniczenie:** gdy obca kopia zniknie bez restartu HA, issue `ergo5_detected` jest
+> **Znane ograniczenie:** gdy równoległa kopia bazowej integracji zniknie bez restartu HA, issue `ergo5_detected` jest
 > usuwany, ale powiadomienie nie jest jawnie odrzucane (`persistent_notification.async_dismiss`)
 > i pozostaje w UI do restartu lub ręcznego zamknięcia. Po restarcie problem nie występuje.
 
@@ -126,7 +126,7 @@ Nie wymaga HACS; przydatne, gdy brak dostępu do sklepu lub chcesz wymusić konk
 3. Brak nowych encji z sufiksem `_2`.
 4. Statystyki LTS: liczba punktów i `sum` dla sensorów Panelu Energia nie spadły do zera.
 5. `/api/error_log` → HTTP 404 (brak błędów). W UI: Ustawienia → System → *Dzienniki*.
-6. Brak naprawy `ergo5_detected` w Ustawienia → System → *Naprawy* po usunięciu obcej kopii
+6. Brak naprawy `ergo5_detected` w Ustawienia → System → *Naprawy* po usunięciu równoległej kopii bazowej integracji
    (powiadomienie w UI zniknie po restarcie — patrz znane ograniczenie w §0).
 
 ## 6. Weryfikacja: co zobaczysz w UI

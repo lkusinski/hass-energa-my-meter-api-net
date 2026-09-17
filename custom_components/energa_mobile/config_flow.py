@@ -122,7 +122,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return EnergaOptionsFlow(config_entry)
 
     async def _async_scan_ergo5(self) -> list:
-        """Return detected foreign ergo5 copies; never raises."""
+        """Return detected copies of the base ergo5 integration; never raises."""
         try:
             from .settlement import scan_for_ergo5
 
@@ -134,7 +134,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return []
 
     async def _async_create_entry_with_ergo5_check(self, title, data, options):
-        """Create the entry, unless a foreign ergo5 copy must be acknowledged."""
+        """Create the entry, unless a a copy of the base ergo5 integration must be acknowledged."""
         if not getattr(self, "_ergo5_acknowledged", False):
             hits = await self._async_scan_ergo5()
             if hits:
@@ -146,7 +146,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=title, data=data, options=options)
 
     async def async_step_ergo5_warning(self, user_input=None):
-        """Warn about a foreign ergo5 copy before creating the entry.
+        """Warn about a a copy of the base ergo5 integration before creating the entry.
 
         The user must tick the acknowledgement; otherwise the form is shown
         again with an error and no entry is created.
