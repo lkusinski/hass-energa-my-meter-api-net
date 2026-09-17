@@ -183,6 +183,22 @@
       },
       "configure_energy_dashboard": {
         "name": "Skonfiguruj Panel Energia"
+      },
+      "verify_period": {
+        "name": "Przelicz Okres"
+      }
+    },
+    "date": {
+      "period_start": {
+        "name": "Okres Start"
+      },
+      "period_end": {
+        "name": "Okres Koniec"
+      }
+    },
+    "sensor": {
+      "period_verification": {
+        "name": "Weryfikacja Rachunku"
       }
     }
   }

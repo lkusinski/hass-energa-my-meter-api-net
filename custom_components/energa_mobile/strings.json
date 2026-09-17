@@ -183,6 +183,22 @@
       },
       "configure_energy_dashboard": {
         "name": "Configure Energy Dashboard"
+      },
+      "verify_period": {
+        "name": "Recalculate Period"
+      }
+    },
+    "date": {
+      "period_start": {
+        "name": "Period Start"
+      },
+      "period_end": {
+        "name": "Period End"
+      }
+    },
+    "sensor": {
+      "period_verification": {
+        "name": "Invoice Verification"
       }
     }
   }

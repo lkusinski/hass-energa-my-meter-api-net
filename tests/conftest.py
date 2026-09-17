@@ -27,6 +27,7 @@ _HA_MODULES = [
     "homeassistant.components.sensor",
     "homeassistant.components.button",
     "homeassistant.components.binary_sensor",
+    "homeassistant.components.date",
     "homeassistant.components.frontend",
     "homeassistant.components.lovelace",
     "homeassistant.components.recorder",
@@ -85,6 +86,10 @@ sensor_mod.SensorEntity = _MockSensorEntity
 button_mod = sys.modules["homeassistant.components.button"]
 button_mod.ButtonEntity = type("ButtonEntity", (), {})
 
+# Provide DateEntity as mock class
+date_mod = sys.modules["homeassistant.components.date"]
+date_mod.DateEntity = type("DateEntity", (), {})
+
 # Provide BinarySensorEntity and BinarySensorDeviceClass as mock class
 binary_sensor_mod = sys.modules["homeassistant.components.binary_sensor"]
 binary_sensor_mod.BinarySensorDeviceClass = MagicMock()
@@ -101,6 +106,7 @@ comp_mod = sys.modules["homeassistant.components"]
 comp_mod.sensor = sensor_mod
 comp_mod.button = button_mod
 comp_mod.binary_sensor = binary_sensor_mod
+comp_mod.date = date_mod
 comp_mod.frontend = sys.modules["homeassistant.components.frontend"]
 comp_mod.lovelace = sys.modules["homeassistant.components.lovelace"]
 comp_mod.recorder = sys.modules["homeassistant.components.recorder"]

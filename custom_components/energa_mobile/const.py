@@ -96,6 +96,13 @@ HEADERS = {
 # Spike guard: maximum plausible hourly energy consumption in kWh
 MAX_HOURLY_KWH = 100
 
+# Verify-period (Faza 2): max days fetched day-by-day from the API per call.
+MAX_HOURLY_RANGE_DAYS = 366
+
+# User-selected verification period (date entities), stored in entry.options.
+CONF_VERIFY_PERIOD_START = "verify_period_start"
+CONF_VERIFY_PERIOD_END = "verify_period_end"
+
 # PSE API for RCE (Rynkowa Cena Energii)
 PSE_RCE_API_URL = "https://api.raporty.pse.pl/api/rce-pln"
 CONF_RCE_AUTO_FETCH = "rce_auto_fetch"  # Enable/disable auto RCE fetch

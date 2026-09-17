@@ -14,6 +14,7 @@ from .const import (
     DATA_ENDPOINT,
     HEADERS,
     LOGIN_ENDPOINT,
+    MAX_HOURLY_RANGE_DAYS,
     PSE_RCE_API_URL,
     SESSION_ENDPOINT,
 )
@@ -237,6 +238,137 @@ class EnergaAPI:
         )
 
         return result
+
+    async def async_get_hourly_range(
+        self, meter_point_id, start_date, end_date
+    ) -> dict[str, dict[int, float]]:
+        """Fetch hourly per-zone energy for ``[start_date, end_date)``.
+
+        Faza 2 data source for invoice verification over historical periods.
+        Walks the Energa ``mchart`` DAY endpoint day by day (via
+        :meth:`async_get_history_hourly` with timestamps) and returns the
+        ``{zone: {epoch_hour: kWh}}`` mapping expected by
+        :func:`core.verification.build_period_invoice`:
+
+            {"import_1": {ts: kWh}, "import_2": {...},
+             "export_1": {...}, "export_2": {...}}
+
+        Single-zone meters only get the ``_1`` keys. Missing days and API
+        failures are skipped (best effort — partial data is better than
+        none), with a small delay between requests to avoid rate limits.
+        The window is capped at ``MAX_HOURLY_RANGE_DAYS`` days.
+        """
+        from datetime import date as _date
+        from datetime import timedelta as _timedelta
+
+        from .settlement import is_export_prosumer
+
+        def _as_date(value):
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, _date):
+                return value
+            try:
+                return datetime.fromisoformat(str(value)[:10]).date()
+            except (ValueError, TypeError):
+                return None
+
+        start = _as_date(start_date)
+        end = _as_date(end_date)
+        if start is None or end is None or end <= start:
+            return {}
+
+        max_days = MAX_HOURLY_RANGE_DAYS
+        if (end - start).days > max_days:
+            _LOGGER.warning(
+                "Energa: hourly range %s..%s capped to %d days",
+                start, end, max_days,
+            )
+            start = end - _timedelta(days=max_days)
+
+        meter = next(
+            (
+                m
+                for m in self._meters_data
+                if str(m.get("meter_point_id")) == str(meter_point_id)
+            ),
+            None,
+        )
+        if not meter:
+            await self.async_get_data()
+            meter = next(
+                (
+                    m
+                    for m in self._meters_data
+                    if str(m.get("meter_point_id")) == str(meter_point_id)
+                ),
+                None,
+            )
+        if not meter:
+            _LOGGER.warning(
+                "Energa: meter %s not found for hourly range", meter_point_id
+            )
+            return {}
+
+        has_zones = meter.get("zone_count", 1) > 1
+        # Map the keys returned by async_get_history_hourly to invoice zones.
+        key_map: dict[str, str] = {
+            "import_1": "import_1" if has_zones else "import"
+        }
+        if has_zones:
+            key_map["import_2"] = "import_2"
+        if is_export_prosumer(meter):
+            key_map["export_1"] = "export_1" if has_zones else "export"
+            if has_zones:
+                key_map["export_2"] = "export_2"
+
+        out: dict[str, dict[int, float]] = {zone: {} for zone in key_map}
+        for offset in range((end - start).days):
+            day = start + _timedelta(days=offset)
+            if offset:
+                await asyncio.sleep(0.3)
+            try:
+                day_data = await self.async_get_history_hourly(
+                    meter_point_id, day, include_timestamps=True
+                )
+            except Exception as err:  # noqa: BLE001 - keep partial results
+                _LOGGER.debug(
+                    "Energa: hourly range day %s failed for %s: %s",
+                    day, meter_point_id, err,
+                )
+                continue
+            if not isinstance(day_data, dict):
+                continue
+            for zone, source_key in key_map.items():
+                for item in day_data.get(source_key, []) or []:
+                    if not isinstance(item, (list, tuple)) or len(item) != 2:
+                        continue
+                    value, tm_ms = item
+                    if value is None:
+                        continue
+                    try:
+                        ts = int(tm_ms) // 1000
+                        kwh = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if ts <= 0 or kwh < 0:
+                        continue
+                    out[zone][ts] = kwh
+
+        total = sum(len(z) for z in out.values())
+        _LOGGER.info(
+            "Energa: hourly range %s..%s for %s: %d points%s",
+            start, end, meter_point_id, total,
+            (
+                f" (imp_z1={len(out.get('import_1', {}))}, "
+                f"imp_z2={len(out.get('import_2', {}))}, "
+                f"exp_z1={len(out.get('export_1', {}))}, "
+                f"exp_z2={len(out.get('export_2', {}))})"
+            )
+            if has_zones
+            else "",
+        )
+        return out
 
     async def async_get_monthly_history(
         self, meter_point_id: str, years: list[int] | None = None

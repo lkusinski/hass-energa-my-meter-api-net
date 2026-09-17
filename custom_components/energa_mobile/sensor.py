@@ -56,6 +56,7 @@ from .sensors.live import (
     EnergaStatisticsSensor,
     EnergaSyntheticStatisticsSensor,
 )
+from .sensors.period import EnergaPeriodVerificationSensor
 from .sensors.price import (
     EnergaPriceSensor,
     EnergaRceSensor,
@@ -90,6 +91,7 @@ __all__ = [
     "EnergaRceSensor",
     "EnergaStatisticsSensor",
     "EnergaSyntheticStatisticsSensor",
+    "EnergaPeriodVerificationSensor",
     "PseRceArbitrageSpreadSensor",
     "PseRceDynamicPriceSensor",
     "_fifo_bank_from_monthly",
@@ -767,6 +769,19 @@ async def async_setup_entry(
                                 serial=serial,
                             )
                         )
+
+            # === PERIOD VERIFICATION RESULT (Faza 2) ===
+            # State = do_zaplaty from the latest Przelicz Okres run; full
+            # breakdown in attributes. No energy statistics (deliberate).
+            sensors.append(
+                EnergaPeriodVerificationSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    serial=serial,
+                    device_info=device_info,
+                    entry=entry,
+                )
+            )
 
             # Dynamic PSE RCE and BESS Arbitrage Spread sensors (Etap 5)
             sensors.append(

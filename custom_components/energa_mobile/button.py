@@ -15,10 +15,13 @@ from .const import (
     CONF_ENABLE_SYNTHETIC_STORAGE,
     CONF_INVERTER_ENERGY_ENTITY,
     CONF_PROSUMER_COEFFICIENT,
+    CONF_VERIFY_PERIOD_END,
+    CONF_VERIFY_PERIOD_START,
     DEFAULT_ENABLE_SYNTHETIC_STORAGE,
     DEFAULT_PROSUMER_COEFFICIENT,
     DOMAIN,
 )
+from .core.verification import format_period_date
 from .dashboard_generator import (
     DEFAULT_ICON,
     DEFAULT_TITLE,
@@ -61,6 +64,13 @@ async def async_setup_entry(
         )
         buttons.append(
             EnergaConfigureEnergyDashboardButton(
+                hass=hass,
+                entry=entry,
+                meter=meter,
+            )
+        )
+        buttons.append(
+            EnergaVerifyPeriodButton(
                 hass=hass,
                 entry=entry,
                 meter=meter,
@@ -409,4 +419,152 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
             )
         except Exception:
             pass
+
+
+class EnergaVerifyPeriodButton(ButtonEntity):
+    """Recompute the invoice for the dates chosen on the period date entities.
+
+    Runs in the background (10-30 s of API calls must not block the UI),
+    stores the result on the coordinator (``_verify_result``) so the
+    verification sensor can render it, and posts a persistent notification
+    with the payable summary. Only available once both dates are set.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Przelicz Okres"
+    _attr_translation_key = "verify_period"
+    _attr_icon = "mdi:calculator-variant-outline"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        meter: dict[str, Any],
+    ) -> None:
+        """Initialize the button."""
+        self.hass = hass
+        self._entry = entry
+        self._meter = meter
+        self._meter_id = str(meter.get("meter_point_id", ""))
+        self._serial = str(meter.get("meter_serial", self._meter_id))
+        ppe = meter.get("ppe", self._meter_id)
+        self._attr_unique_id = f"energa_{self._meter_id}_verify_period"
+        self.entity_id = f"button.energa_{self._serial}_przelicz_okres".lower()
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._serial)},
+            name=f"Energa {self._serial}",
+            manufacturer="Energa-Operator",
+            model=f"PPE: {ppe}",
+            configuration_url="https://mojlicznik.energa-operator.pl",
+        )
+
+    def _period_bounds(self) -> tuple[str | None, str | None]:
+        opts = self._entry.options or {}
+        return (
+            format_period_date(opts.get(CONF_VERIFY_PERIOD_START)),
+            format_period_date(opts.get(CONF_VERIFY_PERIOD_END)),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Both period dates must be set before the button can be pressed."""
+        start, end = self._period_bounds()
+        return bool(start and end)
+
+    async def async_press(self) -> None:
+        """Start the verification in the background."""
+        start, end = self._period_bounds()
+        if not start or not end:
+            _LOGGER.debug(
+                "Energa: verify_period button pressed without both dates set"
+            )
+            return
+        data = {
+            "start": start,
+            "end": end,
+            "entry_id": self._entry.entry_id,
+            "meter_id": self._meter_id,
+        }
+        coro = self._run_verification(data)
+        try:
+            if hasattr(self._entry, "async_create_background_task"):
+                self._entry.async_create_background_task(
+                    self.hass, coro, name=f"energa_verify_period_{self._meter_id}"
+                )
+            else:
+                self.hass.async_create_task(coro)
+        except Exception as err:  # noqa: BLE001 - scheduling must never raise
+            _LOGGER.error("Energa: could not schedule verify_period task: %s", err)
+
+    async def _run_verification(self, data: dict) -> None:
+        """Run the service in the background, cache the result, notify."""
+        from .services import async_verify_period_data
+
+        try:
+            result = await async_verify_period_data(self.hass, data)
+        except Exception as err:  # noqa: BLE001 - background task must not explode
+            _LOGGER.error(
+                "Energa: verify_period failed for meter %s: %s", self._meter_id, err
+            )
+            return
+        if not isinstance(result, dict):
+            return
+
+        coordinator = (
+            (self.hass.data.get(DOMAIN, {}) or {})
+            .get(self._entry.entry_id, {})
+            .get("coordinator")
+        )
+        if coordinator is not None:
+            store = getattr(coordinator, "_verify_result", None)
+            if not isinstance(store, dict):
+                store = {}
+                try:
+                    coordinator._verify_result = store
+                except Exception:  # noqa: BLE001
+                    store = None
+            if isinstance(store, dict):
+                store[self._meter_id] = result
+                try:
+                    coordinator.async_update_listeners()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("Energa: verify_period listener update failed: %s", err)
+
+        self._notify(result)
+
+    def _notify(self, result: dict) -> None:
+        try:
+            from homeassistant.components import persistent_notification
+
+            if result.get("empty"):
+                message = (
+                    f"Nie znaleziono danych dla licznika {self._serial} "
+                    f"w okresie {result.get('period_start', '?')} – "
+                    f"{result.get('period_end', '?')}."
+                )
+            else:
+                message = (
+                    f"Okres: {result.get('period_start', '?')} – "
+                    f"{result.get('period_end', '?')}\n\n"
+                    f"- Netto: **{_pln(result.get('netto'))}**\n"
+                    f"- Brutto: **{_pln(result.get('brutto'))}**\n"
+                    f"- Do zapłaty: **{_pln(result.get('do_zaplaty'))}**\n\n"
+                    f"Źródło danych: {result.get('source', '?')}."
+                )
+            persistent_notification.async_create(
+                self.hass,
+                message,
+                title="Energa: weryfikacja rachunku",
+                notification_id=f"energa_verify_period_{self._serial}",
+            )
+        except Exception as err:  # noqa: BLE001 - notification is best effort
+            _LOGGER.debug("Energa: verify_period notification skipped: %s", err)
+
+
+def _pln(value) -> str:
+    """Format a PLN amount defensively for the notification."""
+    try:
+        return f"{float(value):.2f} PLN"
+    except (ValueError, TypeError):
+        return "brak danych"
 

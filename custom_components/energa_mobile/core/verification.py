@@ -25,7 +25,13 @@ Faza 1 scope / deliberate limitations:
 
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from ..tariff import bill_saldos, compute_bill, mtd_invoice_bases
+
+# Data sources returned by the verify_period service (Faza 2).
+SOURCE_ENERGA_API = "energa_api"
+SOURCE_RECORDER = "recorder_hourly"
 
 # kWh bases surfaced in the response (all JSON-serialisable floats).
 PERIOD_KWH_KEYS = (
@@ -44,6 +50,71 @@ def has_two_zones(hourly_by_zone: dict) -> bool:
     """True when the hourly series carries a second metering zone."""
     hourly = hourly_by_zone or {}
     return bool(hourly.get("import_2") or hourly.get("export_2"))
+
+
+def parse_period_date(value) -> date | None:
+    """Parse a date/datetime/ISO string into a ``date`` (or ``None``).
+
+    Accepts ``date``/``datetime`` objects and strings starting with
+    ``YYYY-MM-DD`` (an ISO datetime suffix is ignored). Garbage returns
+    ``None`` instead of raising so UI/service code stays defensive.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        try:
+            return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+        except (ValueError, TypeError):
+            return None
+    try:
+        return date.fromisoformat(text)
+    except (ValueError, TypeError):
+        return None
+
+
+def format_period_date(value) -> str | None:
+    """Normalise any accepted date value to ``YYYY-MM-DD`` (or ``None``)."""
+    parsed = parse_period_date(value)
+    return parsed.isoformat() if parsed is not None else None
+
+
+def period_is_historical(start, end, *, today: date | None = None) -> bool:
+    """True when the period ended before ``today`` (safe to serve from API).
+
+    ``end`` is inclusive here; a period ending today is *not* historical
+    because the current day may still be incomplete.
+    """
+    start_date = parse_period_date(start)
+    end_date = parse_period_date(end)
+    if start_date is None or end_date is None:
+        return False
+    ref = today if today is not None else date.today()
+    return end_date < ref
+
+
+def choose_period_source(
+    *,
+    api_available: bool,
+    historical: bool,
+    recorder_empty: bool,
+) -> str:
+    """Pick the preferred data source for one verification call.
+
+    The Energa API is preferred when a concrete meter + entry are known and
+    the period is historical, or whenever the recorder has no data at all
+    (e.g. HA was installed after the period). Otherwise the recorder series
+    is used. Callers still fall back if the API returns nothing.
+    """
+    if api_available and (historical or recorder_empty):
+        return SOURCE_ENERGA_API
+    return SOURCE_RECORDER
 
 
 def build_period_invoice(
@@ -114,4 +185,14 @@ def build_period_invoice(
     return out
 
 
-__all__ = ["PERIOD_KWH_KEYS", "build_period_invoice", "has_two_zones"]
+__all__ = [
+    "PERIOD_KWH_KEYS",
+    "SOURCE_ENERGA_API",
+    "SOURCE_RECORDER",
+    "build_period_invoice",
+    "choose_period_source",
+    "format_period_date",
+    "has_two_zones",
+    "parse_period_date",
+    "period_is_historical",
+]

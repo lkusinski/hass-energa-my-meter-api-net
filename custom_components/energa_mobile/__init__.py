@@ -62,7 +62,7 @@ __all__ = [
 ]
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor", "button", "binary_sensor"]
+PLATFORMS = ["sensor", "button", "binary_sensor", "date"]
 
 ERGO5_ISSUE_ID = "ergo5_detected"
 

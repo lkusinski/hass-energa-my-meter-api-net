@@ -115,8 +115,11 @@ reconcile_invoice:
 verify_period:
   name: Verify period
   description: >-
-    Recomputes a full Energa invoice for an arbitrary [start, end] period from
-    hourly recorder statistics and returns the breakdown as a service response.
+    Recomputes a full Energa invoice for an arbitrary [start, end] period and
+    returns the breakdown as a service response. Prefers the Energa API for
+    historical periods when a meter_id is supplied, falling back to hourly
+    recorder statistics. The response reports source (energa_api /
+    recorder_hourly) and cached.
   fields:
     start:
       name: Period start

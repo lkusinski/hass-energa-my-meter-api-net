@@ -77,6 +77,10 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._profile_forecast_cache: dict = {}  # {meter_id: HourlyProfileResult}
         self._rce_records_last_fetch = None
         self._synth_tasks: dict[str, asyncio.Task] = {}
+        # Faza 2 verify-period: latest per-meter invoice result (UI sensor) and
+        # an in-memory per (meter, period) memo (service response caching).
+        self._verify_result: dict = {}
+        self._verify_cache: dict = {}
 
     def async_request_synthetic_storage(self, meter_id: str) -> None:
         """Debounce and run synthetic storage recalculation after statistics import."""

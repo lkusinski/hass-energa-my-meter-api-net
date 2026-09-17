@@ -42,7 +42,14 @@ from .const import (
     get_price_for_key,
     get_prosumer_coefficient,
 )
-from .core.verification import PERIOD_KWH_KEYS, build_period_invoice
+from .core.verification import (
+    PERIOD_KWH_KEYS,
+    SOURCE_ENERGA_API,
+    SOURCE_RECORDER,
+    build_period_invoice,
+    choose_period_source,
+    period_is_historical,
+)
 from .dashboard_generator import (
     DEFAULT_ICON,
     DEFAULT_TITLE,
@@ -355,10 +362,13 @@ async def async_register_services(hass: HomeAssistant) -> None:
     )
 
     async def verify_period_service(call: ServiceCall) -> dict:
-        """Recompute a full invoice for [start, end] from recorder statistics.
+        """Recompute a full invoice for [start, end] from API or recorder.
 
-        Faza 1: recorder hourly statistics only (no API), no opening deposit /
-        warehouse balance, RCEm from the call, coordinator cache, Options or
+        Faza 2: when ``entry_id`` + ``meter_id`` are supplied and the period
+        is historical (or the recorder has no data), the Energa API is the
+        preferred source; otherwise the hourly recorder statistics are used.
+        The response reports ``source`` and ``cached``. No opening deposit /
+        warehouse balance; RCEm from the call, coordinator cache, Options or
         the last-known default. Always returns a JSON-serialisable dict; an
         empty window yields ``empty: true`` with an ``error`` and zeros.
         """
@@ -601,6 +611,69 @@ async def _collect_meter_hourly(
     return hourly
 
 
+async def _collect_meter_hourly_api(
+    api: EnergaAPI | None, meter: dict, start: datetime, end: datetime
+) -> dict:
+    """Build {zone: {epoch_hour: kWh}} from the Energa API (Faza 2).
+
+    Best effort: any API error returns ``{}`` so the caller falls back to the
+    recorder series. The shape matches :func:`_collect_meter_hourly`.
+    """
+    if api is None:
+        return {}
+    meter_point_id = str(meter.get("meter_point_id", ""))
+    if not meter_point_id:
+        return {}
+    try:
+        result = await api.async_get_hourly_range(meter_point_id, start, end)
+    except Exception as err:  # noqa: BLE001 - API fallback must not break the service
+        _LOGGER.debug("verify_period API fetch failed for %s: %s", meter_point_id, err)
+        return {}
+    if not isinstance(result, dict):
+        return {}
+    cleaned: dict[str, dict[int, float]] = {}
+    for zone, series in result.items():
+        if not isinstance(series, dict):
+            continue
+        hour_map: dict[int, float] = {}
+        for ts, val in series.items():
+            try:
+                hour_map[int(float(ts))] = float(val)
+            except (ValueError, TypeError):
+                continue
+        if hour_map:
+            cleaned[zone] = hour_map
+    return cleaned
+
+
+def _verify_cache_get(coordinator, key: tuple) -> dict | None:
+    """Return a cached invoice for ``key`` when a real dict cache exists."""
+    cache = getattr(coordinator, "_verify_cache", None)
+    if not isinstance(cache, dict):
+        return None
+    cached = cache.get(key)
+    return cached if isinstance(cached, dict) else None
+
+
+def _verify_cache_put(coordinator, key: tuple, result: dict) -> None:
+    """Store one invoice result in the coordinator's in-memory cache.
+
+    Deliberately in-memory (no canonical SQLite persistence yet): repeated
+    presses/API calls within a session are instant, and ``cached: true`` is
+    reported honestly. Cross-restart persistence is a Faza 3 follow-up.
+    """
+    if coordinator is None:
+        return
+    cache = getattr(coordinator, "_verify_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        try:
+            coordinator._verify_cache = cache
+        except Exception:  # noqa: BLE001 - never break the service on cache set
+            return
+    cache[key] = result
+
+
 def _empty_period_result(meter: dict, old_system: bool) -> dict:
     """Zeroed, JSON-safe breakdown for a meter with no data in the window."""
     meter_point_id = str(meter.get("meter_point_id", ""))
@@ -635,20 +708,42 @@ def _empty_period_result(meter: dict, old_system: bool) -> dict:
 
 async def _async_verify_period(hass: HomeAssistant, call: ServiceCall) -> dict:
     """Implementation of the ``energa_mobile.verify_period`` service."""
-    data = dict(call.data or {})
+    return await async_verify_period_data(hass, dict(call.data or {}))
+
+
+async def async_verify_period_data(hass: HomeAssistant, data: dict) -> dict:
+    """Recompute a full invoice for [start, end] for one or all meters.
+
+    Faza 1 used hourly recorder statistics only. Faza 2 adds the Energa API
+    as the preferred source when a concrete meter is requested
+    (``entry_id`` + ``meter_id``) and the period is historical — or when the
+    recorder has no data for the window. If the API yields nothing, the
+    recorder series is used as fallback. RCEm resolution, fee tables and the
+    invoice math (``core.verification.build_period_invoice``) are unchanged.
+
+    The response carries ``source`` (``energa_api`` | ``recorder_hourly`` |
+    ``mixed``) and ``cached``. Results are memoised per (meter, period) in an
+    in-memory coordinator cache for the session; cross-restart persistence in
+    the canonical SQLite store is a Faza 3 follow-up (never reported as
+    cached when it is not).
+
+    Always returns a JSON-serialisable dict; an empty window yields
+    ``empty: true`` with an ``error`` and zeros instead of raising.
+    """
+    data = dict(data or {})
     try:
         start_dt, _ = _parse_period_datetime(data.get("start"))
         end_dt, end_is_date = _parse_period_datetime(data.get("end"))
     except (ValueError, TypeError):
-        return {"empty": True, "error": "invalid_period", "source": "recorder_hourly"}
+        return {"empty": True, "error": "invalid_period", "source": SOURCE_RECORDER}
     if end_is_date:
         end_dt = end_dt + timedelta(days=1)
     if end_dt <= start_dt:
-        return {"empty": True, "error": "invalid_period", "source": "recorder_hourly"}
+        return {"empty": True, "error": "invalid_period", "source": SOURCE_RECORDER}
 
     entry, coordinator, api = _resolve_verify_entry(hass, data.get("entry_id"))
     if entry is None:
-        return {"empty": True, "error": "no_entry", "source": "recorder_hourly"}
+        return {"empty": True, "error": "no_entry", "source": SOURCE_RECORDER}
 
     rcem = _resolve_period_rcem(entry, coordinator, data)
     months = _period_months(start_dt, end_dt)
@@ -660,23 +755,58 @@ async def _async_verify_period(hass: HomeAssistant, call: ServiceCall) -> dict:
         "entry_id": entry.entry_id,
         "period_start": start_dt.isoformat(),
         "period_end": end_dt.isoformat(),
-        "source": "recorder_hourly",
         "rcem": float(rcem),
         "months": months,
+        "cached": False,
     }
 
     if not meters:
-        return {**base, "empty": True, "error": "no_meter", "meters": []}
+        return {
+            **base,
+            "empty": True,
+            "error": "no_meter",
+            "source": SOURCE_RECORDER,
+            "meters": [],
+        }
+
+    api_available = api is not None and bool(data.get("meter_id"))
+    historical = period_is_historical(start_dt, end_dt)
 
     results: list[dict] = []
     for meter in meters:
         old_system = _meter_old_system(entry, meter)
         meter_point_id = str(meter.get("meter_point_id", ""))
         serial = str(meter.get("meter_serial", meter_point_id))
+
+        cache_key = (meter_point_id, start_dt.isoformat(), end_dt.isoformat())
+        cached = _verify_cache_get(coordinator, cache_key)
+        if cached is not None:
+            results.append({**cached, "cached": True})
+            continue
+
         hourly = await _collect_meter_hourly(hass, meter, start_dt, end_dt)
+        recorder_points = sum(len(zone) for zone in hourly.values())
+        source = choose_period_source(
+            api_available=api_available,
+            historical=historical,
+            recorder_empty=recorder_points == 0,
+        )
+        if source == SOURCE_ENERGA_API:
+            api_hourly = await _collect_meter_hourly_api(api, meter, start_dt, end_dt)
+            if sum(len(zone) for zone in api_hourly.values()) > 0:
+                hourly = api_hourly
+            else:
+                source = SOURCE_RECORDER
+
         total_points = sum(len(zone) for zone in hourly.values())
         if total_points == 0:
-            results.append(_empty_period_result(meter, old_system))
+            results.append(
+                {
+                    **_empty_period_result(meter, old_system),
+                    "source": source,
+                    "cached": False,
+                }
+            )
             continue
 
         fees = fees_from_options(dict(entry.options or {}), meter.get("tariff"))
@@ -690,20 +820,34 @@ async def _async_verify_period(hass: HomeAssistant, call: ServiceCall) -> dict:
             cover_day=0.0,
             cover_night=0.0,
         )
-        results.append(
-            {
-                **invoice,
-                "empty": False,
-                "meter_point_id": meter_point_id,
-                "meter_serial": serial,
-                "tariff": meter.get("tariff"),
-                "has_zones": meter.get("zone_count", 1) > 1,
-            }
-        )
+        result = {
+            **invoice,
+            "empty": False,
+            "meter_point_id": meter_point_id,
+            "meter_serial": serial,
+            "tariff": meter.get("tariff"),
+            "has_zones": meter.get("zone_count", 1) > 1,
+            "source": source,
+            "cached": False,
+        }
+        _verify_cache_put(coordinator, cache_key, result)
+        results.append(result)
+
+    sources = {result.get("source", SOURCE_RECORDER) for result in results}
+    if len(sources) == 1:
+        source = sources.pop()
+    elif sources:
+        source = "mixed"
+    else:
+        source = SOURCE_RECORDER
 
     response = {
         **base,
+        "source": source,
         "empty": all(result.get("empty", False) for result in results),
+        "cached": bool(results) and all(
+            result.get("cached", False) for result in results
+        ),
         "meters": results,
     }
     if len(results) == 1:
