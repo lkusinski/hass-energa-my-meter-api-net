@@ -23,7 +23,9 @@ Pure functions only (no Home Assistant imports) so they can be unit-tested.
 from __future__ import annotations
 
 import calendar
+import json
 import logging
+import os
 import re
 from datetime import date, datetime
 
@@ -52,6 +54,71 @@ PSE_MONTHS = {
 
 # Day of month on which PSE publishes RCEm for the previous month
 PSE_RCEM_PUBLICATION_DAY = 11
+
+# Marker of the original ergo5 integration (same domain, different codebase).
+ERGO5_REPO_MARKER = "ergo5/hass-energa-my-meter-api"
+
+
+def ergo5_marker_from_manifest(manifest: dict) -> bool:
+    """True when a manifest looks like the ergo5 integration (pure, no HA).
+
+    ergo5 and this integration share ``domain = energa_mobile``. When a user
+    copies/renames the ergo5 folder next to ours, both are loaded. Detect the
+    foreign code by its codeowners or repo URLs; missing/oddly typed fields
+    are ignored rather than raising.
+    """
+    if not isinstance(manifest, dict):
+        return False
+    codeowners = manifest.get("codeowners")
+    if isinstance(codeowners, (list, tuple, set)):
+        for owner in codeowners:
+            if str(owner).strip().lower() == "@ergo5":
+                return True
+    elif isinstance(codeowners, str):
+        if codeowners.strip().lower() == "@ergo5":
+            return True
+    for key in ("documentation", "issue_tracker"):
+        value = manifest.get(key)
+        if isinstance(value, str) and ERGO5_REPO_MARKER in value.lower():
+            return True
+    return False
+
+
+def scan_for_ergo5(custom_components_dir: str) -> list[dict]:
+    """Scan ``custom_components/*/manifest.json`` for ergo5 copies (pure, no HA).
+
+    Returns one entry per hit: ``{"path", "domain", "name", "version"}``.
+    I/O or JSON errors are skipped, never raised, so it is safe to run on a
+    partially readable directory.
+    """
+    hits: list[dict] = []
+    try:
+        entries = sorted(os.listdir(custom_components_dir))
+    except (OSError, ValueError, TypeError):
+        return hits
+    for entry in entries:
+        folder = os.path.join(str(custom_components_dir), entry)
+        if not os.path.isdir(folder):
+            continue
+        manifest_path = os.path.join(folder, "manifest.json")
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        except (OSError, ValueError, TypeError):
+            continue
+        if not ergo5_marker_from_manifest(manifest):
+            continue
+        hits.append(
+            {
+                "path": folder,
+                "domain": manifest.get("domain"),
+                "name": manifest.get("name"),
+                "version": manifest.get("version"),
+            }
+        )
+    return hits
 
 
 def parse_settlement_date(value: str | None) -> date | None:

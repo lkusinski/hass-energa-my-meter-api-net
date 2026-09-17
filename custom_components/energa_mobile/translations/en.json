@@ -31,6 +31,13 @@
           "energy_dashboard_mode": "Energy Dashboard Presentation Model"
         }
       },
+      "ergo5_warning": {
+        "title": "Foreign ergo5 integration detected",
+        "description": "A copy of the ergo5 integration (`ergo5/hass-energa-my-meter-api`) was found on this system:\n{paths}\n\nIt uses the same domain `energa_mobile` as this integration. Keeping both copies can cause conflicts and duplicate entities/statistics. It is recommended to remove the ergo5 copy first; existing entities and long-term statistics are preserved.\n\nTick the box to continue anyway.",
+        "data": {
+          "acknowledge": "I understand, continue anyway"
+        }
+      },
       "reauth_confirm": {
         "title": "Update Password",
         "description": "Re-login for account {username}.",
@@ -42,11 +49,18 @@
     "error": {
       "cannot_connect": "Connection error",
       "invalid_auth": "Invalid authentication",
-      "unknown": "Unknown error"
+      "unknown": "Unknown error",
+      "ergo5_not_acknowledged": "Confirm to continue with a foreign ergo5 copy installed"
     },
     "abort": {
       "already_configured": "Account already configured",
       "reauth_successful": "Password updated successfully"
+    }
+  },
+  "issues": {
+    "ergo5_detected": {
+      "title": "Foreign ergo5 integration detected",
+      "description": "A copy of the ergo5 integration (`ergo5/hass-energa-my-meter-api`) was found on this system:\n\n{names}\n{paths}\n\nIt shares the same domain `energa_mobile` as this integration. Keeping both copies can cause conflicts and duplicate entities/statistics. It is recommended to remove the ergo5 copy; existing entities and long-term statistics are preserved. Detected source: {source}."
     }
   },
   "options": {

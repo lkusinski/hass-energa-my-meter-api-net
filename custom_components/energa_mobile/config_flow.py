@@ -121,6 +121,53 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get options flow handler."""
         return EnergaOptionsFlow(config_entry)
 
+    async def _async_scan_ergo5(self) -> list:
+        """Return detected foreign ergo5 copies; never raises."""
+        try:
+            from .settlement import scan_for_ergo5
+
+            return await self.hass.async_add_executor_job(
+                scan_for_ergo5, self.hass.config.path("custom_components")
+            )
+        except Exception:  # noqa: BLE001 - detection must never break the flow
+            _LOGGER.debug("ergo5 scan during config flow failed", exc_info=True)
+            return []
+
+    async def _async_create_entry_with_ergo5_check(self, title, data, options):
+        """Create the entry, unless a foreign ergo5 copy must be acknowledged."""
+        if not getattr(self, "_ergo5_acknowledged", False):
+            hits = await self._async_scan_ergo5()
+            if hits:
+                self._pending_title = title
+                self._pending_data = data
+                self._pending_options = options
+                self._ergo5_paths = "\n".join(f"- {hit.get('path')}" for hit in hits)
+                return await self.async_step_ergo5_warning()
+        return self.async_create_entry(title=title, data=data, options=options)
+
+    async def async_step_ergo5_warning(self, user_input=None):
+        """Warn about a foreign ergo5 copy before creating the entry.
+
+        The user must tick the acknowledgement; otherwise the form is shown
+        again with an error and no entry is created.
+        """
+        errors = {}
+        if user_input is not None:
+            if user_input.get("acknowledge"):
+                self._ergo5_acknowledged = True
+                return self.async_create_entry(
+                    title=getattr(self, "_pending_title", "Energa My Meter"),
+                    data=getattr(self, "_pending_data", {}),
+                    options=getattr(self, "_pending_options", {}),
+                )
+            errors["base"] = "ergo5_not_acknowledged"
+        return self.async_show_form(
+            step_id="ergo5_warning",
+            data_schema=vol.Schema({vol.Required("acknowledge", default=False): bool}),
+            description_placeholders={"paths": getattr(self, "_ergo5_paths", "")},
+            errors=errors,
+        )
+
     async def async_step_user(self, user_input=None):
         """Handle initial user setup.
 
@@ -193,15 +240,15 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self._pending_data = entry_data
                         return await self.async_step_system_fallback()
 
-                    return self.async_create_entry(
-                        title=attempt_username,
-                        data=entry_data,
+                    return await self._async_create_entry_with_ergo5_check(
+                        attempt_username,
+                        entry_data,
                         # Confirmed NON-prosumer (no export): pin the
                         # coefficient to the "brak" answer (0.0). Without
                         # this the entry inherits DEFAULT_PROSUMER_COEFFICIENT
                         # (0.8) and _is_old_system() mislabels a plain
                         # consumer as old net-metering (Warzywna G11).
-                        options={CONF_PROSUMER_COEFFICIENT: 0.0},
+                        {CONF_PROSUMER_COEFFICIENT: 0.0},
                     )
                 except EnergaAuthError:
                     if attempt_username == normalized_username:
@@ -252,10 +299,10 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
             else:
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
-            return self.async_create_entry(
-                title=getattr(self, "_pending_title", "Energa My Meter"),
-                data=getattr(self, "_pending_data", {}),
-                options=options,
+            return await self._async_create_entry_with_ergo5_check(
+                getattr(self, "_pending_title", "Energa My Meter"),
+                getattr(self, "_pending_data", {}),
+                options,
             )
         return self.async_show_form(
             step_id="system",
@@ -290,10 +337,10 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 options[CONF_ENERGY_DASHBOARD_MODE] = ENERGY_MODE_PHYSICAL_GRID
             else:
                 options[CONF_PROSUMER_COEFFICIENT] = system_choice_coefficient(choice)
-            return self.async_create_entry(
-                title=getattr(self, "_pending_title", "Energa My Meter"),
-                data=getattr(self, "_pending_data", {}),
-                options=options,
+            return await self._async_create_entry_with_ergo5_check(
+                getattr(self, "_pending_title", "Energa My Meter"),
+                getattr(self, "_pending_data", {}),
+                options,
             )
         return self.async_show_form(
             step_id="system_fallback",
@@ -329,10 +376,10 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             options[CONF_ENERGY_DASHBOARD_MODE] = dashboard_mode
             options[CONF_ENABLE_SYNTHETIC_STORAGE] = enable_synth
 
-            return self.async_create_entry(
-                title=getattr(self, "_pending_title", "Energa My Meter"),
-                data=getattr(self, "_pending_data", {}),
-                options=options,
+            return await self._async_create_entry_with_ergo5_check(
+                getattr(self, "_pending_title", "Energa My Meter"),
+                getattr(self, "_pending_data", {}),
+                options,
             )
 
         return self.async_show_form(
