@@ -1257,7 +1257,38 @@ async def async_verify_period_data(
     if len(results) == 1:
         # Single-meter entries get the full breakdown flat as well.
         response.update(results[0])
+    _publish_verify_results(coordinator, results)
     return response
+
+
+def _publish_verify_results(coordinator, results: list[dict]) -> None:
+    """Mirror per-meter results onto the coordinator for the result sensor.
+
+    The ``Przelicz`` button stores its own result, but a direct
+    ``energa_mobile.verify_period`` service call previously left
+    ``sensor.*_weryfikacja_rachunku`` at ``unavailable``. Publishing here makes
+    the sensor reflect the service call too, under both the meter point id and
+    the serial (the sensor looks up either). Best effort: never raises.
+    """
+    if coordinator is None or not results:
+        return
+    try:
+        store = getattr(coordinator, "_verify_result", None)
+        if not isinstance(store, dict):
+            store = {}
+            coordinator._verify_result = store
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            for key in (result.get("meter_point_id"), result.get("meter_serial")):
+                if key:
+                    store[str(key)] = result
+        try:
+            coordinator.async_update_listeners()
+        except Exception as err:  # noqa: BLE001 - refresh is best effort
+            _LOGGER.debug("Energa: verify result listener update skipped: %s", err)
+    except Exception as err:  # noqa: BLE001 - cache publish must never break
+        _LOGGER.debug("Energa: verify result publish skipped: %s", err)
 
 
 async def _stat_sum_before(

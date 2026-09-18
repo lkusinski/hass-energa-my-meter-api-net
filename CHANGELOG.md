@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.9.0-beta.7 (2026-09-18) — niezawodny start Core: timeouty API + cache dzienny (naprawa zawieszenia)
+
+- **Przyczyna**: `EnergaAPI.async_get_data(force_refresh=False)` — wołane przez
+  **każdą** platformę w `async_setup_entry` (`sensor`/`button`/`binary_sensor`/`date`) —
+  mimo „cache" ponownie pobierało dzienne wykresy (`daily_pobor`/`daily_produkcja` oraz
+  warianty strefowe). Dla licznika G12w to do 6 zapytań HTTP na platformę, seryjnie pod
+  `_data_lock`, więc setup platformy przekraczał 10 s (log
+  `Setup of binary_sensor platform energa_mobile is taking over 10 seconds`), a przy
+  wolnym/DNS-owym Energa — blokował start Core na minuty.
+- **Przyczyna (2)**: brak jawnego timeoutu na żądaniach `async_login`/`_api_get` —
+  aiohttp używał domyślnego 300 s na jedno zapytanie, więc nieodpowiadający endpoint
+  mógł zawiesić setup na wiele minut.
+- **Naprawa (cache)**: nowy znacznik `_daily_fetched` — dzienne wykresy pobierane tylko
+  przy `force_refresh=True` (cykl koordynatora co 15 min) lub dla nowego licznika;
+  `force_refresh=False` to teraz tanie czytanie z cache.
+- **Naprawa (timeouty)**: `aiohttp.ClientTimeout(total=30, connect=10)` przekazywany do
+  wszystkich żądań logowania i `_api_get`.
+- **Naprawa (fail-fast setup)**: gdy pierwszy refresh koordynatora się nie powiedzie,
+  `async_setup_entry` propaguje teraz `ConfigEntryNotReady` (z osobnym bezpiecznikiem
+  `asyncio.wait_for(..., timeout=90)`) zamiast połykać błąd i pozwalać każdej platformie
+  powtarzać pełne, nieograniczone pobranie. HA kończy start i ponawia wpis w tle.
+- **Higiena środowiska**: kopie integracji o tym samym `domain = energa_mobile`
+  (`energa_mobile.preclean.bak` beta.1 na `wisniowa`, `energa_mobile.prebak` beta.2 na
+  `agrestowa`) przeniesiono poza `custom_components` (loader HA wybierał moduł
+  niedeterministycznie). Zostaje wyłącznie `custom_components/energa_mobile`.
+- **`verify_period` aktualizuje sensor wyniku**: wynik usługi jest teraz publikowany na
+  koordynatorze (pod `meter_point_id` i `meter_serial`), więc
+  `sensor.*_weryfikacja_rachunku` odzwierciedla również bezpośrednie wywołanie usługi,
+  nie tylko przycisk „Przelicz okres".
+- **Komunikat o brakujących kluczach dla net-billingu**: `bank_open_*/bank_close_*` są
+  wymagane tylko dla starego systemu (net-metering); net-billing nie ma magazynu, więc
+  nie generuje już fałszywego `missing_breakdown_keys` / warningu (lab `agrestowa`).
+- **Testy**: 620 passed, 1 skipped (nowe: bounded-timeouty, `_api_get`/`async_login`
+  przekazują timeout, cache dzienny przy `force_refresh=False`/`True`, publikacja wyniku
+  usługi, brak fałszywych brakujących kluczy dla net-billingu).
+
 ## v1.9.0-beta.6 (2026-09-18) — fee_source na sensorze wyniku + anulowanie taska profilu
 
 - **`fee_source` w atrybutach sensora wyniku**: `sensor.energa_<serial>_weryfikacja_rachunku`

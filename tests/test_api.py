@@ -230,3 +230,81 @@ class TestFindFirstDataDate:
         api.async_get_history_hourly = fake_hourly
         with patch("asyncio.sleep", new=AsyncMock()):
             assert await api.async_find_first_data_date("m1") is None
+
+
+class TestBoundedTimeouts:
+    """Regression for 2026-09-18 startup stall: every Energa request must be
+    bounded so a slow/hanging endpoint can never hold Core setup for the
+    aiohttp 5-minute default."""
+
+    def test_default_timeout_is_bounded(self, api):
+        assert isinstance(api._timeout, aiohttp.ClientTimeout)
+        assert api._timeout.total == 30
+        assert api._timeout.connect == 10
+
+    @pytest.mark.asyncio
+    async def test_api_get_passes_timeout(self, api, mock_session):
+        resp = make_mock_response(200, {"response": {}})
+        mock_session.get = MagicMock(return_value=resp)
+
+        await api._api_get("/x")
+
+        _, kwargs = mock_session.get.call_args
+        assert kwargs.get("timeout") is api._timeout
+
+    @pytest.mark.asyncio
+    async def test_login_passes_timeout(self, api, mock_session):
+        session_resp = make_mock_response(200, {})
+        login_resp = make_mock_response(200, {"success": True, "token": "t"})
+        mock_session.get = MagicMock(side_effect=[session_resp, login_resp])
+
+        await api.async_login()
+
+        assert mock_session.get.call_count == 2
+        for call in mock_session.get.call_args_list:
+            assert call.kwargs.get("timeout") is api._timeout
+
+
+class TestAsyncGetDataDailyCache:
+    """Regression for 2026-09-18: ``force_refresh=False`` (called by every
+    platform during setup) must NOT re-issue the daily chart requests."""
+
+    def _meter(self):
+        return {
+            "meter_point_id": 123456,
+            "meter_serial": "30132815",
+            "obis_plus": "1-0:1.8.0*255",
+            "obis_minus": "1-0:2.8.0*255",
+            "zone_count": 1,
+            "total_plus": 100.0,
+            "total_minus": 50.0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_force_refresh_false_is_a_cache_read(self, api):
+        api._fetch_all_meters = AsyncMock(return_value=[self._meter()])
+        api._fetch_chart = AsyncMock(return_value=[3.0])
+
+        first = await api.async_get_data(force_refresh=True)
+        assert first[0]["daily_pobor"] == 3.0
+        assert api._fetch_chart.await_count > 0
+
+        api._fetch_chart.reset_mock()
+        cached = await api.async_get_data(force_refresh=False)
+
+        assert api._fetch_chart.await_count == 0
+        assert api._fetch_all_meters.await_count == 1
+        assert cached[0]["daily_pobor"] == 3.0
+
+    @pytest.mark.asyncio
+    async def test_force_refresh_true_refetches_daily_charts(self, api):
+        api._fetch_all_meters = AsyncMock(return_value=[self._meter()])
+        api._fetch_chart = AsyncMock(return_value=[1.0])
+
+        await api.async_get_data(force_refresh=True)
+        await api.async_get_data(force_refresh=False)
+        assert api._fetch_chart.await_count > 0
+
+        api._fetch_chart.reset_mock()
+        await api.async_get_data(force_refresh=True)
+        assert api._fetch_chart.await_count > 0

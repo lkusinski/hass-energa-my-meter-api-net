@@ -54,6 +54,16 @@ class EnergaAPI:
         self._api_warning = None  # Last non-null warning from API
         self._api_error = None  # Last non-null error from API
         self._data_lock = asyncio.Lock()
+        # Bounded timeouts for every Energa request. Without them aiohttp falls
+        # back to its 5-minute default, so one unresponsive/DNS-slow endpoint
+        # could stall Core setup for minutes (observed 2026-09-18 on wisniowa).
+        self._timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        # Meter ids whose daily charts (daily_pobor/daily_produkcja and their
+        # per-zone variants) were already fetched. ``async_get_data`` is called
+        # by every platform during setup with ``force_refresh=False``; without
+        # this guard each of those calls re-issued up to 6 chart requests per
+        # G12w meter, which made platform setup exceed HA's 10 s warning.
+        self._daily_fetched: set[str] = set()
 
     def set_hass(self, hass):
         """Set Home Assistant instance reference for database queries."""
@@ -80,7 +90,10 @@ class EnergaAPI:
                 "token": self._device_token,
             }
             async with self._session.get(
-                f"{BASE_URL}{LOGIN_ENDPOINT}", headers=HEADERS, params=params
+                f"{BASE_URL}{LOGIN_ENDPOINT}",
+                headers=HEADERS,
+                params=params,
+                timeout=self._timeout,
             ) as resp:
                 if resp.status != 200:
                     raise EnergaConnectionError(f"Login HTTP {resp.status}")
@@ -120,6 +133,7 @@ class EnergaAPI:
         async with self._data_lock:
             if force_refresh:
                 self._meters_data = []
+                self._daily_fetched.clear()
             if not self._meters_data:
                 self._meters_data = await self._fetch_all_meters()
 
@@ -135,7 +149,12 @@ class EnergaAPI:
             updated_meters = []
             for meter in self._meters_data:
                 m_data = meter.copy()
-                if m_data.get("obis_plus"):
+                mid = str(m_data.get("meter_point_id"))
+                # Daily charts are refreshed on every coordinator cycle
+                # (force_refresh=True). A plain ``Force_refresh=False`` call —
+                # e.g. from platform setup — must stay a cheap cache read.
+                fetch_daily = force_refresh or mid not in self._daily_fetched
+                if fetch_daily and m_data.get("obis_plus"):
                     # Fetch total daily consumption (sum of all zones)
                     vals = await self._fetch_chart(
                         m_data["meter_point_id"], m_data["obis_plus"], ts
@@ -153,11 +172,14 @@ class EnergaAPI:
                         m_data["daily_pobor_1"] = sum(vals_1)
                         m_data["daily_pobor_2"] = sum(vals_2)
 
-                if m_data.get("obis_minus"):
+                if fetch_daily and m_data.get("obis_minus"):
                     vals = await self._fetch_chart(
                         m_data["meter_point_id"], m_data["obis_minus"], ts
                     )
                     m_data["daily_produkcja"] = sum(vals)
+
+                if fetch_daily:
+                    self._daily_fetched.add(mid)
 
                 _LOGGER.debug(
                     "Energa Meter [%s]: Total(+)=%s, Total(-)=%s, Daily(+)=%s, Daily(-)=%s",
@@ -1042,7 +1064,7 @@ class EnergaAPI:
 
             try:
                 async with self._session.get(
-                    url, headers=HEADERS, params=final_params
+                    url, headers=HEADERS, params=final_params, timeout=self._timeout
                 ) as resp:
                     if resp.status in (401, 403):
                         if attempt == 0:

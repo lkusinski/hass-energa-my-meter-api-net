@@ -305,12 +305,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
     }
 
-    # Initial data fetch for coordinator
+    # Initial data fetch for coordinator. A failure here means there are no
+    # meters to build entities from. Propagating ConfigEntryNotReady lets HA
+    # retry the entry in the background instead of swallowing the error and
+    # letting every platform issue its own duplicate (and, before the bounded
+    # ClientTimeout, potentially unbounded) network fetch — that stalled Core
+    # startup for minutes on 2026-09-18. The wait_for is a belt-and-braces
+    # ceiling on top of the per-request timeout.
     try:
-        await coordinator.async_config_entry_first_refresh()
+        await asyncio.wait_for(
+            coordinator.async_config_entry_first_refresh(), timeout=90
+        )
         _LOGGER.debug("Energa: Initial coordinator refresh successful")
-    except Exception as err:
-        _LOGGER.warning("Energa: Initial coordinator fetch failed, will retry: %s", err)
+    except Exception as err:  # convert to a setup retry
+        await session.close()
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        _LOGGER.warning(
+            "Energa: initial coordinator fetch failed, will retry: %s", err
+        )
+        raise ConfigEntryNotReady(
+            f"Energa initial fetch failed: {err}"
+        ) from err
 
     # Warn (Repairs + notification) when a a copy of the base ergo5 integration shares our domain.
     # Fully guarded: detection must never break setup.

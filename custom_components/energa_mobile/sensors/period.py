@@ -84,6 +84,11 @@ _KWH_KEYS = (
     "bank_close_2",
 )
 
+# Warehouse keys that only exist for the old net-metering system.
+_NET_METERING_KWH_KEYS = frozenset(
+    {"bank_open_1", "bank_open_2", "bank_close_1", "bank_close_2"}
+)
+
 
 def _missing_breakdown_keys(result: dict) -> list[str]:
     """Invoice keys ``build_period_invoice`` promises but the result lacks.
@@ -91,11 +96,27 @@ def _missing_breakdown_keys(result: dict) -> list[str]:
     Diagnostic helper (also asserted by tests): it makes a silent omission of a
     line item — exactly the ``fee_source`` bug fixed in v1.9.0-beta.6 — visible
     in the entity attributes and the log instead of hiding in an absent key.
+
+    The net-metering warehouse keys (``bank_open_*``/``bank_close_*``) are only
+    promised for the old (net-metering) system: a net-billing result has no
+    warehouse, so flagging them produced a spurious "missing keys" warning on
+    the agrestowa lab (2026-09-18). Placeholder results ("calculating") and
+    empty-period replies carry no breakdown by design and are skipped too.
     """
+    if result.get("status") == "calculating" or result.get("empty"):
+        return []
     missing = [key for key in _BREAKDOWN_KEYS if key not in result]
     kwh = result.get("kwh")
     if isinstance(kwh, dict):
-        missing += [key for key in _KWH_KEYS if key not in kwh]
+        is_net_billing = (
+            result.get("old_system") is False
+            or str(result.get("system") or "") == "net_billing"
+        )
+        for key in _KWH_KEYS:
+            if is_net_billing and key in _NET_METERING_KWH_KEYS:
+                continue
+            if key not in kwh:
+                missing.append(key)
     return missing
 
 

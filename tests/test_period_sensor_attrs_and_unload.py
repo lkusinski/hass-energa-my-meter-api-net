@@ -112,6 +112,34 @@ class TestFeeSourceExposedOnSensor:
         assert "missing_breakdown_keys" in attrs
         assert "system" in attrs["missing_breakdown_keys"]
 
+    def test_calculating_placeholder_has_no_missing_keys(self):
+        sensor = _sensor({"status": "calculating", "empty": False})
+        attrs = sensor.extra_state_attributes
+        assert "missing_breakdown_keys" not in attrs
+
+    def test_net_billing_without_warehouse_has_no_missing_keys(self):
+        """Net-billing legitimately has no bank_* keys (agrestowa 2026-09-18)."""
+        hourly = {"import_1": {0: 100.0}, "export_1": {0: 120.0}}
+        from custom_components.energa_mobile.core.verification import (
+            build_period_invoice,
+        )
+
+        result = build_period_invoice(hourly, fees={}, rcem=0.3, old_system=False)
+        result.update(
+            {
+                "empty": False,
+                "fee_source": "defaults",
+                "status": "ok",
+                "kwh": {
+                    **result["kwh"],
+                    "cover_1": 0.0,
+                    "cover_2": 0.0,
+                },
+            }
+        )
+        attrs = _sensor(result).extra_state_attributes
+        assert "missing_breakdown_keys" not in attrs
+
 
 class TestProfileForecastTaskCancellation:
     @pytest.mark.asyncio
@@ -195,3 +223,33 @@ class TestProfileForecastTaskCancellation:
         coordinator._profile_forecast_task = task
         # Already finished -> no cancellation, no raise.
         await coordinator.async_shutdown()
+
+
+class TestServicePublishesResultToSensor:
+    def test_publish_sets_store_under_point_id_and_serial(self):
+        from custom_components.energa_mobile.services import (
+            _publish_verify_results,
+        )
+
+        coordinator = SimpleNamespace()
+        result = {
+            "meter_point_id": "360074",
+            "meter_serial": "00069839",
+            "do_zaplaty": 158.72,
+        }
+        _publish_verify_results(coordinator, [result])
+
+        assert coordinator._verify_result["360074"] is result
+        assert coordinator._verify_result["00069839"] is result
+
+    def test_publish_is_best_effort_on_broken_coordinator(self):
+        from custom_components.energa_mobile.services import (
+            _publish_verify_results,
+        )
+
+        # Must not raise even when the coordinator rejects attribute writes.
+        class _Boom(SimpleNamespace):
+            def __setattr__(self, name, value):
+                raise RuntimeError("nope")
+
+        _publish_verify_results(_Boom(), [{"meter_point_id": "1"}])
