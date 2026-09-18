@@ -164,4 +164,18 @@ verify_period:
           min: 0
           step: "any"
 
+clear_period:
+  name: Clear period
+  description: >-
+    Clears the saved verification period dates (verify_period_start /
+    verify_period_end) stored in the config entry options, so the invoice
+    calculator starts clean after a test period was selected.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry; defaults to the first Energa entry.
+      required: false
+      selector:
+        text:
+
 

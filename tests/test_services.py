@@ -111,10 +111,11 @@ async def test_service_registration_and_unregistration():
     assert (DOMAIN, "generate_dashboard") in registered_services
     assert (DOMAIN, "reconcile_invoice") in registered_services
     assert (DOMAIN, "verify_period") in registered_services
+    assert (DOMAIN, "clear_period") in registered_services
 
     # 2. Idempotent registration
     await async_register_services(hass)
-    assert len(registered_services) == 4
+    assert len(registered_services) == 5
 
     # 3. Unregister services
     await async_unregister_services(hass)
@@ -122,6 +123,45 @@ async def test_service_registration_and_unregistration():
     assert (DOMAIN, "generate_dashboard") not in registered_services
     assert (DOMAIN, "reconcile_invoice") not in registered_services
     assert (DOMAIN, "verify_period") not in registered_services
+    assert (DOMAIN, "clear_period") not in registered_services
+
+
+@pytest.mark.asyncio
+async def test_clear_period_removes_saved_dates():
+    """The clear_period action drops verify_period_start/end from options."""
+    from custom_components.energa_mobile.const import (
+        CONF_VERIFY_PERIOD_END,
+        CONF_VERIFY_PERIOD_START,
+    )
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry_1"
+    entry.options = {
+        CONF_VERIFY_PERIOD_START: "2026-08-01",
+        CONF_VERIFY_PERIOD_END: "2026-08-31",
+        "other_option": 1,
+    }
+    hass.config_entries.async_entries = MagicMock(return_value=[entry])
+    updated: dict = {}
+    hass.config_entries.async_update_entry = MagicMock(
+        side_effect=lambda e, options=None: updated.update(options or {})
+    )
+
+    registered_services = {}
+    hass.services.has_service = lambda domain, name: False
+    hass.services.async_register = (
+        lambda domain, name, handler, schema=None, **kw: registered_services.__setitem__(
+            name, handler
+        )
+    )
+
+    await async_register_services(hass)
+    await registered_services["clear_period"](MagicMock(data={"entry_id": "entry_1"}))
+
+    assert CONF_VERIFY_PERIOD_START not in updated
+    assert CONF_VERIFY_PERIOD_END not in updated
+    assert updated.get("other_option") == 1
 
 
 def test_get_entry_and_api():

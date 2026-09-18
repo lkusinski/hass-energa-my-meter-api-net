@@ -64,6 +64,7 @@ from .core.verification import (
     choose_period_source,
     format_period_date,
     opening_bank_from_monthly_flows,
+    opening_deposit_from_monthly_flows,
     period_is_historical,
 )
 from .dashboard_generator import (
@@ -421,6 +422,39 @@ async def async_register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
 
+    async def clear_period_service(call: ServiceCall) -> None:
+        """Clear the saved ``verify_period_start`` / ``verify_period_end`` dates.
+
+        The period date entities persist their values in the config entry
+        Options, so a test period used once stays selected forever. This action
+        removes both keys for the entry, letting the calculator start clean.
+        """
+        entry_id = (call.data or {}).get("entry_id")
+        entries = hass.config_entries.async_entries(DOMAIN)
+        entry = None
+        if entry_id:
+            entry = next((e for e in entries if e.entry_id == entry_id), None)
+        if entry is None and entries:
+            entry = entries[0]
+        if entry is None:
+            return
+        options = dict(entry.options or {})
+        changed = False
+        for key in (CONF_VERIFY_PERIOD_START, CONF_VERIFY_PERIOD_END):
+            if key in options:
+                options.pop(key, None)
+                changed = True
+        if changed:
+            hass.config_entries.async_update_entry(entry, options=options)
+            _LOGGER.info("Energa: cleared verify_period dates for entry %s", entry.entry_id)
+
+    hass.services.async_register(
+        DOMAIN,
+        "clear_period",
+        clear_period_service,
+        schema=vol.Schema({vol.Optional("entry_id"): str}),
+    )
+
 
 async def async_unregister_services(hass: HomeAssistant) -> None:
     """Unregister domain services when all entries are removed."""
@@ -429,6 +463,7 @@ async def async_unregister_services(hass: HomeAssistant) -> None:
         "generate_dashboard",
         "reconcile_invoice",
         "verify_period",
+        "clear_period",
     ):
         if hass.services.has_service(DOMAIN, service_name):
             hass.services.async_remove(DOMAIN, service_name)
@@ -892,6 +927,103 @@ async def _collect_monthly_flows(
     return monthly
 
 
+async def _resolve_monthly_rcem(
+    api: EnergaAPI | None,
+    coordinator,
+    months,
+) -> tuple[dict, list[str], str]:
+    """Historical RCEm per month from the PSE table (cached).
+
+    The PSE RCEm page publishes every month at once, so ``api`` exposes
+    :meth:`async_fetch_official_rcem_map` (one HTTP call per day, cached on the
+    API and mirrored on the coordinator under ``_rcem_monthly``). Only months
+    actually found are returned; the caller's ledger then applies its fallback
+    RCEm and reports the missing months itself.
+
+    Returns ``(prices, missing, source)``.
+    """
+    wanted = sorted({(int(y), int(m)) for (y, m) in (months or [])})
+    prices: dict = {}
+    missing: list[str] = []
+    cache = getattr(coordinator, "_rcem_monthly", None) if coordinator is not None else None
+    if not isinstance(cache, dict):
+        cache = {}
+
+    table: dict = {}
+    fetch_map = getattr(api, "async_fetch_official_rcem_map", None)
+    if callable(fetch_map):
+        try:
+            fetched = await fetch_map()
+            if isinstance(fetched, dict):
+                table = fetched
+        except Exception as err:  # noqa: BLE001 - PSE fetch must not break the service
+            _LOGGER.debug("verify_period PSE RCEm table fetch failed: %s", err)
+
+    for year, month in wanted:
+        key = (year, month)
+        value = cache.get(key)
+        if value is None:
+            value = table.get(key)
+        if value is not None:
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                value = None
+        if value is None:
+            # Only historical values go into the price map; the pure ledger
+            # applies ``fallback_rcem`` and reports the missing months itself.
+            missing.append(f"{year:04d}-{month:02d}")
+            continue
+        cache[key] = value
+        prices[key] = float(value)
+
+    if coordinator is not None:
+        try:
+            coordinator._rcem_monthly = cache
+        except Exception:  # noqa: BLE001 - best-effort cache
+            pass
+
+    if table:
+        source = "pse_table"
+    elif cache and len(cache) >= len(wanted):
+        source = "cache"
+    else:
+        source = "fallback"
+    return prices, missing, source
+
+
+def _prior_months(monthly: dict, start_dt: datetime) -> list[tuple[int, int]]:
+    """``(year, month)`` keys of ``monthly`` strictly before the start month."""
+    keys: list[tuple[int, int]] = []
+    for key in list(monthly or {}):
+        try:
+            year, month = int(key[0]), int(key[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if (year, month) < (start_dt.year, start_dt.month):
+            keys.append((year, month))
+    return sorted(set(keys))
+
+
+async def _prior_monthly_flows(
+    hass: HomeAssistant, meter: dict, coordinator, start_dt: datetime
+) -> dict:
+    """Monthly flows before ``start_dt``: recorder daily rows, else coordinator.
+
+    The recorder's daily ``change`` rows are preferred (they are the true daily
+    increments); when it has no history at all the coordinator's ``_monthly``
+    cache (API YEAR charts / locally computed sums) is used so opening balances
+    do not silently degrade to ``coverage_unknown``. Always returns a dict.
+    """
+    monthly = await _collect_monthly_flows(hass, meter, start_dt)
+    if not monthly and coordinator is not None:
+        cached = getattr(coordinator, "_monthly", None)
+        if isinstance(cached, dict):
+            mid = str(meter.get("meter_point_id", ""))
+            monthly = cached.get(mid) or {}
+    return monthly if isinstance(monthly, dict) else {}
+
+
 def _period_has_positive_import(hourly: dict) -> bool:
     """True when the period window has at least one positive import reading."""
     for suffix in ("import", "import_1", "import_2"):
@@ -899,6 +1031,20 @@ def _period_has_positive_import(hourly: dict) -> bool:
         for value in series.values():
             try:
                 if float(value) > 0.0:
+                    return True
+            except (ValueError, TypeError):
+                continue
+    return False
+
+
+def _monthly_has_export(monthly: dict) -> bool:
+    """True when the prior monthly flows contain any positive export."""
+    for row in (monthly or {}).values():
+        if not isinstance(row, dict):
+            continue
+        for name in ("export", "export_1", "export_2"):
+            try:
+                if float(row.get(name) or 0.0) > 0.0:
                     return True
             except (ValueError, TypeError):
                 continue
@@ -1167,18 +1313,32 @@ async def async_verify_period_data(
             )
             continue
 
-        # Faza 3 opening balances: net-metering warehouse (kWh) from the
-        # recorder's prior monthly flows; net-billing deposit only when the
-        # caller provides it (per-month historical RCEm is Faza 4).
+        # Opening balances. Net-metering (kWh warehouse) is always rebuilt from
+        # the prior monthly flows (FIFO 12m). Net-billing (PLN deposit) is now
+        # rebuilt the same way: a monetary FIFO 12-month ledger over the prior
+        # monthly flows, each month valued with its own historical RCEm from the
+        # PSE table. Explicit ``bank_open_1/2`` / ``deposit_open_pln`` from the
+        # service call remain manual overrides and skip the reconstruction.
+        entry_options = dict(entry.options or {})
+        fees = fees_from_options(entry_options, meter.get("tariff"))
+        fee_origin, _missing_fee_keys = fee_source(
+            entry_options, meter.get("tariff")
+        )
+
         bank_open_1: float | None = None
         bank_open_2: float | None = None
         deposit_open: float | None = None
+        deposit_open_source: str | None = None
+        deposit_detail: dict | None = None
+        deposit_warnings: list[str] = []
         if old_system and prosumer:
             if override_bank_1 is not None or override_bank_2 is not None:
                 bank_open_1 = override_bank_1 if override_bank_1 is not None else 0.0
                 bank_open_2 = override_bank_2 if override_bank_2 is not None else 0.0
             else:
-                monthly = await _collect_monthly_flows(hass, meter, start_dt)
+                monthly = await _prior_monthly_flows(
+                    hass, meter, coordinator, start_dt
+                )
                 bank_open_1, bank_open_2, _bank_detail = (
                     opening_bank_from_monthly_flows(
                         monthly,
@@ -1188,24 +1348,65 @@ async def async_verify_period_data(
                     )
                 )
                 # Honest reconstruction guard: a 0/0 warehouse on a window with
-                # real positive imports is not a trustworthy opening balance
-                # (the old state-column bug produced exactly this). Fall back to
-                # "unknown" so build_period_invoice sets coverage_unknown and a
-                # warning instead of silently overcharging.
+                # real positive imports is only trustworthy when the history
+                # actually contained export (otherwise the old state-column bug
+                # produced exactly this). With export history a 0 warehouse is a
+                # legitimate "fully consumed" result and must not degrade to
+                # coverage_unknown.
                 if (
                     not (bank_open_1 or bank_open_2)
                     and _period_has_positive_import(hourly)
+                    and not _monthly_has_export(monthly)
                 ):
                     bank_open_1 = None
                     bank_open_2 = None
+        elif prosumer and override_deposit is None:
+            monthly = await _prior_monthly_flows(hass, meter, coordinator, start_dt)
+            prior = _prior_months(monthly, start_dt)
+            if prior:
+                monthly_rcem, _missing_rcem, rcem_source = await _resolve_monthly_rcem(
+                    api, coordinator, prior
+                )
+                deposit_open, dep_detail = opening_deposit_from_monthly_flows(
+                    monthly,
+                    monthly_rcem,
+                    fees,
+                    period_start=start_dt,
+                    fallback_rcem=rcem,
+                )
+                deposit_detail = dep_detail
+                if deposit_open is not None:
+                    deposit_open_source = "history"
+                    _LOGGER.debug(
+                        "verify_period deposit_open %s = %.2f PLN "
+                        "(generated=%.2f applied=%.2f expired=%.2f months=%s rcem=%s)",
+                        meter_point_id,
+                        deposit_open,
+                        dep_detail.get("generated_pln", 0.0),
+                        dep_detail.get("applied_pln", 0.0),
+                        dep_detail.get("expired_pln", 0.0),
+                        dep_detail.get("months_used"),
+                        rcem_source,
+                    )
+                # Only months with real export matter; ``missing_rcem`` is
+                # reported by the pure ledger and respects that.
+                missing_export_rcem = list(dep_detail.get("missing_rcem") or [])
+                if missing_export_rcem:
+                    deposit_warnings.append(
+                        "Brak historycznych cen RCEm (PSE) dla miesięcy: "
+                        f"{', '.join(missing_export_rcem)} — użyto bieżącej/"
+                        "ostatniej znanej ceny jako przybliżenia salda depozytu."
+                    )
+            else:
+                deposit_warnings.append(
+                    "Brak miesięcznej historii przepływów przed okresem: nie "
+                    "odtworzono salda początkowego depozytu (net-billing)."
+                )
         else:
             deposit_open = override_deposit
+            if override_deposit is not None:
+                deposit_open_source = "override"
 
-        entry_options = dict(entry.options or {})
-        fees = fees_from_options(entry_options, meter.get("tariff"))
-        fee_origin, _missing_fee_keys = fee_source(
-            entry_options, meter.get("tariff")
-        )
         invoice = build_period_invoice(
             hourly,
             fees=fees,
@@ -1228,6 +1429,9 @@ async def async_verify_period_data(
                 f"(źródło: {fee_origin}) — ustaw stawki w opcjach wpisu, aby "
                 "odtworzyć rachunek co do grosza."
             ]
+        if deposit_warnings:
+            invoice.setdefault("warnings", [])
+            invoice["warnings"] = list(invoice["warnings"]) + deposit_warnings
         result = {
             **invoice,
             "fee_source": fee_origin,
@@ -1241,8 +1445,14 @@ async def async_verify_period_data(
             "period_end": base["period_end"],
             "source": source,
             "cached": False,
+            "deposit_open_source": deposit_open_source,
+            "deposit_history": deposit_detail,
         }
-        _verify_cache_put(coordinator, cache_key, result)
+        # Do not memoise an "unknown opening balance" result: once the recorder
+        # backfill completes, the next press must recompute instead of serving
+        # a stale coverage_unknown reply for the whole session.
+        if not result.get("coverage_unknown"):
+            _verify_cache_put(coordinator, cache_key, result)
         results.append(result)
 
     sources = {result.get("source", SOURCE_RECORDER) for result in results}

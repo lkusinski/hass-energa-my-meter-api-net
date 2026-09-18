@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.1 (2026-09-18) — automatyczne saldo początkowe depozytu (FIFO 12 m-cy + RCEm)
+
+- **`verify_period` sam liczy saldo depozytu na początek okresu** z całej historii (FIFO 12 m-cy, RCEm per miesiąc), zamiast wymagać ręcznego `deposit_open_pln`; nadpisania ręczne nadal działają.
+- Nowe: `opening_deposit_from_monthly_flows`, `async_fetch_official_rcem_map` (cała tabela PSE raz/dzień, cache), `deposit_open_source`/`deposit_history`/`warnings`; magistrala recorder→API YEAR.
+- Magazyn net-meteringu: FIFO kWh także z cache koordynatora; 0 kWh przy historii z eksportem nie degraduje już do `coverage_unknown`.
+- Nowa usługa **`clear_period`** (czyści zapisane daty okresu).
+- Testy akceptacyjne: Agrestowa 08 = 628,55/144,57/773,12/157,59/615,53 (auto); Wiśniowa 07–08 = 129,04/29,68/158,72.
+
 ## v1.9.0 (2026-09-18) — Rozliczenia na godzinowych saldach i weryfikacja rachunku
 
 - Rozliczenia na **godzinowych saldach** (net-billing i net-metering); akcyza od nakładki/brutto; całe kWh per strefa.

@@ -551,9 +551,35 @@ class EnergaAPI:
         (https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej).
         Returns PLN/kWh or None when unavailable.
         """
+        table = await self.async_fetch_official_rcem_map()
+        price = table.get((year, month))
+        if price is not None:
+            _LOGGER.info(
+                "Official RCEm for %04d-%02d: %.5f PLN/kWh (PSE table)",
+                year, month, price,
+            )
+            return price
+        _LOGGER.debug("Official RCEm for %04d-%02d not on PSE page yet", year, month)
+        return None
+
+    async def async_fetch_official_rcem_map(self) -> dict[tuple[int, int], float]:
+        """Return the whole official PSE RCEm table as ``{(year, month): PLN/kWh}``.
+
+        The PSE page lists every published month at once, so the table is
+        fetched at most once per day and cached on the API instance. This lets
+        ``verify_period`` value a whole history of monthly deposits without one
+        HTTP round-trip per month. Returns an empty dict when unreachable.
+        """
         from .settlement import parse_official_rcem_table
 
+        today = datetime.now(ZoneInfo("Europe/Warsaw")).date()
+        cached = getattr(self, "_rcem_table_cache", None)
+        cached_day = getattr(self, "_rcem_table_cache_day", None)
+        if isinstance(cached, dict) and cached_day == today:
+            return cached
+
         url = "https://www.pse.pl/oire/rcem-rynkowa-miesieczna-cena-energii-elektrycznej"
+        table: dict[tuple[int, int], float] = {}
         try:
             async with self._create_session_fn() as session:
                 async with session.get(
@@ -561,25 +587,21 @@ class EnergaAPI:
                     timeout=aiohttp.ClientTimeout(total=30),
                     headers={"User-Agent": "Mozilla/5.0 (compatible; hass-energa-my-meter)"},
                 ) as resp:
-                    if resp.status != 200:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        for y, m, price in parse_official_rcem_table(html):
+                            table[(y, m)] = price
+                    else:
                         _LOGGER.debug("PSE RCEm page returned HTTP %d", resp.status)
-                        return None
-                    html = await resp.text()
-            for y, m, price in parse_official_rcem_table(html):
-                if y == year and m == month:
-                    _LOGGER.info(
-                        "Official RCEm for %04d-%02d: %.5f PLN/kWh (PSE table)",
-                        year, month, price,
-                    )
-                    return price
-            _LOGGER.debug("Official RCEm for %04d-%02d not on PSE page yet", year, month)
-            return None
         except aiohttp.ClientError as err:
             _LOGGER.debug("PSE RCEm page connection error: %s", err)
-            return None
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - parsing must never raise
             _LOGGER.debug("PSE RCEm page error: %s", err)
-            return None
+
+        if table:
+            self._rcem_table_cache = table
+            self._rcem_table_cache_day = today
+        return table
 
     async def async_fetch_rce_average(self, month: int, year: int) -> float | None:
         """Plain arithmetic average of hourly RCE for a month (fallback).

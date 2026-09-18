@@ -13,24 +13,32 @@ Pipeline (matches the live bill sensors):
 Faza 1 scope / deliberate limitations:
 - Data source is the HA recorder hourly statistics of the integration's
   ``*_stats`` energy sensors or the Energa API (Faza 2, service layer).
-- RCEm is supplied by the caller (coordinator cache / Options / last known);
-  per-month historical PSE tables are Faza 4.
-- Faza 3 opening balances are supported through ``bank_open_1/2``
-  (net-metering warehouse, reconstructed by the service from prior monthly
-  flows with :func:`opening_bank_from_monthly_flows`) and
-  ``deposit_open_pln`` (net-billing). When they are unknown the result is
-  still returned with ``coverage_unknown=True`` and a warning instead of
-  pretending invoice parity.
+- RCEm is supplied by the caller (coordinator cache / Options / last known).
+  Per-month historical PSE tables are resolved by the service layer
+  (``api.async_fetch_official_rcem_map``) and passed in for the net-billing
+  opening deposit.
+- Opening balances are supported through ``bank_open_1/2`` (net-metering
+  warehouse, reconstructed by the service from prior monthly flows with
+  :func:`opening_bank_from_monthly_flows`) and ``deposit_open_pln``
+  (net-billing, reconstructed with :func:`opening_deposit_from_monthly_flows`
+  — a monetary FIFO 12-month ledger priced with per-month RCEm). When they are
+  unknown the result is still returned with ``coverage_unknown=True`` and a
+  warning instead of pretending invoice parity.
 - Fee tables are the current ones; historical tariff tables are not yet
-  versioned (Faza 4). Pass ``fees`` explicitly to pin a table.
+  versioned. Pass ``fees`` explicitly to pin a table.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
 
-from ..settlement import fifo_kwh_bank
-from ..tariff import bill_saldos, compute_bill, mtd_invoice_bases
+from ..settlement import deposit_valid_until, fifo_kwh_bank
+from ..tariff import (
+    G12W_DEFAULT_FEES,
+    bill_saldos,
+    compute_bill,
+    mtd_invoice_bases,
+)
 
 # Data sources returned by the verify_period service (Faza 2).
 SOURCE_ENERGA_API = "energa_api"
@@ -461,6 +469,183 @@ def opening_bank_from_monthly_flows(
     return (bank_1, bank_2, detail)
 
 
+def _monthly_flow_row(row: dict) -> tuple[float, float, float, float]:
+    """Split a monthly flow row into (imp1, imp2, exp1, exp2), defensively."""
+
+    def _num(name: str) -> float:
+        try:
+            return max(0.0, float(row.get(name, 0.0) or 0.0))
+        except (ValueError, TypeError):
+            return 0.0
+
+    if any(k in row for k in ("import_1", "import_2", "export_1", "export_2")):
+        return (_num("import_1"), _num("import_2"), _num("export_1"), _num("export_2"))
+    return (_num("import"), 0.0, _num("export"), 0.0)
+
+
+def opening_deposit_from_monthly_flows(
+    monthly_flows: dict,
+    monthly_rcem: dict | None = None,
+    fees: dict | None = None,
+    *,
+    period_start=None,
+    fallback_rcem: float | None = None,
+) -> tuple[float | None, dict]:
+    """Net-billing deposit balance at the start of a period from history.
+
+    Replays the net-billing monetary FIFO ledger over the monthly import/export
+    flows that precede ``period_start`` (oldest first):
+
+    * deposit for month M is ``export_M * RCEm_M * 1.23`` (VAT on energy sold),
+      credited on the 1st of M+1 and valid until the last day of M+13 — i.e. a
+      rolling 12-month window (``deposit_valid_until``);
+    * the same month draws its deposit down by at most its eligible energy
+      charge (energy sale + excise, gross) — never distribution or fixed fees;
+    * the remainder rolls over to the next month.
+
+    Args:
+        monthly_flows: ``{(year, month): {"import_1"/"export_1"/...}}`` (single
+            zone rows may use ``import``/``export``).
+        monthly_rcem: ``{(year, month): PLN/kWh}`` historical RCEm table.
+        fees: fee table (energy prices + excise) used to size the monthly cap.
+        period_start: date/datetime of the period start.
+        fallback_rcem: value used when a month's historical RCEm is missing.
+
+    Returns:
+        ``(deposit_open_pln, detail)``. ``None`` means no usable prior history
+        (the caller reports ``coverage_unknown``). ``detail["missing_rcem"]``
+        lists ``YYYY-MM`` months valued with the fallback (or skipped).
+    """
+    f = dict(G12W_DEFAULT_FEES)
+    if fees:
+        f.update(fees)
+
+    def _fee(key: str) -> float:
+        try:
+            return max(0.0, float(f.get(key, 0.0) or 0.0))
+        except (ValueError, TypeError):
+            return 0.0
+
+    energy_day = _fee("energy_day")
+    energy_night = _fee("energy_night")
+    excise_rate = _fee("excise_mwh") / 1000.0
+
+    ref = period_start
+    if isinstance(ref, datetime):
+        ref = ref.date()
+    if not isinstance(ref, date):
+        ref = date.today()
+    ref_ym = (ref.year, ref.month)
+
+    rows: list[tuple[int, int, float, float, float, float]] = []
+    for key in list(monthly_flows or {}):
+        try:
+            year, month = int(key[0]), int(key[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        # The start month is still being settled (its invoice/deposit is not
+        # final yet), so it never contributes to the opening balance.
+        if (year, month) >= ref_ym:
+            continue
+        row = monthly_flows.get(key) or {}
+        imp1, imp2, exp1, exp2 = _monthly_flow_row(row)
+        rows.append((year, month, imp1, imp2, exp1, exp2))
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    has_data = any(
+        imp1 or imp2 or exp1 or exp2
+        for (_y, _m, imp1, imp2, exp1, exp2) in rows
+    )
+    if not has_data:
+        return (
+            None,
+            {
+                "months_used": 0,
+                "has_data": False,
+                "opening_pln": None,
+                "expired_pln": 0.0,
+                "generated_pln": 0.0,
+                "applied_pln": 0.0,
+                "missing_rcem": [],
+            },
+        )
+
+    lots: list[dict] = []
+    expired = 0.0
+    generated_total = 0.0
+    applied_total = 0.0
+    missing: list[str] = []
+
+    for year, month, imp1, imp2, exp1, exp2 in rows:
+        month_start = date(year, month, 1)
+
+        # 1. Expire lots older than the rolling 12-month window.
+        for lot in lots:
+            if lot["remaining"] > 0.0 and lot["expires"] < month_start:
+                expired += lot["remaining"]
+                lot["remaining"] = 0.0
+
+        # 2. Credit this month's export (the invoice applies it to this same
+        #    month's energy charge; it is only *dated* on the 1st of M+1).
+        export_kwh = exp1 + exp2
+        if export_kwh > 0.0:
+            rcem = None
+            if monthly_rcem:
+                rcem = monthly_rcem.get((year, month))
+            used_fallback = False
+            if rcem is None:
+                rcem = fallback_rcem
+                used_fallback = rcem is not None
+            generated = 0.0
+            if rcem is None:
+                missing.append(f"{year:04d}-{month:02d}")
+            else:
+                try:
+                    generated = _round2(export_kwh * float(rcem) * 1.23)
+                except (ValueError, TypeError):
+                    generated = 0.0
+                if used_fallback:
+                    missing.append(f"{year:04d}-{month:02d}")
+            if generated > 0.0:
+                lots.append(
+                    {"expires": deposit_valid_until(year, month), "remaining": generated}
+                )
+                generated_total += generated
+
+        # 3. Draw down by this month's eligible energy charge (gross).
+        cap = _round2(((imp1 * energy_day) + (imp2 * energy_night)
+                       + ((imp1 + imp2) * excise_rate)) * 1.23)
+        remaining_cap = cap
+        for lot in lots:
+            if remaining_cap <= 0.0:
+                break
+            if lot["remaining"] <= 0.0:
+                continue
+            take = min(lot["remaining"], remaining_cap)
+            lot["remaining"] -= take
+            remaining_cap -= take
+            applied_total += take
+
+    # Final expiry as of the requested period start (a lot whose window ended
+    # between the last monthly flow and the period start must not leak in).
+    for lot in lots:
+        if lot["remaining"] > 0.0 and lot["expires"] < ref:
+            expired += lot["remaining"]
+            lot["remaining"] = 0.0
+
+    opening = _round2(sum(lot["remaining"] for lot in lots))
+    detail = {
+        "months_used": len(rows),
+        "has_data": True,
+        "opening_pln": opening,
+        "expired_pln": _round2(expired),
+        "generated_pln": _round2(generated_total),
+        "applied_pln": _round2(applied_total),
+        "missing_rcem": sorted(set(missing)),
+    }
+    return (opening, detail)
+
+
 def deposit_ledger_close(entries, *, initial: float = 0.0) -> float:
     """Replay a net-billing deposit ledger oldest-first.
 
@@ -498,6 +683,7 @@ __all__ = [
     "format_period_date",
     "has_two_zones",
     "opening_bank_from_monthly_flows",
+    "opening_deposit_from_monthly_flows",
     "parse_period_date",
     "period_is_historical",
 ]
