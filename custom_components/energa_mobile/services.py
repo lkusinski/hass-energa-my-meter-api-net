@@ -974,6 +974,7 @@ def _empty_period_result(meter: dict, old_system: bool) -> dict:
         "do_zaplaty": 0.0,
         "coverage_unknown": True,
         "warnings": ["Brak danych w wybranym okresie."],
+        "fee_source": None,
         "kwh": kwh,
     }
 

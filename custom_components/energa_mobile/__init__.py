@@ -60,6 +60,7 @@ __all__ = [
     "TIMEZONE",
     "_has_any_panel_statistics",
     "_has_history_statistics",
+    "_async_cancel_coordinator_tasks",
     "_async_ensure_settlement_dashboard",
     "_import_meter_history",
     "_maybe_auto_backfill",
@@ -390,11 +391,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _async_cancel_coordinator_tasks(
+    coordinator, entry_id: str
+) -> None:
+    """Cancel background coordinator tasks before the entry is torn down.
+
+    The profile-forecast refresh runs as a task created inside the coordinator
+    task. On unload/reload HA cancels the setup task and logs
+    ``ERROR ... Setup of config entry ... cancelled`` with a
+    ``_async_update_profile_forecasts`` traceback when that child is still
+    pending. Cancelling it here (idempotently, never raising) removes the
+    error. Any exception is swallowed so teardown always proceeds.
+    """
+    shutdown = getattr(coordinator, "async_shutdown", None)
+    if shutdown is None:
+        return
+    try:
+        await shutdown()
+    except asyncio.CancelledError:
+        _LOGGER.debug(
+            "Energa: coordinator task shutdown cancelled during unload of %s",
+            entry_id,
+        )
+    except Exception as err:  # noqa: BLE001 - teardown must never break unload
+        _LOGGER.debug(
+            "Energa: coordinator task shutdown skipped for %s: %s", entry_id, err
+        )
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         entry_data = hass.data[DOMAIN].pop(entry.entry_id)
+        # Stop tracked coordinator background tasks (profile forecasts) so the
+        # config-entry task is never cancelled mid-flight on stop/reload.
+        if isinstance(entry_data, dict):
+            await _async_cancel_coordinator_tasks(
+                entry_data.get("coordinator"), entry.entry_id
+            )
         # Close dedicated session
         if isinstance(entry_data, dict) and "session" in entry_data:
             await entry_data["session"].close()

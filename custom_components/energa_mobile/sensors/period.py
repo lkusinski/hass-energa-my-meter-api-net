@@ -56,10 +56,47 @@ _BREAKDOWN_KEYS = (
     "tariff",
     "prosumer_coefficient",
     "kwh_source",
+    "fee_source",
     "months",
     "coverage_unknown",
     "warnings",
 )
+
+# Full ``kwh`` block keys produced by ``build_period_invoice`` (Faza 3). The
+# sensor copies the whole ``kwh`` dict verbatim anyway; keeping the expected set
+# here documents the contract and lets ``_missing_breakdown_keys`` flag drift.
+_KWH_KEYS = (
+    "saldo_plus_1",
+    "saldo_plus_2",
+    "saldo_minus_1",
+    "saldo_minus_2",
+    "gross_1",
+    "gross_2",
+    "gross_import_1",
+    "gross_import_2",
+    "overlap_1",
+    "overlap_2",
+    "cover_1",
+    "cover_2",
+    "bank_open_1",
+    "bank_open_2",
+    "bank_close_1",
+    "bank_close_2",
+)
+
+
+def _missing_breakdown_keys(result: dict) -> list[str]:
+    """Invoice keys ``build_period_invoice`` promises but the result lacks.
+
+    Diagnostic helper (also asserted by tests): it makes a silent omission of a
+    line item — exactly the ``fee_source`` bug fixed in v1.9.0-beta.6 — visible
+    in the entity attributes and the log instead of hiding in an absent key.
+    """
+    missing = [key for key in _BREAKDOWN_KEYS if key not in result]
+    kwh = result.get("kwh")
+    if isinstance(kwh, dict):
+        missing += [key for key in _KWH_KEYS if key not in kwh]
+    return missing
 
 
 class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
@@ -141,6 +178,17 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
         for key in _BREAKDOWN_KEYS:
             if key in result:
                 attrs[key] = result.get(key)
+        # Always expose the source explicitly (even when the key is absent) so
+        # the attribute is never silently ``None`` for a rendered result.
+        attrs.setdefault("fee_source", result.get("fee_source"))
+        missing = _missing_breakdown_keys(result)
+        if missing:
+            _LOGGER.warning(
+                "Energa: sensor wyniku okresu bez kluczy %s "
+                "(wynik usługi może być niepełny)",
+                missing,
+            )
+            attrs["missing_breakdown_keys"] = missing
         return attrs
 
     @property

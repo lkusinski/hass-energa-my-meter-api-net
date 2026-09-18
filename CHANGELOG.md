@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.0-beta.6 (2026-09-18) — fee_source na sensorze wyniku + anulowanie taska profilu
+
+- **`fee_source` w atrybutach sensora wyniku**: `sensor.energa_<serial>_weryfikacja_rachunku`
+  („Okres: rozliczenie") eksponuje teraz `fee_source` (`options`/`partial`/`defaults`) —
+  wcześniej `_BREAKDOWN_KEYS` go pomijał, więc atrybut = `None`, mimo że usługa zwracała
+  wartość. Gwarantowany jest teraz **pełny** zestaw kluczy z `build_period_invoice`:
+  `system`, `coverage_unknown`, `warnings` oraz `kwh` z `cover_1/2`, `bank_open_1/2`,
+  `bank_close_1/2`. Brakujące klucze są logowane (warning) i raportowane w atrybucie
+  `missing_breakdown_keys`, zamiast cicho znikać. Pusty okres zwraca `fee_source=None`.
+- **Anulowanie zadania profilu przy wyładowaniu wpisu**: zadanie
+  `_async_update_profile_forecasts` jest teraz śledzone (`_profile_forecast_task`) i
+  uruchamiane jako cancellable task; `async_unload_entry` (unload/reload/`ha core stop`)
+  anuluje je przez `coordinator.async_shutdown()` z `try/except CancelledError`. Koniec z
+  `ERROR … Setup of config entry … cancelled` + tracebackiem profilu; brak
+  „Task was destroyed" / „coroutine was never awaited".
+
 ## v1.9.0-beta.5 (2026-09-17) — UX kalkulatora, postęp historii, PV w onboardingu
 
 - **Bez migania encji**: zmiana dat okresu nie przeładowuje już integracji (smart update listener).
