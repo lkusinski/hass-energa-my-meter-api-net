@@ -933,8 +933,12 @@ def _verify_cache_put(coordinator, key: tuple, result: dict) -> None:
     cache[key] = result
 
 
-def _empty_period_result(meter: dict, old_system: bool) -> dict:
+def _empty_period_result(
+    meter: dict, old_system: bool, is_prosumer: bool = True
+) -> dict:
     """Zeroed, JSON-safe breakdown for a meter with no data in the window."""
+    from .settlement import settlement_system_name
+
     meter_point_id = str(meter.get("meter_point_id", ""))
     serial = str(meter.get("meter_serial", meter_point_id))
     kwh = {key: 0.0 for key in PERIOD_KWH_KEYS}
@@ -945,8 +949,8 @@ def _empty_period_result(meter: dict, old_system: bool) -> dict:
         "error": "no_data",
         "meter_point_id": meter_point_id,
         "meter_serial": serial,
-        "old_system": bool(old_system),
-        "system": "net_metering" if old_system else "net_billing",
+        "old_system": bool(old_system) and is_prosumer,
+        "system": settlement_system_name(is_prosumer, old_system),
         "sale_energy_day": 0.0,
         "sale_energy_night": 0.0,
         "excise_day": 0.0,
@@ -1111,10 +1115,13 @@ async def async_verify_period_data(
     override_bank_2 = _optional_float("bank_open_2")
     override_deposit = _optional_float("deposit_open_pln")
 
+    from .settlement import is_export_prosumer
+
     results: list[dict] = []
     for meter in meters:
         old_system = _meter_old_system(entry, meter)
         coefficient = _meter_coefficient(entry, meter)
+        prosumer = is_export_prosumer(meter)
         has_zones = meter.get("zone_count", 1) > 1
         meter_point_id = str(meter.get("meter_point_id", ""))
         serial = str(meter.get("meter_serial", meter_point_id))
@@ -1153,7 +1160,7 @@ async def async_verify_period_data(
         if total_points == 0:
             results.append(
                 {
-                    **_empty_period_result(meter, old_system),
+                    **_empty_period_result(meter, old_system, prosumer),
                     "source": source,
                     "cached": False,
                 }
@@ -1166,7 +1173,7 @@ async def async_verify_period_data(
         bank_open_1: float | None = None
         bank_open_2: float | None = None
         deposit_open: float | None = None
-        if old_system:
+        if old_system and prosumer:
             if override_bank_1 is not None or override_bank_2 is not None:
                 bank_open_1 = override_bank_1 if override_bank_1 is not None else 0.0
                 bank_open_2 = override_bank_2 if override_bank_2 is not None else 0.0
@@ -1212,6 +1219,7 @@ async def async_verify_period_data(
             bank_open_2=bank_open_2,
             prosumer_coefficient=coefficient,
             tariff=meter.get("tariff"),
+            is_prosumer=prosumer,
         )
         if fee_origin != "options":
             invoice.setdefault("warnings", [])

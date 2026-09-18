@@ -75,6 +75,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["sensor", "button", "binary_sensor", "date"]
 
 ERGO5_ISSUE_ID = "ergo5_detected"
+DUPLICATE_DOMAIN_ISSUE_ID = "duplicate_domain_detected"
 
 # Options that only affect the verification period picker. A change limited to
 # these keys must not trigger a full config-entry reload (it would briefly make
@@ -173,6 +174,69 @@ async def _async_detect_ergo5(hass: HomeAssistant) -> None:
         message,
         title="Energa: wykryto integrację ergo5",
         notification_id=ERGO5_ISSUE_ID,
+    )
+
+
+async def _async_detect_duplicate_domain(hass: HomeAssistant) -> None:
+    """Repairs + notification for every extra folder sharing our domain.
+
+    The loader loads *every* folder in ``custom_components`` whose manifest
+    declares ``domain: energa_mobile``; a backup copy left next to the live
+    integration (e.g. ``energa_mobile.prebak``) therefore loads the domain
+    twice and can hang HA startup. This is broader than the ergo5 scan: it
+    catches renamed backups of *our own* integration too. Fully guarded so
+    detection can never break setup.
+    """
+    from .settlement import scan_for_domain_duplicates
+
+    own_dir = hass.config.path("custom_components", DOMAIN)
+    hits = await hass.async_add_executor_job(
+        scan_for_domain_duplicates, hass.config.path("custom_components"), DOMAIN
+    )
+    if not hits:
+        ir.async_delete_issue(hass, DOMAIN, DUPLICATE_DOMAIN_ISSUE_ID)
+        try:
+            persistent_notification.async_dismiss(
+                hass, DUPLICATE_DOMAIN_ISSUE_ID
+            )
+        except Exception as err:  # noqa: BLE001 - dismissal must never break setup
+            _LOGGER.debug(
+                "Energa: duplicate-domain notification dismiss skipped: %s", err
+            )
+        return
+
+    names = ", ".join(
+        sorted({str(hit.get("name") or hit.get("domain") or "?") for hit in hits})
+    )
+    paths = "\n".join(f"- {hit.get('path')}" for hit in hits)
+    placeholders = {"names": names, "paths": paths, "own_path": own_dir}
+
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        DUPLICATE_DOMAIN_ISSUE_ID,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=DUPLICATE_DOMAIN_ISSUE_ID,
+        translation_placeholders=placeholders,
+    )
+
+    message = (
+        "Wykryto dodatkowe kopie integracji o domenie `energa_mobile`:\n"
+        f"{paths}\n\n"
+        f"Żywa integracja to: {own_dir}\n\n"
+        "Każdy katalog w `custom_components` z `\"domain\": \"energa_mobile\"` "
+        "jest ładowany przez Home Assistant jako ta sama domena — duplikat "
+        "może zawiesić start HA i tworzyć zdublowane encje. Przenieś kopie "
+        "POZA katalog `custom_components` (np. do `/config/backup/`) i usuń "
+        "z nich plik `manifest.json` albo cały katalog. Encje i statystyki "
+        "żywej integracji zostaną zachowane."
+    )
+    persistent_notification.async_create(
+        hass,
+        message,
+        title="Energa: duplikat domeny energa_mobile",
+        notification_id=DUPLICATE_DOMAIN_ISSUE_ID,
     )
 
 
@@ -333,6 +397,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _async_detect_ergo5(hass)
     except Exception as err:  # noqa: BLE001 - detection must never break setup
         _LOGGER.debug("Energa: ergo5 detection skipped: %s", err)
+
+    # Broader guard: any *other* custom_components folder with our domain is a
+    # duplicate (renamed backup / copy) and must be reported and removed.
+    try:
+        await _async_detect_duplicate_domain(hass)
+    except Exception as err:  # noqa: BLE001 - detection must never break setup
+        _LOGGER.debug("Energa: duplicate-domain detection skipped: %s", err)
 
     # v1.9.0 backfill: an entry created before v0.3.8 that never stored
     # `prosumer_coefficient` inherits the 0.8 default, which mislabels a plain

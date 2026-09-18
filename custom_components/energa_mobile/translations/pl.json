@@ -82,6 +82,10 @@
     "ergo5_detected": {
       "title": "Wykryto równoległą kopię bazowej integracji ergo5",
       "description": "Wykryto kopię integracji ergo5 (`ergo5/hass-energa-my-meter-api`) zainstalowaną obok tej integracji:\n\n{names}\n{paths}\n\nMa ona ten sam domain `energa_mobile` co ta integracja. Trzymanie obu kopii może powodować konflikty oraz duplikaty encji i statystyk. Zalecane jest usunięcie kopii ergo5; istniejące encje i statystyki długoterminowe zostaną zachowane. Wykryte źródło: {source}."
+    },
+    "duplicate_domain_detected": {
+      "title": "Wykryto duplikat domeny `energa_mobile`",
+      "description": "W `custom_components` znaleziono dodatkowe katalogi z `domain: energa_mobile`:\n\n{paths}\n\nŻywa integracja to: {own_path}\n\nHome Assistant ładuje każdy katalog z tą domeną, więc kopia/backup ładuje domenę dwukrotnie i może zawiesić start HA lub zdublować encje. Przenieś kopie POZA `custom_components` (np. do katalogu backupu) albo usuń ich `manifest.json`. Encje i statystyki żywej integracji zostaną zachowane."
     }
   },
   "options": {

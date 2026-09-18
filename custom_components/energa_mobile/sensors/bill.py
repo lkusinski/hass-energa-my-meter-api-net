@@ -25,7 +25,12 @@ from ..const import (
     get_price_for_key,
     get_prosumer_coefficient,
 )
-from ..settlement import month_to_date_forecast
+from ..settlement import (
+    is_export_prosumer,
+    month_to_date_forecast,
+    settlement_system_label,
+    settlement_system_name,
+)
 from ..tariff import (
     capacity_for_annual_use,
     compute_bill,
@@ -166,6 +171,35 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             return round(lifetime / days * 365, 1)
         except (ValueError, TypeError):
             return None
+
+    def _meter_dict(self) -> dict | None:
+        """This sensor's meter from the coordinator payload (or ``None``)."""
+        for m in getattr(self.coordinator, "data", None) or []:
+            if str(m.get("meter_point_id")) == str(self._meter_id):
+                return m
+        return None
+
+    def _is_consumer(self) -> bool:
+        """True for a one-way meter (no export): label it a consumer.
+
+        A plain consumer has coefficient 0.0, which ``_is_old_system`` would
+        otherwise read as "new net-billing" — the warzywna defect (2026-09-18).
+        """
+        meter = self._meter_dict()
+        if meter is None:
+            return False
+        return not is_export_prosumer(meter)
+
+    def _settlement_type(self) -> str:
+        """Fine-grained settlement enum (preserves historic prosumer values)."""
+        if self._is_consumer():
+            return settlement_system_name(False, False)
+        return "net_metering" if self._is_old_system() else "net_billing_rcem"
+
+    def _system_label(self) -> str:
+        return settlement_system_label(
+            not self._is_consumer(), self._is_old_system()
+        )
 
     def _is_old_system(self) -> bool:
         """Old net-metering (coeff >= 0.7) vs new net-billing."""
@@ -368,7 +402,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         except (ValueError, TypeError):
             bill_fc = None
 
-        self._attr_extra_state_attributes = {
+        consumer = self._is_consumer()
+        attrs = {
             "mtd_import_kwh": round(imp_mtd, 2),
             "mtd_export_kwh": round(exp_mtd, 2),
             "mtd_net_pln": round(mtd_net, 2),
@@ -378,12 +413,17 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             "rce_price": rce,
             "rce_source": getattr(self.coordinator, "_rce_source", None) or "manual",
             "formula": "mtd_net/days_elapsed*days_in_month; mtd_net=export×RCE×1.23-import×cena",
-            "note": "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)",
             "rule_version": "ustawa_oze_art4_ust11_v1",
-            "settlement_type": "net_metering" if old_system else "net_billing_rcem",
+            "system": self._system_label(),
+            "settlement_type": self._settlement_type(),
             "period": f"{today.year}-{today.month:02d}",
             "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
+        if not consumer:
+            attrs["note"] = (
+                "Depozyt pokrywa tylko energię czynną (bez dystrybucji i opłat stałych)"
+            )
+        self._attr_extra_state_attributes = attrs
         if profile_res and profile_res.method == "hourly_profile_wal":
             self._attr_extra_state_attributes.update({
                 "profile_confidence": profile_res.confidence_score,
@@ -397,8 +437,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         if bill_mtd is not None and bill_fc is not None:
 
             self._attr_extra_state_attributes.update({
-                "system": "stare net-metering (magazyn kWh)"
-                if old_system else "nowe net-billing (depozyt PLN)",
+                "system": self._system_label(),
                 "mtd_import_day_kwh": round(imp_d, 2),
                 "mtd_import_night_kwh": round(imp_n, 2),
                 "mtd_sale_total_pln": bill_mtd["sale_total"],
@@ -423,9 +462,12 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "fee_table": tariff_family(self._meter_tariff()),
                 "fee_note": "Stawki z Options (taryfa) lub domyślne z faktur (G11 bez PV, G12W 07 i 05-06.2026); "
                 "mocowa/abonament stałe z faktury — sprawdź z taryfą OSD",
-                "hourly_netting_note": "Licznik: delty dobowe; sprzedawca bilansuje "
-                "godzinowo — przybliżenie ~1% (kWh) / ~13% (depozyt PLN)",
             })
+            if not consumer:
+                self._attr_extra_state_attributes["hourly_netting_note"] = (
+                    "Licznik: delty dobowe; sprzedawca bilansuje godzinowo "
+                    "— przybliżenie ~1% (kWh) / ~13% (depozyt PLN)"
+                )
             return bill_fc["do_zaplaty"]
         return forecast
 
@@ -530,9 +572,8 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
             "period": f"{today.year}-{today.month:02d}",
             "day_of_month": today.day,
             "calculated_at": datetime.now(timezone.utc).isoformat(),
-            "system": "stare net-metering (magazyn kWh)"
-            if old_system
-            else "nowe net-billing (depozyt PLN)",
+            "system": self._system_label(),
+            "settlement_type": self._settlement_type(),
             "mtd_import_kwh": round(imp_mtd, 2),
             "mtd_export_kwh": round(exp_mtd, 2),
             "mtd_import_day_kwh": round(imp_d, 2),

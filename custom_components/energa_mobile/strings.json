@@ -82,6 +82,10 @@
     "ergo5_detected": {
       "title": "A copy of the base ergo5 integration was detected",
       "description": "A copy of the ergo5 integration (`ergo5/hass-energa-my-meter-api`) was found on this system:\n\n{names}\n{paths}\n\nIt shares the same domain `energa_mobile` as this integration. Keeping both copies can cause conflicts and duplicate entities/statistics. It is recommended to remove the ergo5 copy; existing entities and long-term statistics are preserved. Detected source: {source}."
+    },
+    "duplicate_domain_detected": {
+      "title": "Duplicate `energa_mobile` domain folders detected",
+      "description": "Extra folders declaring `domain: energa_mobile` were found in `custom_components`:\n\n{paths}\n\nThe live integration is: {own_path}\n\nHome Assistant loads every folder with this domain, so a backup/copy loads the domain twice and can hang startup or duplicate entities. Move the copies OUTSIDE `custom_components` (e.g. to a backup folder) or delete their `manifest.json`. The live integration's entities and statistics are preserved."
     }
   },
   "options": {

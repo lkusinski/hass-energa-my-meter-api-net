@@ -80,7 +80,7 @@ async def async_setup_entry(
 
     _LOGGER.info("Energa binary_sensor: created %d entities for %d active meters", len(entities), len(active_meters))
     if entities:
-        async_add_entities(entities, update_before_add=True)
+        async_add_entities(entities, update_before_add=False)
         _LOGGER.info("Energa binary_sensor: added %d entities successfully", len(entities))
 
 

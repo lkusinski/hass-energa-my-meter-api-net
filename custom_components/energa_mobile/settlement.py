@@ -121,6 +121,79 @@ def scan_for_ergo5(custom_components_dir: str) -> list[dict]:
     return hits
 
 
+def scan_for_domain_duplicates(
+    custom_components_dir: str,
+    own_dir_name: str = "energa_mobile",
+    domain: str = "energa_mobile",
+) -> list[dict]:
+    """Scan ``custom_components/*/manifest.json`` for extra copies of our domain.
+
+    Any folder other than ``own_dir_name`` whose manifest declares
+    ``domain == domain`` is a duplicate of this integration: a renamed copy, a
+    backup left next to the live one, or an ergo5 fork sharing the domain. The
+    loader loads every such folder and they fight over the same entities —
+    the root cause of the HA startup hang on 2026-09-17/18.
+
+    Returns one entry per hit: ``{"path", "domain", "name", "version"}``.
+    I/O or JSON errors are skipped, never raised.
+    """
+    hits: list[dict] = []
+    try:
+        entries = sorted(os.listdir(custom_components_dir))
+    except (OSError, ValueError, TypeError):
+        return hits
+    own = str(own_dir_name or "").strip()
+    wanted = str(domain or "").strip()
+    for entry in entries:
+        if str(entry) == own:
+            continue
+        folder = os.path.join(str(custom_components_dir), entry)
+        if not os.path.isdir(folder):
+            continue
+        manifest_path = os.path.join(folder, "manifest.json")
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
+            with open(manifest_path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        if str(manifest.get("domain") or "").strip() != wanted:
+            continue
+        hits.append(
+            {
+                "path": folder,
+                "domain": manifest.get("domain"),
+                "name": manifest.get("name"),
+                "version": manifest.get("version"),
+            }
+        )
+    return hits
+
+
+def settlement_system_name(is_prosumer: bool, old_system: bool) -> str:
+    """Settlement enum for a meter: consumer / net_metering / net_billing.
+
+    A one-way consumer (no export, ``is_export_prosumer`` False) must never be
+    labelled net-billing just because its prosumer coefficient is 0.0 — that
+    is the warzywna defect (2026-09-18).
+    """
+    if not is_prosumer:
+        return "consumer"
+    return "net_metering" if old_system else "net_billing"
+
+
+def settlement_system_label(is_prosumer: bool, old_system: bool) -> str:
+    """Polish display label matching :func:`settlement_system_name`."""
+    if not is_prosumer:
+        return "konsument (jednokierunkowy)"
+    if old_system:
+        return "stare net-metering (magazyn kWh)"
+    return "nowe net-billing (depozyt PLN)"
+
+
 def parse_settlement_date(value: str | None) -> date | None:
     """Parse YYYY-MM-DD settlement anniversary. None when empty/invalid."""
     if not value or not str(value).strip():

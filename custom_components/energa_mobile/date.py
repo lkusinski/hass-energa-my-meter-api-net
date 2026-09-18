@@ -41,12 +41,18 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the verification period date entities."""
-    api = hass.data[DOMAIN][entry.entry_id]["api"]
-    try:
-        meters_list = await api.async_get_data(force_refresh=False)
-    except Exception as err:  # noqa: BLE001 - must never break entry setup
-        _LOGGER.error("Energa: Failed to fetch meters for date setup: %s", err)
-        meters_list = []
+    entry_data = hass.data[DOMAIN][entry.entry_id]
+    api = entry_data["api"]
+    coordinator = entry_data.get("coordinator")
+    # Reuse the coordinator's first refresh instead of re-awaiting the API
+    # (and its lock) during setup; see sensor.py for the rationale.
+    meters_list = coordinator.data if coordinator is not None else None
+    if not meters_list:
+        try:
+            meters_list = await api.async_get_data(force_refresh=False)
+        except Exception as err:  # noqa: BLE001 - must never break entry setup
+            _LOGGER.error("Energa: Failed to fetch meters for date setup: %s", err)
+            meters_list = []
 
     active_meters = [
         m
@@ -69,7 +75,7 @@ async def async_setup_entry(
             entities.append(EnergaPeriodDate(entry, meter, kind, device_info))
 
     if entities:
-        async_add_entities(entities, update_before_add=True)
+        async_add_entities(entities, update_before_add=False)
 
 
 class EnergaPeriodDate(DateEntity):

@@ -143,6 +143,7 @@ def build_period_invoice(
     bank_open_2: float | None = None,
     prosumer_coefficient: float | None = None,
     tariff: str | None = None,
+    is_prosumer: bool = True,
 ) -> dict:
     """Build the full invoice breakdown for one meter and one period.
 
@@ -196,6 +197,47 @@ def build_period_invoice(
 
     warnings: list[str] = []
     coverage_unknown = False
+
+    # A one-way consumer (no export) is NOT a prosumer: it must be labelled
+    # ``consumer`` and must never emit deposit/warehouse "opening balance"
+    # warnings — there is no deposit to reconstruct. ``old_system`` stays
+    # False for a consumer (coefficient 0.0), so it is passed explicitly.
+    if not is_prosumer:
+        from ..settlement import settlement_system_name
+
+        res = compute_bill(
+            import_day=bases["import_day"],
+            import_night=bases["import_night"],
+            export_kwh=bases["export"],
+            rcem=rcem,
+            fees=fees,
+            months=months,
+            cover_day=0.0,
+            cover_night=0.0,
+            deposit_pln=0.0,
+            deposit_generated=0.0,
+            excise_day=bases["excise_day"],
+            excise_night=bases["excise_night"],
+            add_excise=bases["add_excise"],
+        )
+        kwh = {key: float(saldos.get(key, 0.0)) for key in PERIOD_KWH_KEYS}
+        kwh["gross_import_1"] = float(saldos.get("gross_1", 0.0))
+        kwh["gross_import_2"] = float(saldos.get("gross_2", 0.0))
+        kwh["cover_1"] = 0.0
+        kwh["cover_2"] = 0.0
+        out = dict(res)
+        out["kwh"] = kwh
+        out["rcem"] = float(rcem or 0.0)
+        out["months"] = max(1, int(months))
+        out["old_system"] = False
+        out["system"] = settlement_system_name(False, False)
+        out["tariff"] = tariff
+        out["prosumer_coefficient"] = coefficient
+        out["kwh_source"] = bases["source"]
+        out["coverage_unknown"] = False
+        out["warnings"] = list(warnings)
+        out["deposit_open"] = 0.0
+        return out
 
     # --- Opening warehouse (net-metering) -------------------------------
     bank_known = bank_open_1 is not None or bank_open_2 is not None
@@ -290,7 +332,9 @@ def build_period_invoice(
     out["rcem"] = float(rcem or 0.0)
     out["months"] = max(1, int(months))
     out["old_system"] = bool(old_system)
-    out["system"] = "net_metering" if old_system else "net_billing"
+    from ..settlement import settlement_system_name
+
+    out["system"] = settlement_system_name(True, bool(old_system))
     out["tariff"] = tariff
     out["prosumer_coefficient"] = coefficient
     out["kwh_source"] = bases["source"]

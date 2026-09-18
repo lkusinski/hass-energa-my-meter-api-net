@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.9.0-beta.8 (2026-09-18) — brak „taking over 10 seconds", etykieta konsumenta, detekcja duplikatu domeny
+
+- **A) Setup platformy `sensor` bez drugiego refreshu koordynatora (defekt 2).**
+  Prawdziwa przyczyna `Setup of sensor platform energa_mobile is taking over
+  10 seconds` na `agrestowa` nie leżała w samym `sensor.async_setup_entry`, lecz
+  w `update_before_add=True`: HA wołał dla **każdej** z 42 encji
+  `CoordinatorEntity.async_update()` → `coordinator.async_request_refresh()`,
+  więc debouncer uruchamiał kolejny pełny refresh API (~10 s, log
+  `Finished fetching … in 10.65 seconds`), na który czekał setup platformy.
+  Zmiana na `update_before_add=False` (stany początkowe nadal zapisuje
+  `Entity.add_to_platform_finish`) usuwa ten refresh. Analogicznie
+  `binary_sensor` i `date`.
+- **A) Brak ponownego `api.async_get_data` w setupie platform.** `sensor`,
+  `button` i `date` korzystają teraz z `coordinator.data` (świeżego po
+  `async_config_entry_first_refresh`), a API wołają tylko jako fallback, gdy
+  koordynator nie ma danych. Cache-read `force_refresh=False` wciąż brał
+  `api._data_lock`, który równoległy refresh koordynatora trzyma przez cały
+  fetch liczników i wykresów — to blokowało start platformy.
+- **B) Konsument jednokierunkowy = `consumer` (defekt 4).** Licznik bez
+  eksportu (`is_export_prosumer` false) nie jest już etykietowany
+  `net_billing` z powodu `prosumer_coefficient=0.0`. Nowe czyste helpery
+  `settlement_system_name`/`settlement_system_label` dają `system` =
+  „konsument (jednokierunkowy)" i `settlement_type` = `consumer` w
+  `build_period_invoice`, sensora wyniku okresu oraz sensorów rachunku
+  (`system`/`settlement_type`). Ostrzeżenie „Brak salda początkowego depozytu
+  (net-billing)" i noty depozytowe (`hourly_netting_note`) są dla konsumenta
+  wyłączone — brak eksportu ⇒ brak depozytu. Kwoty bez zmian (depozyt 0,00).
+  Zachowanie prosumenta net-billing/net-metering **bez zmian** (w tym
+  historyczne `settlement_type=net_billing_rcem`).
+- **C) Detekcja duplikatu domeny (przyczyna zawieszenia HA).** Nowy czysty
+  `scan_for_domain_duplicates` znajduje **każdy inny** katalog w
+  `custom_components/*/manifest.json` z `"domain": "energa_mobile"` (backup,
+  kopia, fork ergo5). `_async_detect_duplicate_domain` zgłasza `Repairs`
+  (`duplicate_domain_detected`) + `persistent_notification` z listą ścieżek i
+  jednoznaczną instrukcją (przenieś kopie poza `custom_components`), a po
+  zniknięciu kopii auto-usuwa issue i notyfikację. Uzupełnia wcześniejszy
+  `scan_for_ergo5`.
+- **Tłumaczenia**: nowy `issues.duplicate_domain_detected` w `strings.json`,
+  `translations/pl.json`, `translations/en.json`.
+- **Testy**: 639 passed, 1 skipped (nowe: etykieta/ostrzeżenia konsumenta w
+  fakturze okresu i sensorach rachunku, skan duplikatów domeny + Repairs/
+  notyfikacja, szybki setup platformy bez drugiego refreshu i bez wołania API
+  gdy koordynator ma dane).
+
 ## v1.9.0-beta.7 (2026-09-18) — niezawodny start Core: timeouty API + cache dzienny (naprawa zawieszenia)
 
 - **Przyczyna**: `EnergaAPI.async_get_data(force_refresh=False)` — wołane przez

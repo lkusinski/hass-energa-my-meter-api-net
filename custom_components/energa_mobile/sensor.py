@@ -133,17 +133,24 @@ async def async_setup_entry(
         except Exception as err:
             _LOGGER.warning("Energa: Initial fetch failed, will retry: %s", err)
 
-    # CRITICAL: Fetch meters directly from API to create sensors
-    # Don't rely on coordinator.data which may be empty at startup
-    try:
-        meters_list = await api.async_get_data(force_refresh=False)
-        _LOGGER.info(
-            "Energa: Fetched %d meters from API for sensor setup",
-            len(meters_list) if meters_list else 0,
-        )
-    except Exception as err:
-        _LOGGER.error("Energa: Failed to fetch meters for setup: %s", err)
-        meters_list = []
+    # Prefer the data already fetched by ``async_config_entry_first_refresh``
+    # in ``__init__.py`` (awaited before platforms). Calling the API here again
+    # is unnecessary, and the cache read (``force_refresh=False``) still grabs
+    # ``api._data_lock`` — during a concurrent coordinator refresh that lock is
+    # held for the whole meter+chart fetch, which used to push sensor platform
+    # setup over HA's 10 s warning on agrestowa. The API is only consulted as a
+    # fallback when the coordinator genuinely has no data.
+    meters_list = coordinator.data
+    if not meters_list:
+        try:
+            meters_list = await api.async_get_data(force_refresh=False)
+        except Exception as err:
+            _LOGGER.error("Energa: Failed to fetch meters for setup: %s", err)
+            meters_list = []
+    _LOGGER.info(
+        "Energa: Using %d meters for sensor setup",
+        len(meters_list) if meters_list else 0,
+    )
 
     # Filter active meters (total_plus > 0)
     meters_to_process = (
@@ -1039,7 +1046,13 @@ async def async_setup_entry(
             for s in sensors
         ],
     )
-    async_add_entities(sensors, update_before_add=True)
+    # ``update_before_add=False`` is deliberate: with ``True`` HA calls
+    # ``CoordinatorEntity.async_update()`` for every entity, which awaits
+    # ``coordinator.async_request_refresh()``. The debouncer then runs one more
+    # full API refresh (~10 s) that the platform setup awaits, tripping HA's
+    # "Setup of sensor platform ... is taking over 10 seconds" warning. Initial
+    # states are still written by ``Entity.add_to_platform_finish``.
+    async_add_entities(sensors, update_before_add=False)
 
     # Ensure post-startup settlement calibration runs once recorder and entities are ready
     if entry.options.get(
