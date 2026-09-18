@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.9.0 (2026-09-18) — Rozliczenia na godzinowych saldach i weryfikacja rachunku
+
+- Rozliczenia na **godzinowych saldach** (net-billing i net-metering); akcyza od nakładki/brutto; całe kWh per strefa.
+- **Weryfikacja rachunku**: usługa `verify_period` + UI (2 daty + „Przelicz okres rozliczeniowy" + sensor wyniku), encja kompletności okresu z blokadą przycisku, powiadomienie o liczeniu z ETA; źródło API z fallbackiem na recorder.
+- **Salda początkowe**: magazyn (net-metering, FIFO 12 m-cy) i depozyt (net-billing).
+- Onboarding: system „(wykryto)", rekomendacja PV, checkbox panelu „Energa — Rozliczenia", konsument `0.0` + backfill.
+- Detekcja kopii bazowej integracji ergo5 i duplikatu domeny; `docs/MIGRACJA_ergo5.md`.
+- Poprawki: `async_get_hourly_range`, magazyn (change vs state), szybszy start (bez „taking over 10 s"), anulowanie zadań w tle.
+
 ## v1.9.0-beta.8 (2026-09-18) — brak „taking over 10 seconds", etykieta konsumenta, detekcja duplikatu domeny
 
 - **A) Setup platformy `sensor` bez drugiego refreshu koordynatora (defekt 2).**
