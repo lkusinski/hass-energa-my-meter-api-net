@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.9.2 (2026-09-18) — RCEm per miesiąc okresu + stawki produktu
+
+- **RCEm z miesiąca oddania energii (PSE), nie z opcji.** `verify_period`
+  rozwiązuje RCEm dla każdego miesiąca okresu z całej tabeli PSE
+  (`async_fetch_official_rcem_map`); dla okresu wielomiesięcznego depozyt jest
+  ważony per miesiąc. `bank_rce_price`/`_rce_cache` to wyłącznie fallback
+  (z ostrzeżeniem), a jawne `rcem_pln`/`rcem` nadal nadpisuje wszystko.
+  Wynik zwraca `rcem` (użyty) i `rcem_source` (`pse_table`/`option`/`override`).
+  Naprawia Agrestową 08.2026: depozyt 157,59 i do zapłaty ≈615,53 bez podawania
+  `rcem_pln` (wcześniej przestarzałe 0,26288 dawało 140,65/631,81).
+- **Stawki produktu.** Dwie wariantowe tabele: `G12W_OFERTA` („Oferta
+  Podstawowa”, net-metering — energia 0,7125/0,4622, handlowa 16,18,
+  abonament 0,70) i `G12W_URZEDOWA` („taryfa urzędowa”, net-billing — jak
+  dotychczasowe `G12W_DEFAULT_FEES`). API nie podaje nazwy produktu, więc
+  produkt jest inferowany z systemu rozliczeń, gdy stawek nie ma w opcjach,
+  oraz jawnie wybierany w Options (`tariff_product`). `fee_source` przyjmuje
+  `options`/`product`/`partial`/`defaults`; przy `partial`/`defaults` jest
+  ostrzeżenie. Naprawia Wiśniową 07–08.2026: 129,04/29,68/158,72 (excise
+  0,60/1,86) bez ręcznego wpisywania stawek.
+- **Options**: nowy selektor produktu w sekcji cen z domyślnymi dla dwóch
+  typowych produktów (Wiśniowa vs Agrestowa) + zapis wszystkich `tariff_*`.
+- **Testy**: 671 passed, 1 skipped; `ruff` czysty.
+
 ## v1.9.1 (2026-09-18) — automatyczne saldo początkowe depozytu (FIFO 12 m-cy + RCEm)
 
 - **`verify_period` sam liczy saldo depozytu na początek okresu** z całej historii (FIFO 12 m-cy, RCEm per miesiąc), zamiast wymagać ręcznego `deposit_open_pln`; nadpisania ręczne nadal działają.

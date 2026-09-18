@@ -1190,3 +1190,54 @@ class TestPeriodDatePersistenceAfterRestart:
         entry2.options = dict(store)
         fresh = EnergaPeriodDate(entry2, meter, "start", MagicMock())
         assert fresh.native_value == date(2026, 9, 1)
+
+
+class TestPeriodRcemPerMonth:
+    """v1.9.2: RCEm is resolved per month of energy delivery."""
+
+    def _ts(self, year, month, day=15):
+        return int(datetime(year, month, day, 12, tzinfo=TZ).timestamp())
+
+    def test_month_keys_cover_inclusive_months(self):
+        from custom_components.energa_mobile.services import _period_month_keys
+
+        # date-only end is extended to the exclusive next midnight by the
+        # service, so [Aug 1, Sep 1) touches only August.
+        assert _period_month_keys(
+            datetime(2026, 8, 1, tzinfo=TZ), datetime(2026, 9, 1, tzinfo=TZ)
+        ) == [(2026, 8)]
+        assert _period_month_keys(
+            datetime(2026, 7, 1, tzinfo=TZ), datetime(2026, 9, 1, tzinfo=TZ)
+        ) == [(2026, 7), (2026, 8)]
+
+    def test_effective_rcem_weights_export_per_month(self, monkeypatch):
+        import custom_components.energa_mobile.services as svc
+
+        # Synthetic epoch keys land in 1970; pin _stat_row_moment so the real
+        # month buckets are exercised.
+        mapping = {self._ts(2026, 7): (2026, 7), self._ts(2026, 8): (2026, 8)}
+        monkeypatch.setattr(
+            svc,
+            "_stat_row_moment",
+            lambda ts: datetime(
+                *mapping[int(ts)], 12, tzinfo=TZ
+            )
+            if int(ts) in mapping
+            else None,
+        )
+        hourly = {"export_1": {self._ts(2026, 7): 100.0, self._ts(2026, 8): 300.0}}
+        prices = {(2026, 7): 0.20, (2026, 8): 0.40}
+        eff = svc._effective_period_rcem(None, prices, hourly, 0.0)
+        assert eff == pytest.approx((100 * 0.20 + 300 * 0.40) / 400)
+        # Explicit scalar (override/option fallback) wins.
+        assert svc._effective_period_rcem(0.5, prices, hourly, 0.0) == 0.5
+        # No export -> zero deposit; report the latest month.
+        assert svc._effective_period_rcem(None, prices, {}, 0.0) == pytest.approx(0.40)
+
+    def test_rcem_cache_signature_is_stable(self):
+        from custom_components.energa_mobile.services import _rcem_cache_signature
+
+        assert _rcem_cache_signature(0.29453, {}) == 0.29453
+        a = _rcem_cache_signature(None, {(2026, 8): 0.29453, (2026, 7): 0.26288})
+        b = _rcem_cache_signature(None, {(2026, 7): 0.26288, (2026, 8): 0.29453})
+        assert a == b == ((2026, 7, 0.26288), (2026, 8, 0.29453))

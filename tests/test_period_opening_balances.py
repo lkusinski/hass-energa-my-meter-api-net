@@ -28,8 +28,10 @@ from custom_components.energa_mobile.const import (
     CONF_TARIFF_GRID_VAR_DAY,
     CONF_TARIFF_GRID_VAR_NIGHT,
     CONF_TARIFF_OZE,
+    CONF_TARIFF_PRODUCT,
     CONF_TARIFF_QUALITY,
     CONF_TARIFF_TRADE_FEE,
+    DEFAULT_BANK_RCE_PRICE,
     DOMAIN,
 )
 from custom_components.energa_mobile.core.verification import (
@@ -596,6 +598,17 @@ def _wisniowa_options() -> dict:
     }
 
 
+def _wisniowa_change_stats() -> dict:
+    """June ``change`` rows giving L1 752 / L2 606 kWh at July 1."""
+    june = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    return {
+        "id_import_1": [{"start": june, "change": 0.0}],
+        "id_export_1": [{"start": june, "change": 940.0}],
+        "id_import_2": [{"start": june, "change": 0.0}],
+        "id_export_2": [{"start": june, "change": 757.5}],
+    }
+
+
 def _wisniowa_hourly() -> dict:
     """Hourly series giving saldo_plus 83/342 and gross import 120/372."""
 
@@ -625,50 +638,43 @@ class TestWisniowaServiceAcceptance:
     energia 0,7125/0,4622) and charge excise on the GROSS import.
     """
 
-    @pytest.mark.asyncio
-    async def test_full_invoice_from_change_flows_and_options(self):
+    def _run_with_change_stats(self, options):
+        """Return the verify_period result for the Wiśniowa setup (async helper)."""
         from custom_components.energa_mobile import services as svc
 
-        hass, _ = _hass_with_meter(_wisniowa_meter(), _wisniowa_options())
-        # June flows BEFORE the July-1 period start; ``change`` (not ``state``)
-        # must drive the FIFO warehouse: L1 752 kWh, L2 606 kWh at July 1.
-        june = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        change_stats = {
-            "id_import_1": [{"start": june, "change": 0.0}],
-            "id_export_1": [{"start": june, "change": 940.0}],
-            "id_import_2": [{"start": june, "change": 0.0}],
-            "id_export_2": [{"start": june, "change": 757.5}],
-        }
-        with patch(
-            "custom_components.energa_mobile.services._collect_meter_hourly",
-            new=AsyncMock(return_value=_wisniowa_hourly()),
-        ), patch.object(
-            svc,
-            "_statistic_id_for",
-            side_effect=lambda hass, mid, serial, suffix: f"id_{suffix}",
-        ), patch.object(svc, "get_instance") as gi:
-            gi.return_value.async_add_executor_job = AsyncMock(
-                return_value=change_stats
-            )
-            res = await async_verify_period_data(
-                hass,
-                {
-                    "start": "2026-07-01",
-                    "end": "2026-08-31",
-                    "meter_id": "10000002",
-                    "rcem_pln": 0.0,
-                },
-            )
+        hass, _ = _hass_with_meter(_wisniowa_meter(), options)
 
-        assert res["old_system"] is True
-        assert res["fee_source"] == "options"
-        # FIFO warehouse >= the positive balances, fully covering the period.
-        assert res["kwh"]["bank_open_1"] >= 83.0
-        assert res["kwh"]["bank_open_2"] >= 342.0
+        async def _run():
+            # June flows BEFORE the July-1 period start; ``change`` (not
+            # ``state``) must drive the FIFO warehouse: L1 752, L2 606 kWh.
+            with patch(
+                "custom_components.energa_mobile.services._collect_meter_hourly",
+                new=AsyncMock(return_value=_wisniowa_hourly()),
+            ), patch.object(
+                svc,
+                "_statistic_id_for",
+                side_effect=lambda hass, mid, serial, suffix: f"id_{suffix}",
+            ), patch.object(svc, "get_instance") as gi:
+                gi.return_value.async_add_executor_job = AsyncMock(
+                    return_value=_wisniowa_change_stats()
+                )
+                return await async_verify_period_data(
+                    hass,
+                    {
+                        "start": "2026-07-01",
+                        "end": "2026-08-31",
+                        "meter_id": "10000002",
+                        "rcem_pln": 0.0,
+                    },
+                )
+
+        return _run()
+
+    def _assert_real_invoice(self, res):
+        # Real invoice FES/00042: 129,04 / 29,68 / 158,72.
         assert res["kwh"]["cover_1"] == 83.0
         assert res["kwh"]["cover_2"] == 342.0
         assert res["coverage_unknown"] is False
-        # Real invoice FES/00042: 129,04 / 29,68 / 158,72.
         assert res["excise_day"] == 0.60
         assert res["excise_night"] == 1.86
         assert res["trade_fee"] == 32.36
@@ -676,6 +682,43 @@ class TestWisniowaServiceAcceptance:
         assert res["vat"] == 29.68
         assert res["brutto"] == 158.72
         assert res["do_zaplaty"] == 158.72
+
+    @pytest.mark.asyncio
+    async def test_full_invoice_from_change_flows_and_options(self):
+        res = await self._run_with_change_stats(_wisniowa_options())
+        assert res["old_system"] is True
+        assert res["fee_source"] == "options"
+        # FIFO warehouse >= the positive balances, fully covering the period.
+        assert res["kwh"]["bank_open_1"] >= 83.0
+        assert res["kwh"]["bank_open_2"] >= 342.0
+        self._assert_real_invoice(res)
+
+    @pytest.mark.asyncio
+    async def test_full_invoice_via_inferred_product_table(self):
+        """v1.9.2 acceptance: no rates in Options -> product inferred.
+
+        Net-metering (coefficient 0.8) maps to the "Oferta Podstawowa" product
+        table, so the real FES/00042 invoice is reproduced without
+        hand-entering any tariff rate.
+        """
+        res = await self._run_with_change_stats(
+            {CONF_PROSUMER_COEFFICIENT: 0.8}
+        )
+        assert res["old_system"] is True
+        assert res["fee_source"] == "product"
+        self._assert_real_invoice(res)
+
+    @pytest.mark.asyncio
+    async def test_full_invoice_via_explicit_product_option(self):
+        """An explicit ``tariff_product`` selects the same product table."""
+        res = await self._run_with_change_stats(
+            {
+                CONF_PROSUMER_COEFFICIENT: 0.8,
+                CONF_TARIFF_PRODUCT: "G12W_OFERTA",
+            }
+        )
+        assert res["fee_source"] == "product"
+        self._assert_real_invoice(res)
 
     @pytest.mark.asyncio
     async def test_zero_bank_on_positive_import_flags_unknown(self):
@@ -835,6 +878,97 @@ class TestAgrestowaServiceAcceptance:
         assert res["coverage_unknown"] is True
         assert any("historii przepływów" in w for w in res["warnings"])
 
+    @pytest.mark.asyncio
+    async def test_period_rcem_from_pse_table_without_override(self):
+        """v1.9.2: no ``rcem_pln`` -> the PSE table's August RCEm is used.
+
+        The old resolver took the stale Options value (0.26288), which made the
+        deposit 140.65; the delivery-month RCEm (0.29453) gives 157.59.
+        """
+        hass, _ = _hass_with_meter(_agrestowa_meter(), _agrestowa_options())
+        _api_for(hass).async_fetch_official_rcem_map = AsyncMock(
+            return_value={(2026, 7): 0.26288, (2026, 8): 0.29453}
+        )
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value=_agrestowa_hourly()),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(
+                return_value={
+                    (2026, 7): {
+                        "import_1": 204.0,
+                        "import_2": 266.0,
+                        "export_1": 356.0,
+                        "export_2": 220.0,
+                    }
+                }
+            ),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-08-01",
+                    "end": "2026-08-31",
+                    "meter_id": "10000001",
+                },
+            )
+        assert res["rcem_source"] == "pse_table"
+        assert res["rcem"] == pytest.approx(0.29453)
+        assert res["deposit_generated"] == 157.59
+        assert res["deposit_applied"] == 157.59
+        assert res["do_zaplaty"] == pytest.approx(615.53, abs=0.7)
+
+    @pytest.mark.asyncio
+    async def test_rcem_override_still_wins(self):
+        hass, _ = _hass_with_meter(_agrestowa_meter(), _agrestowa_options())
+        _api_for(hass).async_fetch_official_rcem_map = AsyncMock(
+            return_value={(2026, 8): 0.29453}
+        )
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value=_agrestowa_hourly()),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-08-01",
+                    "end": "2026-08-31",
+                    "meter_id": "10000001",
+                    "rcem_pln": 0.20,
+                },
+            )
+        assert res["rcem_source"] == "override"
+        assert res["rcem"] == pytest.approx(0.20)
+        # saldo ujemne 238 + 197 = 435 kWh x 0.20 x 1.23 = 107.01.
+        assert res["deposit_generated"] == pytest.approx(107.01)
+
+    @pytest.mark.asyncio
+    async def test_option_fallback_when_pse_unavailable(self):
+        hass, _ = _hass_with_meter(_agrestowa_meter(), _agrestowa_options())
+        _api_for(hass).async_fetch_official_rcem_map = AsyncMock(return_value={})
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value=_agrestowa_hourly()),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-08-01",
+                    "end": "2026-08-31",
+                    "meter_id": "10000001",
+                },
+            )
+        assert res["rcem_source"] == "option"
+        assert res["rcem"] == pytest.approx(DEFAULT_BANK_RCE_PRICE)
+        assert any("tabeli RCEm PSE" in w for w in res["warnings"])
+
 
 class TestNetBillingAutoDeposit:
     """Automatic deposit reconstruction honours overrides and warns on RCEm."""
@@ -973,10 +1107,61 @@ class TestNetBillingAutoDeposit:
 
 class TestServiceFeeSource:
     @pytest.mark.asyncio
-    async def test_defaults_are_reported_and_warned(self):
+    async def test_consumer_defaults_are_reported_and_warned(self):
+        # A plain consumer has no product (the settlement system does not
+        # discriminate one): the default table must be reported and warned.
+        consumer = {
+            "meter_point_id": "1",
+            "meter_serial": "S1",
+            "zone_count": 1,
+            "total_plus": 100.0,
+            "total_minus": 0.0,
+            "is_prosumer": False,
+            "tariff": "G12W",
+        }
+        hass, _ = _hass_with_meter(consumer, {})
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(return_value={"import_1": {0: 100.0}}),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {"start": "2026-08-01", "end": "2026-08-31", "meter_id": "1"},
+            )
+        assert res["fee_source"] == "defaults"
+        assert any("tabeli domyślnej" in w for w in res["warnings"])
+
+    @pytest.mark.asyncio
+    async def test_product_inferred_from_settlement_system(self):
+        # Net-metering prosumer without explicit rates/product -> the
+        # "Oferta Podstawowa" product table (Wiśniowa) is used automatically.
         hass, _ = _hass_with_meter(
             _prosumer_meter(), {CONF_PROSUMER_COEFFICIENT: 0.8}
         )
+        with patch(
+            "custom_components.energa_mobile.services._collect_meter_hourly",
+            new=AsyncMock(
+                return_value={"import_1": {0: 100.0}, "export_1": {0: 0.0}}
+            ),
+        ), patch(
+            "custom_components.energa_mobile.services._collect_monthly_flows",
+            new=AsyncMock(return_value={}),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {"start": "2026-08-01", "end": "2026-08-31", "meter_id": "1"},
+            )
+        assert res["fee_source"] == "product"
+        assert not any("tabeli domyślnej" in w for w in res["warnings"])
+
+    @pytest.mark.asyncio
+    async def test_no_explicit_coefficient_keeps_defaults(self):
+        # A prosumer entry that never saved a coefficient must not be assumed
+        # net-metering: the default table (and its warning) stays honest.
+        hass, _ = _hass_with_meter(_prosumer_meter(), {})
         with patch(
             "custom_components.energa_mobile.services._collect_meter_hourly",
             new=AsyncMock(return_value={"import_1": {0: 100.0}}),
@@ -992,8 +1177,26 @@ class TestServiceFeeSource:
         assert any("tabeli domyślnej" in w for w in res["warnings"])
 
     def test_fee_source_helper_classifies(self):
-        from custom_components.energa_mobile.tariff import fee_source
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G12W_OFERTA,
+            PRODUCT_G12W_URZEDOWA,
+            fee_source,
+        )
 
         assert fee_source({})[0] == "defaults"
         assert fee_source({"tariff_trade_fee": 16.18})[0] == "partial"
         assert fee_source(_wisniowa_options())[0] == "options"
+        # Explicit product wins; inference is used only when nothing is set.
+        assert fee_source({"tariff_product": PRODUCT_G12W_OFERTA})[0] == "product"
+        assert fee_source({}, old_system=True)[0] == "product"
+        assert (
+            fee_source({}, old_system=False)[0] == "product"
+        )
+        assert (
+            fee_source({}, tariff="G12W", old_system=True)
+            == ("product", [])
+        )
+        assert fee_source({}, old_system=None)[0] == "defaults"
+        assert (
+            fee_source({"tariff_product": PRODUCT_G12W_URZEDOWA})[0] == "product"
+        )

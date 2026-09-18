@@ -520,15 +520,29 @@ def _resolve_verify_entry(
     return entry, edata.get("coordinator"), edata.get("api")
 
 
-def _resolve_period_rcem(entry: ConfigEntry, coordinator, data: dict) -> float:
-    """RCEm from call data, then coordinator cache, then Options/default."""
-    for key in ("rcem_pln", "rcem"):
-        val = (data or {}).get(key)
-        if val is not None:
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                pass
+def _period_month_keys(start: datetime, end: datetime) -> list[tuple[int, int]]:
+    """Calendar months touched by ``[start, end)`` (exclusive end)."""
+    try:
+        last_moment = end - timedelta(microseconds=1)
+    except (TypeError, ValueError, OverflowError):
+        last_moment = end
+    first = (start.year, start.month)
+    last = (last_moment.year, last_moment.month)
+    keys: list[tuple[int, int]] = []
+    year, month = first
+    while (year, month) <= last:
+        keys.append((year, month))
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+        if len(keys) > 600:  # hard safety stop for absurd windows
+            break
+    return keys
+
+
+def _option_rcem(entry: ConfigEntry, coordinator) -> float:
+    """Fallback RCEm: coordinator cache, then Options, then last-known default."""
     cached = getattr(coordinator, "_rce_cache", None) if coordinator is not None else None
     if cached is not None:
         try:
@@ -541,6 +555,150 @@ def _resolve_period_rcem(entry: ConfigEntry, coordinator, data: dict) -> float:
         )
     except (ValueError, TypeError):
         return float(DEFAULT_BANK_RCE_PRICE)
+
+
+async def _resolve_period_rcem(
+    api: EnergaAPI | None,
+    coordinator,
+    entry: ConfigEntry,
+    data: dict,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> tuple[float | None, dict, str, list[str]]:
+    """Resolve the RCEm used to price the verified period.
+
+    The energy is valued with the RCEm of the month it was delivered, so the
+    whole official PSE table (``api.async_fetch_official_rcem_map``, cached) is
+    consulted for every month the period touches. Returns
+    ``(scalar, monthly_prices, source, warnings)``:
+
+    * explicit ``rcem_pln``/``rcem`` from the call -> ``scalar`` set, source
+      ``override``;
+    * PSE table -> ``monthly_prices`` filled per month, source ``pse_table``;
+    * table unreachable (or month not published) -> Options/``_rce_cache``
+      price as ``scalar``, source ``option`` and a warning.
+    """
+    for key in ("rcem_pln", "rcem"):
+        val = (data or {}).get(key)
+        if val is not None:
+            try:
+                return float(val), {}, "override", []
+            except (ValueError, TypeError):
+                pass
+
+    wanted = _period_month_keys(start_dt, end_dt)
+    table: dict = {}
+    fetch_map = getattr(api, "async_fetch_official_rcem_map", None)
+    if callable(fetch_map):
+        try:
+            fetched = await fetch_map()
+            if isinstance(fetched, dict):
+                table = fetched
+        except Exception as err:  # noqa: BLE001 - PSE fetch must not break the service
+            _LOGGER.debug("verify_period PSE RCEm table fetch failed: %s", err)
+
+    cache = getattr(coordinator, "_rcem_monthly", None) if coordinator is not None else None
+    if not isinstance(cache, dict):
+        cache = {}
+
+    prices: dict = {}
+    for key in wanted:
+        value = table.get(key)
+        if value is None:
+            value = cache.get(key)
+        if value is None:
+            continue
+        try:
+            value = float(value)
+        except (ValueError, TypeError):
+            continue
+        prices[key] = value
+        cache[key] = value
+
+    if coordinator is not None:
+        try:
+            coordinator._rcem_monthly = cache
+        except Exception:  # noqa: BLE001 - best-effort cache
+            pass
+
+    warnings: list[str] = []
+    if prices:
+        missing = [f"{y:04d}-{m:02d}" for (y, m) in wanted if (y, m) not in prices]
+        if missing:
+            fallback = _option_rcem(entry, coordinator)
+            for key in wanted:
+                prices.setdefault(key, fallback)
+            warnings.append(
+                "Brak historycznych cen RCEm (PSE) dla miesięcy: "
+                f"{', '.join(missing)} — dla nich użyto ceny z opcji/ostatniej "
+                "znanej jako przybliżenia."
+            )
+        return None, prices, "pse_table", warnings
+
+    fallback = _option_rcem(entry, coordinator)
+    warnings.append(
+        "Nie udało się pobrać tabeli RCEm PSE dla okresu — użyto ceny z opcji "
+        f"bank_rce_price ({fallback:.5f} PLN/kWh)."
+    )
+    return fallback, {}, "option", warnings
+
+
+def _monthly_export_kwh(hourly: dict) -> dict:
+    """Export kWh per ``(year, month)`` from the hourly epoch series."""
+    buckets: dict = {}
+    for suffix in ("export", "export_1", "export_2"):
+        series = (hourly or {}).get(suffix)
+        if not isinstance(series, dict):
+            continue
+        for ts, value in series.items():
+            try:
+                kwh = float(value)
+            except (ValueError, TypeError):
+                continue
+            if kwh <= 0.0:
+                continue
+            moment = _stat_row_moment(ts)
+            if moment is None:
+                continue
+            key = (moment.year, moment.month)
+            buckets[key] = buckets.get(key, 0.0) + kwh
+    return buckets
+
+
+def _effective_period_rcem(
+    scalar: float | None,
+    monthly_prices: dict,
+    hourly: dict,
+    fallback: float,
+) -> float:
+    """One RCEm for the invoice: an explicit scalar, or the export-weighted
+    average of the period's monthly RCEm (energy valued in its delivery month).
+    """
+    if scalar is not None:
+        return float(scalar)
+    if not monthly_prices:
+        return float(fallback)
+    weights = _monthly_export_kwh(hourly)
+    total = sum(weights.get(key, 0.0) for key in monthly_prices)
+    if total <= 0.0:
+        # No export in the period -> zero deposit; report the latest month.
+        return float(monthly_prices[max(monthly_prices)])
+    return (
+        sum(
+            weights.get(key, 0.0) * float(price)
+            for key, price in monthly_prices.items()
+        )
+        / total
+    )
+
+
+def _rcem_cache_signature(scalar: float | None, monthly_prices: dict):
+    """Hashable signature of the resolved RCEm for the in-memory memo cache."""
+    if scalar is not None:
+        return float(scalar)
+    return tuple(
+        sorted((int(y), int(m), float(v)) for (y, m), v in monthly_prices.items())
+    )
 
 
 def _meter_coefficient(entry: ConfigEntry, meter: dict) -> float:
@@ -560,6 +718,24 @@ def _meter_coefficient(entry: ConfigEntry, meter: dict) -> float:
 def _meter_old_system(entry: ConfigEntry, meter: dict) -> bool:
     """True for old net-metering (coefficient >= 0.7)."""
     return _meter_coefficient(entry, meter) >= 0.7
+
+
+def _has_explicit_coefficient(options: dict, meter: dict) -> bool:
+    """True when the settlement coefficient was explicitly configured.
+
+    Guards the best-effort product inference: an entry that never saved a
+    coefficient must not be assumed net-metering just because the default
+    (0.8) applies.
+    """
+    opts = options or {}
+    if CONF_PROSUMER_COEFFICIENT in opts:
+        return True
+    serial = str(meter.get("meter_serial", meter.get("meter_point_id", "")))
+    meter_id = str(meter.get("meter_point_id", ""))
+    for ident in (serial, meter_id):
+        if ident and f"meter_{ident}_{CONF_PROSUMER_COEFFICIENT}" in opts:
+            return True
+    return False
 
 
 async def _active_meters_for_period(
@@ -1221,7 +1397,19 @@ async def async_verify_period_data(
                 "source": SOURCE_RECORDER,
             }
 
-    rcem = _resolve_period_rcem(entry, coordinator, data)
+    (
+        rcem_scalar,
+        rcem_prices,
+        rcem_source,
+        rcem_warnings,
+    ) = await _resolve_period_rcem(api, coordinator, entry, data, start_dt, end_dt)
+    if rcem_scalar is not None:
+        base_rcem = float(rcem_scalar)
+    elif rcem_prices:
+        base_rcem = float(rcem_prices[max(rcem_prices)])
+    else:
+        base_rcem = float(DEFAULT_BANK_RCE_PRICE)
+    rcem_cache_sig = _rcem_cache_signature(rcem_scalar, rcem_prices)
     months = _period_months(start_dt, end_dt)
     meters = await _active_meters_for_period(
         hass, api, coordinator, data.get("meter_id")
@@ -1231,7 +1419,8 @@ async def async_verify_period_data(
         "entry_id": entry.entry_id,
         "period_start": start_dt.isoformat(),
         "period_end": end_dt.isoformat(),
-        "rcem": float(rcem),
+        "rcem": base_rcem,
+        "rcem_source": rcem_source,
         "months": months,
         "cached": False,
     }
@@ -1276,7 +1465,7 @@ async def async_verify_period_data(
             meter_point_id,
             start_dt.isoformat(),
             end_dt.isoformat(),
-            float(rcem),
+            rcem_cache_sig,
             override_bank_1,
             override_bank_2,
             override_deposit,
@@ -1302,11 +1491,16 @@ async def async_verify_period_data(
             else:
                 source = SOURCE_RECORDER
 
+        meter_rcem = _effective_period_rcem(
+            rcem_scalar, rcem_prices, hourly, base_rcem
+        )
         total_points = sum(len(zone) for zone in hourly.values())
         if total_points == 0:
             results.append(
                 {
                     **_empty_period_result(meter, old_system, prosumer),
+                    "rcem": meter_rcem,
+                    "rcem_source": rcem_source,
                     "source": source,
                     "cached": False,
                 }
@@ -1320,9 +1514,20 @@ async def async_verify_period_data(
         # PSE table. Explicit ``bank_open_1/2`` / ``deposit_open_pln`` from the
         # service call remain manual overrides and skip the reconstruction.
         entry_options = dict(entry.options or {})
-        fees = fees_from_options(entry_options, meter.get("tariff"))
+        # The seller product is only inferable for a real prosumer with an
+        # explicitly configured settlement coefficient (the system
+        # discriminates "Oferta Podstawowa" vs "taryfa urzędowa"); a plain
+        # consumer or an unconfigured entry keeps the tariff defaults.
+        product_system = (
+            old_system
+            if prosumer and _has_explicit_coefficient(entry_options, meter)
+            else None
+        )
+        fees = fees_from_options(
+            entry_options, meter.get("tariff"), old_system=product_system
+        )
         fee_origin, _missing_fee_keys = fee_source(
-            entry_options, meter.get("tariff")
+            entry_options, meter.get("tariff"), old_system=product_system
         )
 
         bank_open_1: float | None = None
@@ -1364,15 +1569,15 @@ async def async_verify_period_data(
             monthly = await _prior_monthly_flows(hass, meter, coordinator, start_dt)
             prior = _prior_months(monthly, start_dt)
             if prior:
-                monthly_rcem, _missing_rcem, rcem_source = await _resolve_monthly_rcem(
-                    api, coordinator, prior
+                monthly_rcem, _missing_rcem, monthly_rcem_source = (
+                    await _resolve_monthly_rcem(api, coordinator, prior)
                 )
                 deposit_open, dep_detail = opening_deposit_from_monthly_flows(
                     monthly,
                     monthly_rcem,
                     fees,
                     period_start=start_dt,
-                    fallback_rcem=rcem,
+                    fallback_rcem=meter_rcem,
                 )
                 deposit_detail = dep_detail
                 if deposit_open is not None:
@@ -1386,7 +1591,7 @@ async def async_verify_period_data(
                         dep_detail.get("applied_pln", 0.0),
                         dep_detail.get("expired_pln", 0.0),
                         dep_detail.get("months_used"),
-                        rcem_source,
+                        monthly_rcem_source,
                     )
                 # Only months with real export matter; ``missing_rcem`` is
                 # reported by the pure ledger and respects that.
@@ -1410,7 +1615,7 @@ async def async_verify_period_data(
         invoice = build_period_invoice(
             hourly,
             fees=fees,
-            rcem=rcem,
+            rcem=meter_rcem,
             months=months,
             old_system=old_system,
             deposit_open_pln=deposit_open,
@@ -1422,7 +1627,7 @@ async def async_verify_period_data(
             tariff=meter.get("tariff"),
             is_prosumer=prosumer,
         )
-        if fee_origin != "options":
+        if fee_origin in ("partial", "defaults"):
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + [
                 "Część stawek taryfowych pochodzi z tabeli domyślnej "
@@ -1432,9 +1637,13 @@ async def async_verify_period_data(
         if deposit_warnings:
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + deposit_warnings
+        if rcem_warnings:
+            invoice.setdefault("warnings", [])
+            invoice["warnings"] = list(invoice["warnings"]) + rcem_warnings
         result = {
             **invoice,
             "fee_source": fee_origin,
+            "rcem_source": rcem_source,
             "empty": False,
             "meter_point_id": meter_point_id,
             "meter_serial": serial,

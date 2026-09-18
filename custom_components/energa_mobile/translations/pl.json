@@ -151,7 +151,8 @@
           "tariff_quality": "Taryfa: opłata jakościowa [PLN/kWh] (z faktury!)",
           "tariff_oze": "Taryfa: opłata OZE [PLN/kWh]",
           "tariff_cogen": "Taryfa: opłata kogeneracyjna [PLN/kWh]",
-          "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.] (puste = auto próg URE 2026)"
+          "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.] (puste = auto próg URE 2026)",
+          "tariff_product": "Taryfa: produkt sprzedawcy (tabela stawek) — puste = automatycznie"
         }
       },
       "history": {

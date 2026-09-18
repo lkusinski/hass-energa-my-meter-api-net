@@ -281,11 +281,76 @@ G11_DEFAULT_FEES = {
     "capacity": 24.05,
 }
 
+# --- Seller product variants (v1.9.2) -------------------------------------
+# The Energa API exposes only the tariff string (G11/G12W), never the seller
+# product ("Oferta Podstawowa…" / "taryfa urzędowa"), so the product must come
+# from the entry Options. These tables are the invoice-verified rates per
+# product; ``fee_source`` reports ``product`` when one is used.
+#
+# G12W_OFERTA — "Oferta Podstawowa" / starszy produkt (net-metering, Wiśniowa
+#   FES/00042): handlowa 16,18 and abonament 0,70.
+# G12W_URZEDOWA — "taryfa urzędowa" (net-billing, Agrestowa FES/00045): no
+#   handlowa, abonament 0,74. Identical to G12W_DEFAULT_FEES.
+PRODUCT_G12W_OFERTA = "G12W_OFERTA"
+PRODUCT_G12W_URZEDOWA = "G12W_URZEDOWA"
+OPTION_TARIFF_PRODUCT = "tariff_product"
+
+G12W_OFERTA_FEES = {
+    "energy_day": 0.7125,
+    "energy_night": 0.4622,
+    "excise_mwh": 5.00,
+    "trade_fee": 16.18,
+    "abonament": 0.70,
+    "grid_fixed": 20.17,
+    "grid_var_day": 0.4017,
+    "grid_var_night": 0.0851,
+    "quality": 0.0332,
+    "oze": 0.0073,
+    "cogen": 0.0030,
+    "capacity": 24.05,
+}
+G12W_URZEDOWA_FEES = G12W_DEFAULT_FEES
+
+PRODUCT_FEE_TABLES = {
+    PRODUCT_G12W_OFERTA: G12W_OFERTA_FEES,
+    PRODUCT_G12W_URZEDOWA: G12W_URZEDOWA_FEES,
+}
+
+# Human labels for the Options product selector (PL, verbatim in the form).
+PRODUCT_LABELS = {
+    PRODUCT_G12W_OFERTA: "Oferta Podstawowa (starszy produkt, np. Wiśniowa)",
+    PRODUCT_G12W_URZEDOWA: "Taryfa urzędowa (nowszy produkt, np. Agrestowa)",
+}
+
 # Fee table per tariff family. Unknown tariffs fall back to G12W.
 FEE_TABLES = {
     "G11": G11_DEFAULT_FEES,
     "G12W": G12W_DEFAULT_FEES,
 }
+
+
+def normalized_product(value) -> str | None:
+    """Return a recognized product key (upper-case) or ``None``."""
+    try:
+        name = str(value or "").strip().upper()
+    except (ValueError, TypeError):
+        return None
+    return name if name in PRODUCT_FEE_TABLES else None
+
+
+def product_for_system(old_system: bool | None) -> str | None:
+    """Best-effort product key from the settlement system (v1.9.2).
+
+    The API does not name the seller product, so when the user has not picked
+    one explicitly we infer from the settlement system: net-metering (older
+    installations) -> "Oferta Podstawowa", net-billing -> "taryfa urzędowa".
+    ``None`` (unknown) never infers. Users can always override in Options.
+    """
+    if old_system is True:
+        return PRODUCT_G12W_OFERTA
+    if old_system is False:
+        return PRODUCT_G12W_URZEDOWA
+    return None
 
 
 def tariff_family(tariff: str | None) -> str:
@@ -466,30 +531,87 @@ def compute_bill(
     return out
 
 
-def fees_from_options(options: dict | None, tariff: str | None = None) -> dict:
+def _fee_source_counts(options: dict | None) -> tuple[str, list[str]]:
+    """Classify raw ``tariff_*`` coverage: options / partial / defaults."""
+    opts = options or {}
+    present: list[str] = []
+    missing: list[str] = []
+    for fee, opt_key in _OPTION_KEY_MAP.items():
+        configured = False
+        try:
+            if opt_key in opts and opts.get(opt_key) is not None:
+                float(opts[opt_key])
+                configured = True
+        except (TypeError, ValueError, AttributeError):
+            configured = False
+        (present if configured else missing).append(fee)
+    if not present:
+        return ("defaults", missing)
+    if missing:
+        return ("partial", missing)
+    return ("options", [])
+
+
+def _resolve_product(
+    options: dict | None, tariff: str | None, old_system: bool | None
+) -> str | None:
+    """Product key to use (or ``None``).
+
+    Precedence: an explicit ``tariff_product`` option wins; otherwise the
+    product is inferred from the settlement system *only* when no individual
+    ``tariff_*`` override is configured (so a hand-tuned table is never
+    silently replaced). G11 has no product variants.
+    """
+    opts = options or {}
+    if tariff_family(tariff) != "G12W":
+        return None
+    explicit = normalized_product(opts.get(OPTION_TARIFF_PRODUCT))
+    if explicit is not None:
+        return explicit
+    if old_system is None:
+        return None
+    if _fee_source_counts(opts)[0] != "defaults":
+        return None
+    return product_for_system(old_system)
+
+
+def fees_from_options(
+    options: dict | None,
+    tariff: str | None = None,
+    *,
+    old_system: bool | None = None,
+) -> dict:
     """Build a fee table from integration Options (v0.2.14, tariffs v0.3.0).
 
-    Reads ``tariff_*`` overrides, falls back to the per-tariff table
-    (G11 vs G12W via :func:`tariff_family`). Fully defensive:
-    unknown/missing/invalid values keep defaults, so a half-filled
-    Options form can never break the bill sensor.
+    Reads a selected ``tariff_product`` (full invoice-verified product table)
+    or individual ``tariff_*`` overrides, falling back to the per-tariff table
+    (G11 vs G12W via :func:`tariff_family`). When ``old_system`` is given and
+    no explicit rates/product are configured, the product is inferred from the
+    settlement system (net-metering -> "Oferta Podstawowa", net-billing ->
+    "taryfa urzędowa"), see :func:`product_for_system`. Fully defensive:
+    unknown/missing/invalid values keep defaults, so a half-filled Options form
+    can never break the bill sensor.
     """
+    opts = options or {}
+    product = _resolve_product(opts, tariff, old_system)
+    if product is not None:
+        return dict(PRODUCT_FEE_TABLES[product])
     base = FEE_TABLES.get(tariff_family(tariff), G12W_DEFAULT_FEES)
     f = dict(base)
-    if not options:
+    if not opts:
         return f
     # Migration (v0.3.0): the Options form used to bake G12W defaults
     # into every account on first open. A G11 meter whose overrides are
     # all identical to the G12W table was never meaningfully customized
     # — use the invoice-verified G11 table instead of stale G12W numbers.
     if tariff_family(tariff) == "G11" and _options_match_table(
-        options, G12W_DEFAULT_FEES
+        opts, G12W_DEFAULT_FEES
     ):
         return dict(G11_DEFAULT_FEES)
     for fee, opt_key in _OPTION_KEY_MAP.items():
         try:
-            if opt_key in options and options[opt_key] is not None:
-                f[fee] = float(options[opt_key])
+            if opt_key in opts and opts[opt_key] is not None:
+                f[fee] = float(opts[opt_key])
         except (ValueError, TypeError):
             continue
     return f
@@ -511,33 +633,27 @@ def _options_match_table(options: dict, table: dict) -> bool:
     return True
 
 
-def fee_source(options: dict | None, tariff: str | None = None) -> tuple[str, list[str]]:
-    """Report where a fee table comes from: ``options`` / ``partial`` / ``defaults``.
+def fee_source(
+    options: dict | None,
+    tariff: str | None = None,
+    *,
+    old_system: bool | None = None,
+) -> tuple[str, list[str]]:
+    """Report where a fee table comes from.
 
-    Returns ``(source, missing_fee_keys)``. ``options`` means every mapped
-    ``tariff_*`` key is present (the invoice is reproducible to the grosz);
-    ``partial`` means some are missing and the rest silently fall back to the
-    per-tariff default table; ``defaults`` means none were configured. The
-    caller surfaces this honestly instead of pretending the defaults are the
-    user's contract.
+    Returns ``(source, missing_fee_keys)`` where ``source`` is one of
+    ``product`` (a recognized ``tariff_product`` table, or the best-effort
+    inference from the settlement system), ``options`` (every mapped
+    ``tariff_*`` key is present — the invoice is reproducible to the grosz),
+    ``partial`` (some are missing and the rest silently fall back to the
+    per-tariff default table) or ``defaults`` (none were configured). The
+    caller surfaces ``partial``/``defaults`` with a warning honestly instead of
+    pretending the defaults are the user's contract.
     """
     opts = options or {}
-    present: list[str] = []
-    missing: list[str] = []
-    for fee, opt_key in _OPTION_KEY_MAP.items():
-        configured = False
-        try:
-            if opt_key in opts and opts.get(opt_key) is not None:
-                float(opts[opt_key])
-                configured = True
-        except (TypeError, ValueError, AttributeError):
-            configured = False
-        (present if configured else missing).append(fee)
-    if not present:
-        return ("defaults", missing)
-    if missing:
-        return ("partial", missing)
-    return ("options", [])
+    if _resolve_product(opts, tariff, old_system) is not None:
+        return ("product", [])
+    return _fee_source_counts(opts)
 
 
 def split_cover(total_cover: float, import_day: float, import_night: float) -> tuple[float, float]:

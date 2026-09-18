@@ -151,7 +151,8 @@
           "tariff_quality": "Tariff: quality fee [PLN/kWh] (from your invoice!)",
           "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
           "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
-          "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)"
+          "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)",
+          "tariff_product": "Tariff: seller product (rate table) — empty = automatic"
         }
       },
       "history": {

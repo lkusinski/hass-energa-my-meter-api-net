@@ -306,6 +306,55 @@ class TestSettlementDashboardOption:
         assert DEFAULT_CREATE_SETTLEMENT_DASHBOARD is True
 
 
+class TestTariffFeeSchema:
+    """v1.9.2: product selector + product-aware fee defaults in Options."""
+
+    def _defaults(self, options, tariff="G12W", old_system=None):
+        from custom_components.energa_mobile.config_flow import _tariff_fee_schema
+
+        schema = _tariff_fee_schema(options, tariff, old_system)
+        return {
+            key.schema: key.default()
+            for key in schema
+            if key.default is not None
+        }
+
+    def test_inferred_oferta_defaults_for_old_system(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import G12W_OFERTA_FEES
+
+        defaults = self._defaults({}, "G12W", old_system=True)
+        assert defaults[CONF_TARIFF_PRODUCT] == "G12W_OFERTA"
+        assert defaults["tariff_energy_day"] == G12W_OFERTA_FEES["energy_day"]
+        assert defaults["tariff_trade_fee"] == G12W_OFERTA_FEES["trade_fee"]
+
+    def test_inferred_urzedowa_defaults_for_new_system(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import G12W_URZEDOWA_FEES
+
+        defaults = self._defaults({}, "G12W", old_system=False)
+        assert defaults[CONF_TARIFF_PRODUCT] == "G12W_URZEDOWA"
+        assert defaults["tariff_energy_day"] == G12W_URZEDOWA_FEES["energy_day"]
+
+    def test_explicit_product_wins_over_inference(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import G12W_URZEDOWA_FEES
+
+        defaults = self._defaults(
+            {"tariff_product": "G12W_URZEDOWA"}, "G12W", old_system=True
+        )
+        assert defaults[CONF_TARIFF_PRODUCT] == "G12W_URZEDOWA"
+        assert (
+            defaults["tariff_energy_day"] == G12W_URZEDOWA_FEES["energy_day"]
+        )
+
+    def test_g11_form_has_no_product_selector(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+
+        defaults = self._defaults({}, "G11", old_system=True)
+        assert CONF_TARIFF_PRODUCT not in defaults
+
+
 class TestSystemStepSolarDetection:
     """v1.9.0: onboarding detects consumers and the Energy panel PV source."""
 

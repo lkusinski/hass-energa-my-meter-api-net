@@ -47,6 +47,7 @@ from .const import (
     CONF_TARIFF_GRID_VAR_DAY,
     CONF_TARIFF_GRID_VAR_NIGHT,
     CONF_TARIFF_OZE,
+    CONF_TARIFF_PRODUCT,
     CONF_TARIFF_QUALITY,
     CONF_TARIFF_TRADE_FEE,
     CONF_USE_ROLLING_365D,
@@ -111,34 +112,63 @@ def _wizard_language(hass) -> str:
     return "pl"
 
 
-def _tariff_fee_schema(options: dict, tariff: str | None = None) -> dict:
-    """Optional tariff fee overrides for the full-bill forecast (v0.2.14).
+_TARIFF_KEY_MAP = {
+    CONF_TARIFF_ENERGY_DAY: "energy_day",
+    CONF_TARIFF_ENERGY_NIGHT: "energy_night",
+    CONF_TARIFF_EXCISE_MWH: "excise_mwh",
+    CONF_TARIFF_TRADE_FEE: "trade_fee",
+    CONF_TARIFF_ABONAMENT: "abonament",
+    CONF_TARIFF_GRID_FIXED: "grid_fixed",
+    CONF_TARIFF_GRID_VAR_DAY: "grid_var_day",
+    CONF_TARIFF_GRID_VAR_NIGHT: "grid_var_night",
+    CONF_TARIFF_QUALITY: "quality",
+    CONF_TARIFF_OZE: "oze",
+    CONF_TARIFF_COGEN: "cogen",
+    CONF_TARIFF_CAPACITY: "capacity",
+}
 
-    Shared by the G12W and G11 price forms. Defaults follow the meter
-    tariff (v0.3.0: G11 has its own invoice-verified table); an
-    empty/unchanged field keeps the default via fees_from_options.
+
+def _tariff_fee_schema(
+    options: dict, tariff: str | None = None, old_system: bool | None = None
+) -> dict:
+    """Tariff product + fee overrides for the full-bill forecast.
+
+    Shared by the G12W and G11 price forms. Defaults follow the selected
+    product (``tariff_product``) or, if none is stored, the product inferred
+    from the settlement system (v1.9.2), else the meter tariff table (v0.3.0:
+    G11 has its own invoice-verified table). An empty/unchanged field keeps the
+    default via fees_from_options.
     """
-    from .tariff import FEE_TABLES, tariff_family
+    from .tariff import (
+        FEE_TABLES,
+        PRODUCT_FEE_TABLES,
+        PRODUCT_LABELS,
+        normalized_product,
+        product_for_system,
+        tariff_family,
+    )
 
-    table = FEE_TABLES.get(tariff_family(tariff))
-    key_map = {
-        CONF_TARIFF_ENERGY_DAY: "energy_day",
-        CONF_TARIFF_ENERGY_NIGHT: "energy_night",
-        CONF_TARIFF_EXCISE_MWH: "excise_mwh",
-        CONF_TARIFF_TRADE_FEE: "trade_fee",
-        CONF_TARIFF_ABONAMENT: "abonament",
-        CONF_TARIFF_GRID_FIXED: "grid_fixed",
-        CONF_TARIFF_GRID_VAR_DAY: "grid_var_day",
-        CONF_TARIFF_GRID_VAR_NIGHT: "grid_var_night",
-        CONF_TARIFF_QUALITY: "quality",
-        CONF_TARIFF_OZE: "oze",
-        CONF_TARIFF_COGEN: "cogen",
-        CONF_TARIFF_CAPACITY: "capacity",
-    }
-    return {
-        vol.Optional(key, default=options.get(key, table[fee])): vol.Coerce(float)
-        for key, fee in key_map.items()
-    }
+    opts = options or {}
+    family = tariff_family(tariff)
+    explicit = normalized_product(opts.get(CONF_TARIFF_PRODUCT))
+    inferred = product_for_system(old_system) if family == "G12W" else None
+    current_product = explicit or inferred or ""
+    product_table = PRODUCT_FEE_TABLES.get(explicit or inferred or "")
+    table = product_table or FEE_TABLES.get(family)
+    schema: dict = {}
+    if family == "G12W":
+        choices = {"": "Automatycznie / własne stawki"}
+        choices.update(PRODUCT_LABELS)
+        schema[
+            vol.Optional(CONF_TARIFF_PRODUCT, default=current_product)
+        ] = vol.In(choices)
+    schema.update(
+        {
+            vol.Optional(key, default=opts.get(key, table[fee])): vol.Coerce(float)
+            for key, fee in _TARIFF_KEY_MAP.items()
+        }
+    )
+    return schema
 
 
 class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -754,6 +784,16 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
             return "G11"
         return "G12W"
 
+    def _old_system_hint(self) -> bool | None:
+        """Best-effort settlement-system hint for product defaults (v1.9.2)."""
+        coeff = self._config_entry.options.get(CONF_PROSUMER_COEFFICIENT)
+        if coeff is None:
+            return None
+        try:
+            return float(coeff) >= 0.7
+        except (ValueError, TypeError):
+            return None
+
     async def async_step_prices(self, user_input=None):
         """Handle energy price configuration."""
         if user_input is not None:
@@ -874,7 +914,11 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
-                        **_tariff_fee_schema(self._config_entry.options, self._dominant_tariff()),
+                        **_tariff_fee_schema(
+                            self._config_entry.options,
+                            self._dominant_tariff(),
+                            self._old_system_hint(),
+                        ),
                     }
                 ),
             )
@@ -935,7 +979,11 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_USE_ROLLING_365D, default=current_rolling
                         ): bool,
-                        **_tariff_fee_schema(self._config_entry.options, self._dominant_tariff()),
+                        **_tariff_fee_schema(
+                            self._config_entry.options,
+                            self._dominant_tariff(),
+                            self._old_system_hint(),
+                        ),
                     }
                 ),
             )
