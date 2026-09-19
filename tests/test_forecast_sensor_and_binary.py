@@ -102,6 +102,10 @@ def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
     assert attrs["profile_confidence"] > 0.5
     assert attrs["forecast_import_t1_kwh"] > 0
     assert attrs["forecast_import_t2_kwh"] > 0
+    # v1.9.2 (P0.1): the WAL path's invoice is now exposed and non-None.
+    assert isinstance(attrs["forecast_payable_pln"], float)
+    assert isinstance(attrs["bill_breakdown"], dict)
+    assert attrs["bill_breakdown"]["do_zaplaty"] == attrs["forecast_payable_pln"]
 
 
 def test_bill_sensor_uses_product_rates_for_old_system():

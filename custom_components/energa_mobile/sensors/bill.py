@@ -458,6 +458,15 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 "forecast_import_t2_kwh": float(profile_res.forecast_import_t2_kwh),
                 "forecast_export_t1_kwh": float(profile_res.forecast_export_t1_kwh),
                 "forecast_export_t2_kwh": float(profile_res.forecast_export_t2_kwh),
+                # v1.9.2 (P0.1): the WAL path's own invoice. Before the fix
+                # this was always None (swallowed TypeError); exposing it makes
+                # the forecast auditable alongside the linear fallback.
+                "forecast_payable_pln": (
+                    float(profile_res.forecast_payable_pln)
+                    if profile_res.forecast_payable_pln is not None
+                    else None
+                ),
+                "bill_breakdown": profile_res.bill_breakdown,
             })
         if bill_mtd is not None and bill_fc is not None:
 
