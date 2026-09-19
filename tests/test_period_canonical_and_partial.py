@@ -1,6 +1,6 @@
 """Faza 4 tests: canonical SQLite opening balances + mid-month period starts.
 
-Two gaps closed in v1.9.3:
+Two gaps closed in v1.9.2:
 
 * LUKA 1 — ``verify_period`` prefers the canonical SQLite opening snapshot
   (``settlement_lot``/``market_price``) when it exists, otherwise recomputes

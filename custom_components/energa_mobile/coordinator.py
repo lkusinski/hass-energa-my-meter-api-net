@@ -387,11 +387,6 @@ class EnergaCoordinator(DataUpdateCoordinator):
         """Get pre-fetched last statistics for all entities."""
         return self._pre_fetched_stats
 
-    def get_meter_total(self, meter_id: str, data_key: str) -> float:
-        """Get meter total reading from API data."""
-        totals = self._meter_totals.get(meter_id, {})
-        return totals.get(data_key, 0.0)
-
     async def _fetch_last_stats_for_meter(self, meter_id: str, has_zones: bool = False):
         """Pre-fetch last statistics for meter entities (async-safe)."""
         from homeassistant.components.recorder import get_instance

@@ -1,5 +1,5 @@
 """Energa API client adapter package."""
 
-from .client import EnergaApiClient, normalize_chart_payload
+from .client import normalize_chart_payload
 
-__all__ = ["EnergaApiClient", "normalize_chart_payload"]
+__all__ = ["normalize_chart_payload"]

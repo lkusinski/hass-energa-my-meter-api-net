@@ -11,7 +11,7 @@ Invariants:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,7 +27,7 @@ class AlertItem:
     severity: str  # "info", "warning", "critical"
     title: str
     message: str
-    created_at_utc: datetime = datetime.now(timezone.utc)
+    created_at_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     details: dict[str, Any] | None = None
 
 

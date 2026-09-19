@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.9.2-beta.2 (2026-09-19) — porządki P2 z audytu (martwy kod, tłumaczenia, wersje)
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.1`. Bez zmian
+zachowania rozliczeń i encji — usunięcie martwego kodu oraz uzupełnienie
+dokumentacji usług/tłumaczeń.
+
+- **Martwy adapter Energa:** usunięto nieużywane `EnergaApiClient`,
+  `_request_with_retry`, `EnergaAdapterError`, `EnergaRateLimitError` i
+  `BASE_URL` z `adapters/energa/client.py`; pozostał używany przez testy
+  `normalize_chart_payload` (re-eksport zaktualizowany).
+- **Nieużywane metody/klasy:** usunięto `Coordinator.get_meter_total`,
+  `VirtualBankFlowSensor._nets`, `RceDynamicPriceSensor.async_update_rcem`,
+  `MeterReadingOffset` (`core/identity/models.py`), `IntervalReading.revision_key`
+  oraz deprecated alias `_has_any_panel_statistics` (import/`__all__`).
+- **Martwe warstwy canonical:** usunięto produkcyjne instancje `MigrationMap`
+  i `ProsumerAlertManager` (były wkładane do `hass.data`, nigdzie nie czytane);
+  `diagnostics` nadal ma własną instancję alertów. Moduły pozostają (używane
+  przez testy).
+- **Poprawka P2.6:** `AlertItem.created_at_utc` używa teraz
+  `field(default_factory=...)` — wcześniej wszystkie alerty miały wspólny
+  znacznik czasu z momentu importu modułu.
+- **`services.yaml`:** dodano brakujące pola `fetch_history.meter_id`,
+  `reconcile_invoice.day_kwh`/`night_kwh`/`invoiced_lines`,
+  `verify_period.bank_open_1`/`bank_open_2`/`deposit_open_pln`.
+- **Tłumaczenia:** `strings.json`/`en.json`/`pl.json` uzupełnione o opisy
+  `reconcile_invoice`, `verify_period`, `clear_period`; usunięto nieużywane
+  klucze przycisków `create_dashboard`/`configure_energy_dashboard`.
+- **Wersje:** komentarz `v1.9.3` w `sensors/period.py` poprawiony na
+  `v1.9.2-beta.2`.
+- **Świadomie pozostawione (opisane):** `latest_official_rcem` (używane przez
+  testy), stałe `DEFAULT_TARIFF_*` (test parity z `G12W_DEFAULT_FEES`),
+  równoległe silniki FIFO (`core/settlement/fifo_*`) i
+  `projections/statistics` — używane wyłącznie przez testy; scalanie/usuwanie
+  to zmiana ryzykowna, do decyzji w kolejnym wydaniu.
+- **Testy:** 695 passed, 1 skipped; `ruff` czysty. Regresje faktur bez zmian.
+
 ## v1.9.2 (2026-09-19) — naprawa prognozy rachunku, G12W reconcile, PII i spójność stawek/magazynu
 
 Wydanie naprawcze po audycie 1.9.1 (`AUDYT_1.9.1.md`): dwa błędy P0 i cztery

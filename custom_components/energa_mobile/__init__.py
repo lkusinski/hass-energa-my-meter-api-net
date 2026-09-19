@@ -43,7 +43,6 @@ from .dashboard_generator import DEFAULT_URL_PATH, async_provision_dashboard
 from .services import (
     AUTO_HISTORY_DAYS,
     TIMEZONE,
-    _has_any_panel_statistics,
     _has_history_statistics,
     _import_meter_history,
     _maybe_auto_backfill,
@@ -58,7 +57,6 @@ __all__ = [
     "PERIOD_OPTION_KEYS",
     "PLATFORMS",
     "TIMEZONE",
-    "_has_any_panel_statistics",
     "_has_history_statistics",
     "_async_cancel_coordinator_tasks",
     "_async_ensure_settlement_dashboard",
@@ -341,16 +339,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(err) from err
 
     # Initialize Canonical SQLite Storage & HA Production Adapters (v1.0 Architecture)
-    from .ha.alerts import ProsumerAlertManager
-    from .ha.migration_map import MigrationMap
     from .ha.recorder_adapter import RecorderAdapter
     from .storage.sqlite.database import CanonicalStorage
 
     db_path = hass.config.path(".storage", "energa_canonical.db")
     storage = CanonicalStorage(db_path)
     recorder_adapter = RecorderAdapter(hass)
-    migration_map = MigrationMap()
-    alert_manager = ProsumerAlertManager(storage)
 
     # Initialize coordinator before setting up platforms so all platforms have access
     from .coordinator import EnergaCoordinator
@@ -364,8 +358,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "session": session,
         "storage": storage,
         "recorder_adapter": recorder_adapter,
-        "migration_map": migration_map,
-        "alert_manager": alert_manager,
         "coordinator": coordinator,
     }
 

@@ -180,6 +180,10 @@
         "days": {
           "name": "Number of days",
           "description": "How many days to fetch (default 30)."
+        },
+        "meter_id": {
+          "name": "Meter ID / Serial",
+          "description": "Optional serial or point ID to fetch only for a single meter."
         }
       }
     },
@@ -204,16 +208,112 @@
           "description": "Optional meter serial/ID to generate only for a single meter."
         }
       }
+    },
+    "reconcile_invoice": {
+      "name": "Reconcile invoice",
+      "description": "Performs per-line audit reconciliation comparing seller invoice against canonical calculation.",
+      "fields": {
+        "invoice_number": {
+          "name": "Invoice Number",
+          "description": "Unique identifier of the seller invoice (e.g. FES/00017)."
+        },
+        "period_start": {
+          "name": "Period start",
+          "description": "Billing period start date (YYYY-MM-DD)."
+        },
+        "period_end": {
+          "name": "Period end",
+          "description": "Billing period end date (YYYY-MM-DD)."
+        },
+        "tariff": {
+          "name": "Tariff code",
+          "description": "Tariff plan (G11 or G12w)."
+        },
+        "consumption_kwh": {
+          "name": "Consumption (kWh)",
+          "description": "Total billed kWh for G11."
+        },
+        "day_kwh": {
+          "name": "Day zone consumption (kWh)",
+          "description": "Optional L1 (day) kWh for G12w. When omitted, consumption_kwh is split 50/50."
+        },
+        "night_kwh": {
+          "name": "Night zone consumption (kWh)",
+          "description": "Optional L2 (night) kWh for G12w."
+        },
+        "months": {
+          "name": "Number of months",
+          "description": "Billing duration in months (e.g. 2.0)."
+        },
+        "invoiced_gross": {
+          "name": "Invoiced gross (PLN)",
+          "description": "Total gross amount printed on the invoice header."
+        },
+        "invoiced_lines": {
+          "name": "Invoiced lines",
+          "description": "Optional list of invoice line items to compare against the computed lines."
+        },
+        "ppe_id": {
+          "name": "PPE ID",
+          "description": "Optional PPE point code."
+        }
+      }
+    },
+    "verify_period": {
+      "name": "Verify period",
+      "description": "Recomputes a full Energa invoice for an arbitrary [start, end] period and returns the breakdown as a service response.",
+      "fields": {
+        "start": {
+          "name": "Period start",
+          "description": "First day of the period (YYYY-MM-DD or ISO datetime)."
+        },
+        "end": {
+          "name": "Period end",
+          "description": "Last day of the period, inclusive (YYYY-MM-DD or ISO datetime)."
+        },
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional config entry; defaults to the first Energa entry."
+        },
+        "meter_id": {
+          "name": "Meter ID / Serial",
+          "description": "Optional meter serial or point id when the account has several."
+        },
+        "rcem_pln": {
+          "name": "RCEm (PLN/kWh)",
+          "description": "Market price used to value export. Defaults to the coordinator cache, then Options, then the last-known value."
+        },
+        "rcem": {
+          "name": "RCEm (PLN/kWh, alias)",
+          "description": "Alias of rcem_pln."
+        },
+        "bank_open_1": {
+          "name": "Opening bank L1 (kWh)",
+          "description": "Optional manual opening balance of the net-metering warehouse for zone 1."
+        },
+        "bank_open_2": {
+          "name": "Opening bank L2 (kWh)",
+          "description": "Optional manual opening balance of the net-metering warehouse for zone 2."
+        },
+        "deposit_open_pln": {
+          "name": "Opening deposit (PLN)",
+          "description": "Optional manual opening balance of the prosumer deposit in PLN."
+        }
+      }
+    },
+    "clear_period": {
+      "name": "Clear period",
+      "description": "Clears the saved verification period dates from the config entry options.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Optional config entry; defaults to the first Energa entry."
+        }
+      }
     }
   },
   "entity": {
     "button": {
-      "create_dashboard": {
-        "name": "Create Billing Dashboard"
-      },
-      "configure_energy_dashboard": {
-        "name": "Configure Energy Dashboard"
-      },
       "verify_period": {
         "name": "Recalculate Billing Period"
       }
@@ -226,18 +326,18 @@
         "name": "Period End"
       }
     },
-  "sensor": {
-    "period_completeness": {
-      "name": "Period: Data completeness",
-      "state": {
-        "complete": "Complete",
-        "incomplete": "Incomplete",
-        "unknown": "No data"
+    "sensor": {
+      "period_completeness": {
+        "name": "Period: Data completeness",
+        "state": {
+          "complete": "Complete",
+          "incomplete": "Incomplete",
+          "unknown": "No data"
+        }
+      },
+      "period_verification": {
+        "name": "Period: Settlement"
       }
-    },
-    "period_verification": {
-      "name": "Period: Settlement"
     }
-  }
   }
 }

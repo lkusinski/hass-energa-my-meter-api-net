@@ -193,21 +193,6 @@ class EnergaRceSensor(CoordinatorEntity, SensorEntity):
             "method_note": "Oficjalne RCEm (średnia ważona PSE); fallback: zwykła średnia RCE",
         }
 
-    async def async_update_rcem(self):
-        """Manual trigger — delegate to coordinator cache refresh."""
-        try:
-            rcem = await self._api.async_fetch_rcem()
-            if rcem is not None:
-                self.coordinator._rce_cache = rcem
-                self.coordinator._rce_source = "PSE (manual refresh)"
-                from datetime import datetime as _dt
-                self.coordinator._rce_last_fetch = _dt.now()
-                self.async_write_ha_state()
-                _LOGGER.info("RCEm manual fetch: %.5f PLN/kWh", rcem)
-        except Exception as err:
-            _LOGGER.warning("RCEm manual fetch error: %s", err)
-
-
 class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
     """Dynamic RCE market price sensor (PSE OIRE 15-min / hourly intervals)."""
 

@@ -202,7 +202,7 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
         # Always expose the source explicitly (even when the key is absent) so
         # the attribute is never silently ``None`` for a rendered result.
         attrs.setdefault("fee_source", result.get("fee_source"))
-        # v1.9.3: opening-balance provenance (override/canonical/recorder/api).
+        # v1.9.2-beta.2: opening-balance provenance (override/canonical/recorder/api).
         attrs.setdefault("opening_source", result.get("opening_source"))
         attrs.setdefault("deposit_open_source", result.get("deposit_open_source"))
         missing = _missing_breakdown_keys(result)

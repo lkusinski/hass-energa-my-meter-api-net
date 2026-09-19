@@ -794,36 +794,6 @@ class EnergaBankFlowSensor(CoordinatorEntity, RestoreEntity, SensorEntity):
                 self._flows.restore(charge=None, discharge=value)
         self._restored = True
 
-    def _nets(self):
-        """(net_import, net_export) from meter totals minus baselines."""
-        totals = self.coordinator._meter_totals.get(str(self._meter_id))
-        if not totals:
-            return None
-        opts = self._entry.options
-        mid = str(self._meter_id)
-        ser = str(getattr(self, "_serial", ""))
-        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-        if self._has_zones:
-            bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
-            bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
-            be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
-            be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
-            if bi1 == bi and bi2 == bi:
-                net_imp = float(totals.get("import", 0)) - bi
-                net_exp = float(totals.get("export", 0)) - be
-            else:
-                imp1 = float(totals.get("import_1", totals.get("import", 0)))
-                imp2 = float(totals.get("import_2", 0))
-                exp1 = float(totals.get("export_1", totals.get("export", 0)))
-                exp2 = float(totals.get("export_2", 0))
-                net_imp = (imp1 - bi1) + (imp2 - bi2)
-                net_exp = (exp1 - be1) + (exp2 - be2)
-        else:
-            net_imp = float(totals.get("import", 0)) - bi
-            net_exp = float(totals.get("export", 0)) - be
-        return (net_imp, net_exp)
-
     @property
     def native_value(self):
         """Return None — flow statistics flow exclusively via async_import_statistics.

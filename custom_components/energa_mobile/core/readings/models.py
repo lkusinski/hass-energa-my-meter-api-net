@@ -37,11 +37,6 @@ class IntervalReading:
         dt_str = self.interval_start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
         return f"{self.source}:{self.ppe_id}:{self.meter_id}:{self.register}:{dt_str}:{self.resolution}"
 
-    @property
-    def revision_key(self) -> str:
-        """Deterministic revision key."""
-        return f"{self.event_key}:rev{self.revision}"
-
 
 @dataclass(frozen=True)
 class SourceObservation:

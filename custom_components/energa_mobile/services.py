@@ -2147,12 +2147,6 @@ async def _has_history_statistics(
         return False
 
 
-async def _has_any_panel_statistics(hass: HomeAssistant, meters: list) -> bool:
-    """Deprecated alias: True when statistics already extend back to near target_start."""
-    start_date = datetime.now(TIMEZONE) - timedelta(days=AUTO_HISTORY_DAYS)
-    return await _has_history_statistics(hass, meters, start_date)
-
-
 def _polish_plural(count: int, one: str, few: str, many: str) -> str:
     """Return the Polish plural form for ``count``.
 

@@ -180,6 +180,10 @@
         "days": {
           "name": "Liczba dni",
           "description": "Ile dni pobrać (domyślnie 30)."
+        },
+        "meter_id": {
+          "name": "Numer licznika",
+          "description": "Opcjonalny numer seryjny/ID, aby pobrać tylko dla jednego licznika."
         }
       }
     },
@@ -204,16 +208,112 @@
           "description": "Opcjonalny numer seryjny/ID licznika, aby wygenerować widok tylko dla niego."
         }
       }
+    },
+    "reconcile_invoice": {
+      "name": "Rozlicz fakturę",
+      "description": "Wykonuje audyt pozycji faktury sprzedawcy względem wyliczenia kanonicznego.",
+      "fields": {
+        "invoice_number": {
+          "name": "Numer faktury",
+          "description": "Unikalny identyfikator faktury sprzedawcy (np. FES/00017)."
+        },
+        "period_start": {
+          "name": "Początek okresu",
+          "description": "Data początku okresu rozliczeniowego (RRRR-MM-DD)."
+        },
+        "period_end": {
+          "name": "Koniec okresu",
+          "description": "Data końca okresu rozliczeniowego (RRRR-MM-DD)."
+        },
+        "tariff": {
+          "name": "Kod taryfy",
+          "description": "Plan taryfowy (G11 lub G12w)."
+        },
+        "consumption_kwh": {
+          "name": "Zużycie (kWh)",
+          "description": "Łączne zużycie na fakturze dla G11."
+        },
+        "day_kwh": {
+          "name": "Zużycie strefa dzienna (kWh)",
+          "description": "Opcjonalne zużycie L1 dla G12w. Gdy pominięte, consumption_kwh jest dzielone 50/50."
+        },
+        "night_kwh": {
+          "name": "Zużycie strefa nocna (kWh)",
+          "description": "Opcjonalne zużycie L2 dla G12w."
+        },
+        "months": {
+          "name": "Liczba miesięcy",
+          "description": "Czas trwania rozliczenia w miesiącach (np. 2.0)."
+        },
+        "invoiced_gross": {
+          "name": "Brutto z faktury (PLN)",
+          "description": "Łączna kwota brutto z nagłówka faktury."
+        },
+        "invoiced_lines": {
+          "name": "Pozycje faktury",
+          "description": "Opcjonalna lista pozycji faktury do porównania z wyliczonymi."
+        },
+        "ppe_id": {
+          "name": "Identyfikator PPE",
+          "description": "Opcjonalny kod punktu poboru."
+        }
+      }
+    },
+    "verify_period": {
+      "name": "Zweryfikuj okres",
+      "description": "Przelicza pełną fakturę Energa dla dowolnego okresu [start, end] i zwraca rozbicie jako odpowiedź usługi.",
+      "fields": {
+        "start": {
+          "name": "Początek okresu",
+          "description": "Pierwszy dzień okresu (RRRR-MM-DD lub ISO)."
+        },
+        "end": {
+          "name": "Koniec okresu",
+          "description": "Ostatni dzień okresu włącznie (RRRR-MM-DD lub ISO)."
+        },
+        "entry_id": {
+          "name": "ID wpisu konfiguracji",
+          "description": "Opcjonalny wpis Energa; domyślnie pierwszy."
+        },
+        "meter_id": {
+          "name": "Numer licznika",
+          "description": "Opcjonalny numer seryjny/ID, gdy konto ma kilka liczników."
+        },
+        "rcem_pln": {
+          "name": "RCEm (PLN/kWh)",
+          "description": "Cena rynkowa eksportu; domyślnie cache koordynatora, opcje lub ostatnia znana wartość."
+        },
+        "rcem": {
+          "name": "RCEm (PLN/kWh, alias)",
+          "description": "Alias rcem_pln."
+        },
+        "bank_open_1": {
+          "name": "Magazyn początkowy L1 (kWh)",
+          "description": "Opcjonalne ręczne saldo początkowe magazynu dla strefy 1."
+        },
+        "bank_open_2": {
+          "name": "Magazyn początkowy L2 (kWh)",
+          "description": "Opcjonalne ręczne saldo początkowe magazynu dla strefy 2."
+        },
+        "deposit_open_pln": {
+          "name": "Depozyt początkowy (PLN)",
+          "description": "Opcjonalne ręczne saldo początkowe depozytu prosumenckiego."
+        }
+      }
+    },
+    "clear_period": {
+      "name": "Wyczyść okres",
+      "description": "Usuwa zapisane daty okresu weryfikacji z opcji wpisu konfiguracji.",
+      "fields": {
+        "entry_id": {
+          "name": "ID wpisu konfiguracji",
+          "description": "Opcjonalny wpis Energa; domyślnie pierwszy."
+        }
+      }
     }
   },
   "entity": {
     "button": {
-      "create_dashboard": {
-        "name": "Utwórz Pulpit Rozliczeń"
-      },
-      "configure_energy_dashboard": {
-        "name": "Skonfiguruj Panel Energia"
-      },
       "verify_period": {
         "name": "Przelicz okres rozliczeniowy"
       }
@@ -226,18 +326,18 @@
         "name": "Okres Koniec"
       }
     },
-  "sensor": {
-    "period_completeness": {
-      "name": "Okres: kompletność danych",
-      "state": {
-        "complete": "Kompletne",
-        "incomplete": "Niekompletne",
-        "unknown": "Brak danych"
+    "sensor": {
+      "period_completeness": {
+        "name": "Okres: kompletność danych",
+        "state": {
+          "complete": "Kompletne",
+          "incomplete": "Niekompletne",
+          "unknown": "Brak danych"
+        }
+      },
+      "period_verification": {
+        "name": "Okres: rozliczenie"
       }
-    },
-    "period_verification": {
-      "name": "Okres: rozliczenie"
     }
-  }
   }
 }

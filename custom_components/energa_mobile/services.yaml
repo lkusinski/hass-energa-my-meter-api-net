@@ -17,6 +17,12 @@ fetch_history:
         number:
           min: 1
           max: 365
+    meter_id:
+      name: Meter ID / Serial
+      description: Optional serial or point ID to fetch only for a single meter.
+      required: false
+      selector:
+        text:
 
 generate_dashboard:
   name: Generate dashboard
@@ -88,6 +94,22 @@ reconcile_invoice:
         number:
           min: 0
           step: 0.01
+    day_kwh:
+      name: Day zone consumption (kWh)
+      description: Optional L1 (day) kWh for G12w. When omitted, consumption_kwh is split 50/50.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.01
+    night_kwh:
+      name: Night zone consumption (kWh)
+      description: Optional L2 (night) kWh for G12w.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 0.01
     months:
       name: Number of months
       description: Billing duration in months (e.g. 2.0).
@@ -105,6 +127,12 @@ reconcile_invoice:
         number:
           min: 0
           step: 0.01
+    invoiced_lines:
+      name: Invoiced lines
+      description: Optional list of invoice line items to compare against the computed lines.
+      required: false
+      selector:
+        object:
     ppe_id:
       name: PPE ID
       description: Optional PPE point code.
@@ -158,6 +186,30 @@ verify_period:
     rcem:
       name: RCEm (PLN/kWh, alias)
       description: Alias of rcem_pln.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: "any"
+    bank_open_1:
+      name: Opening bank L1 (kWh)
+      description: Optional manual opening balance of the net-metering warehouse for zone 1.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: "any"
+    bank_open_2:
+      name: Opening bank L2 (kWh)
+      description: Optional manual opening balance of the net-metering warehouse for zone 2.
+      required: false
+      selector:
+        number:
+          min: 0
+          step: "any"
+    deposit_open_pln:
+      name: Opening deposit (PLN)
+      description: Optional manual opening balance of the prosumer deposit in PLN.
       required: false
       selector:
         number:
