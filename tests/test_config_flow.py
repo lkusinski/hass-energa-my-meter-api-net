@@ -324,7 +324,8 @@ class TestTariffFeeSchema:
         from custom_components.energa_mobile.tariff import G12W_OFERTA_FEES
 
         defaults = self._defaults({}, "G12W", old_system=True)
-        assert defaults[CONF_TARIFF_PRODUCT] == "G12W_OFERTA"
+        # v1.9.2-beta.3: selector defaults to "auto" (inference still G12W_OFERTA).
+        assert defaults[CONF_TARIFF_PRODUCT] == "auto"
         assert defaults["tariff_energy_day"] == G12W_OFERTA_FEES["energy_day"]
         assert defaults["tariff_trade_fee"] == G12W_OFERTA_FEES["trade_fee"]
 
@@ -333,7 +334,7 @@ class TestTariffFeeSchema:
         from custom_components.energa_mobile.tariff import G12W_URZEDOWA_FEES
 
         defaults = self._defaults({}, "G12W", old_system=False)
-        assert defaults[CONF_TARIFF_PRODUCT] == "G12W_URZEDOWA"
+        assert defaults[CONF_TARIFF_PRODUCT] == "auto"
         assert defaults["tariff_energy_day"] == G12W_URZEDOWA_FEES["energy_day"]
 
     def test_explicit_product_wins_over_inference(self):
@@ -348,11 +349,76 @@ class TestTariffFeeSchema:
             defaults["tariff_energy_day"] == G12W_URZEDOWA_FEES["energy_day"]
         )
 
-    def test_g11_form_has_no_product_selector(self):
+    def test_g11_form_offers_both_g11_presets(self):
+        from custom_components.energa_mobile.config_flow import _tariff_fee_schema
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G11_OFERTA,
+            PRODUCT_G11_STANDARD,
+        )
+
+        schema = _tariff_fee_schema({}, "G11")
+        product_field = None
+        for marker, validator in schema.items():
+            if getattr(marker, "schema", None) == CONF_TARIFF_PRODUCT:
+                product_field = validator
+        assert product_field is not None
+        assert PRODUCT_G11_STANDARD in product_field.container
+        assert PRODUCT_G11_OFERTA in product_field.container
+
+    def test_auto_selector_default_for_g11(self):
         from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
 
         defaults = self._defaults({}, "G11", old_system=True)
-        assert CONF_TARIFF_PRODUCT not in defaults
+        assert defaults[CONF_TARIFF_PRODUCT] == "auto"
+
+    def test_explicit_g11_preset_uses_its_table(self):
+        from custom_components.energa_mobile.tariff import G11_OFERTA_FEES
+
+        defaults = self._defaults(
+            {"tariff_product": "G11_OFERTA"}, "G11", old_system=False
+        )
+        assert defaults["tariff_energy_day"] == G11_OFERTA_FEES["energy_day"]
+        assert defaults["tariff_trade_fee"] == G11_OFERTA_FEES["trade_fee"]
+
+
+class TestApplyTariffProduct:
+    """Onboarding/Options materialise a preset into all ``tariff_*`` keys."""
+
+    def test_preset_overwrites_all_rates(self):
+        from custom_components.energa_mobile.config_flow import (
+            _apply_tariff_product,
+        )
+        from custom_components.energa_mobile.tariff import G11_OFERTA_FEES
+
+        user_input = {"tariff_product": "G11_OFERTA", "tariff_energy_day": 9.99}
+        _apply_tariff_product(user_input, {"tariff_energy_day": 9.99})
+        assert user_input["tariff_energy_day"] == G11_OFERTA_FEES["energy_day"]
+        assert user_input["tariff_trade_fee"] == G11_OFERTA_FEES["trade_fee"]
+        assert user_input["tariff_abonament"] == G11_OFERTA_FEES["abonament"]
+
+    def test_auto_drops_form_defaults_when_nothing_was_stored(self):
+        from custom_components.energa_mobile.config_flow import (
+            _apply_tariff_product,
+        )
+
+        user_input = {
+            "tariff_product": "auto",
+            "tariff_energy_day": 0.6114,
+            "tariff_trade_fee": 16.18,
+        }
+        _apply_tariff_product(user_input, {})
+        assert "tariff_energy_day" not in user_input
+        assert "tariff_trade_fee" not in user_input
+
+    def test_auto_keeps_previously_stored_rates(self):
+        from custom_components.energa_mobile.config_flow import (
+            _apply_tariff_product,
+        )
+
+        user_input = {"tariff_product": "auto", "tariff_energy_day": 0.5}
+        _apply_tariff_product(user_input, {"tariff_energy_day": 0.4})
+        assert user_input["tariff_energy_day"] == 0.5
 
 
 class TestSystemStepSolarDetection:

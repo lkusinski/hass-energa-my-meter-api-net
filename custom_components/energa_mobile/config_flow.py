@@ -131,18 +131,22 @@ _TARIFF_KEY_MAP = {
 def _tariff_fee_schema(
     options: dict, tariff: str | None = None, old_system: bool | None = None
 ) -> dict:
-    """Tariff product + fee overrides for the full-bill forecast.
+    """Tariff product preset + fee overrides for the full-bill forecast.
 
-    Shared by the G12W and G11 price forms. Defaults follow the selected
-    product (``tariff_product``) or, if none is stored, the product inferred
-    from the settlement system (v1.9.2), else the meter tariff table (v0.3.0:
-    G11 has its own invoice-verified table). An empty/unchanged field keeps the
+    Shared by the G12W and G11 price forms. The product selector offers
+    ``auto`` plus the presets of the meter's tariff family (v1.9.2-beta.3:
+    G11 now has "Standard" and "Oferta Podstawowa" too). Defaults follow an
+    explicitly selected product, else the product inferred from the settlement
+    system (G12W only), else the per-tariff table. An unchanged field keeps the
     default via fees_from_options.
     """
     from .tariff import (
         FEE_TABLES,
+        PRODUCT_AUTO,
+        PRODUCT_FAMILIES,
         PRODUCT_FEE_TABLES,
         PRODUCT_LABELS,
+        default_product_for,
         normalized_product,
         product_for_system,
         tariff_family,
@@ -152,23 +156,78 @@ def _tariff_fee_schema(
     family = tariff_family(tariff)
     explicit = normalized_product(opts.get(CONF_TARIFF_PRODUCT))
     inferred = product_for_system(old_system) if family == "G12W" else None
-    current_product = explicit or inferred or ""
-    product_table = PRODUCT_FEE_TABLES.get(explicit or inferred or "")
-    table = product_table or FEE_TABLES.get(family)
-    schema: dict = {}
-    if family == "G12W":
-        choices = {"": "Automatycznie / własne stawki"}
-        choices.update(PRODUCT_LABELS)
-        schema[
-            vol.Optional(CONF_TARIFF_PRODUCT, default=current_product)
-        ] = vol.In(choices)
+    # The selector shows "auto" unless a concrete preset is stored.
+    current_product = explicit or PRODUCT_AUTO
+    if explicit is not None:
+        table = PRODUCT_FEE_TABLES[explicit]
+    else:
+        effective = inferred or default_product_for(tariff, old_system)
+        table = PRODUCT_FEE_TABLES.get(effective, FEE_TABLES.get(family))
+
+    def _default(opt_key: str, fee: str):
+        # An explicitly chosen product always shows its own table (selecting a
+        # preset is meant to replace stale hand-typed rates).
+        if explicit is not None:
+            return table[fee]
+        return opts.get(opt_key, table[fee])
+
+    choices = {
+        PRODUCT_AUTO: PRODUCT_LABELS[PRODUCT_AUTO],
+        **{
+            key: PRODUCT_LABELS[key]
+            for key, fam in PRODUCT_FAMILIES.items()
+            if fam == family
+        },
+    }
+    schema: dict = {
+        vol.Optional(CONF_TARIFF_PRODUCT, default=current_product): vol.In(choices)
+    }
     schema.update(
         {
-            vol.Optional(key, default=opts.get(key, table[fee])): vol.Coerce(float)
+            vol.Optional(key, default=_default(key, fee)): vol.Coerce(float)
             for key, fee in _TARIFF_KEY_MAP.items()
         }
     )
     return schema
+
+
+def _apply_tariff_product(user_input: dict, prior_options: dict | None) -> None:
+    """Materialise a chosen preset into all ``tariff_*`` fields.
+
+    A recognized preset overwrites every rate with its invoice-verified table
+    (``fee_source=product``). When the selector stays on ``auto`` and the entry
+    never stored any rate, the form defaults are dropped again so the product
+    remains a named *default* (and is warned about) instead of silently
+    becoming a hand-tuned table.
+    """
+    from .tariff import normalized_product, product_option_values
+
+    selected = normalized_product(user_input.get(CONF_TARIFF_PRODUCT))
+    if selected is not None:
+        user_input.update(product_option_values(selected))
+        return
+    had_rates = any(
+        (prior_options or {}).get(key) is not None for key in _TARIFF_KEY_MAP
+    )
+    if not had_rates:
+        for key in _TARIFF_KEY_MAP:
+            user_input.pop(key, None)
+
+
+def _onboarding_product_field() -> dict:
+    """Product preset selector for the onboarding wizard (all families).
+
+    ``auto`` keeps the settlement-system inference (G12W) / named G11 default;
+    picking a concrete preset materialises its invoice-verified rates.
+    """
+    from .tariff import PRODUCT_AUTO, PRODUCT_FAMILIES, PRODUCT_LABELS
+
+    choices = {PRODUCT_AUTO: PRODUCT_LABELS[PRODUCT_AUTO]}
+    for key in PRODUCT_FAMILIES:
+        choices[key] = PRODUCT_LABELS[key]
+    return {
+        vol.Optional(CONF_TARIFF_PRODUCT, default=PRODUCT_AUTO): vol.In(choices)
+    }
 
 
 class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -377,6 +436,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
                 )
             )
+            _apply_tariff_product(options, None)
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -405,6 +465,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_CREATE_SETTLEMENT_DASHBOARD,
                 default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
             ): bool,
+            **_onboarding_product_field(),
         }
         # A two-way meter with no PV source yet in the Energy panel: nudge the
         # user to add one. Detection runs once per form render and never blocks
@@ -427,6 +488,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
                 )
             )
+            _apply_tariff_product(options, None)
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -456,6 +518,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_CREATE_SETTLEMENT_DASHBOARD,
                         default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
                     ): bool,
+                    **_onboarding_product_field(),
                 }
             ),
         )
@@ -805,6 +868,10 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                 old_total = float(self._config_entry.options.get(CONF_BANK_INITIAL_KWH, DEFAULT_BANK_INITIAL_KWH))
                 if cur_total == 0.0 or cur_total == old_total:
                     user_input[CONF_BANK_INITIAL_KWH] = round(init_l1 + init_l2, 2)
+
+            # v1.9.2-beta.3: a chosen product preset replaces every rate with
+            # its invoice-verified table; a pure "auto" keeps inference/defaults.
+            _apply_tariff_product(user_input, self._config_entry.options)
 
             # Save global prices
             new_options = {**self._config_entry.options, **user_input}

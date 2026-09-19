@@ -140,6 +140,26 @@ class TestFeeSourceExposedOnSensor:
         attrs = _sensor(result).extra_state_attributes
         assert "missing_breakdown_keys" not in attrs
 
+    def test_rate_warnings_and_product_provenance_reach_attributes(self):
+        """v1.9.2-beta.3: default-table warning + preset provenance on sensor."""
+        result = {
+            "empty": False,
+            "do_zaplaty": 84.44,
+            "fee_source": "defaults",
+            "tariff_product": "G11_STANDARD",
+            "product_source": "none",
+            "warnings": [
+                "Stawki pochodzą z tabeli domyślnej (G11_STANDARD: …) — "
+                "mogą nie odpowiadać Twojemu produktowi; wybierz produkt "
+                "w Options (np. »G11 – Oferta Podstawowa«)."
+            ],
+            "kwh": {},
+        }
+        attrs = _sensor(result).extra_state_attributes
+        assert attrs["tariff_product"] == "G11_STANDARD"
+        assert attrs["product_source"] == "none"
+        assert any("tabeli domyślnej" in w for w in attrs["warnings"])
+
 
 class TestProfileForecastTaskCancellation:
     @pytest.mark.asyncio

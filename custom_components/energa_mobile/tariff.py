@@ -281,20 +281,46 @@ G11_DEFAULT_FEES = {
     "capacity": 24.05,
 }
 
-# --- Seller product variants (v1.9.2) -------------------------------------
+# --- Seller product presets (v1.9.2-beta.3) -------------------------------
 # The Energa API exposes only the tariff string (G11/G12W), never the seller
-# product ("Oferta Podstawowa…" / "taryfa urzędowa"), so the product must come
-# from the entry Options. These tables are the invoice-verified rates per
-# product; ``fee_source`` reports ``product`` when one is used.
+# product ("Oferta Podstawowa…" / "taryfa urzędowa"), so the product comes
+# from onboarding / entry Options (``tariff_product``). Every preset is a
+# full, invoice-verified rate table; choosing one materialises all
+# ``tariff_*`` overrides and ``fee_source`` reports ``product``.
 #
-# G12W_OFERTA — "Oferta Podstawowa" / starszy produkt (net-metering, Wiśniowa
-#   FES/00042): handlowa 16,18 and abonament 0,70.
-# G12W_URZEDOWA — "taryfa urzędowa" (net-billing, Agrestowa FES/00045): no
-#   handlowa, abonament 0,74. Identical to G12W_DEFAULT_FEES.
+# Provenance (net PLN):
+#   G11_STANDARD  — Warzywna FES/00017 (G11 consumer, trade 16,18).
+#   G11_OFERTA    — Bursztynowa FES/00027 (G11 net-billing, trade 20,32).
+#   G12W_URZEDOWA — Agrestowa FES/00045 (net-billing, no handlowa).
+#   G12W_OFERTA   — Wiśniowa FES/00042 (net-metering, handlowa 16,18).
+PRODUCT_G11_STANDARD = "G11_STANDARD"
+PRODUCT_G11_OFERTA = "G11_OFERTA"
 PRODUCT_G12W_OFERTA = "G12W_OFERTA"
 PRODUCT_G12W_URZEDOWA = "G12W_URZEDOWA"
+PRODUCT_AUTO = "auto"
 OPTION_TARIFF_PRODUCT = "tariff_product"
 
+# G11_STANDARD is the exact G11_DEFAULT_FEES table (Warzywna FES/00017).
+G11_STANDARD_FEES = dict(G11_DEFAULT_FEES)
+# G11_OFERTA: "Oferta Podstawowa" (Bursztynowa FES/00027) — lower energy
+# price (0,605286), higher handlowa (20,32) and abonament (0,74).
+G11_OFERTA_FEES = {
+    "energy_day": 0.605286,
+    "energy_night": 0.0,
+    "excise_mwh": 5.00,
+    "trade_fee": 20.32,
+    "abonament": 0.74,
+    "grid_fixed": 11.77,
+    "grid_var_day": 0.3485,
+    "grid_var_night": 0.0,
+    "quality": 0.0332,
+    "oze": 0.0073,
+    "cogen": 0.0030,
+    "capacity": 24.05,
+}
+# G12W_URZEDOWA is the exact G12W_DEFAULT_FEES table (Agrestowa FES/00045).
+G12W_URZEDOWA_FEES = dict(G12W_DEFAULT_FEES)
+# G12W_OFERTA: "Oferta Podstawowa" (Wiśniowa FES/00042) — handlowa 16,18.
 G12W_OFERTA_FEES = {
     "energy_day": 0.7125,
     "energy_night": 0.4622,
@@ -309,18 +335,47 @@ G12W_OFERTA_FEES = {
     "cogen": 0.0030,
     "capacity": 24.05,
 }
-G12W_URZEDOWA_FEES = G12W_DEFAULT_FEES
 
 PRODUCT_FEE_TABLES = {
-    PRODUCT_G12W_OFERTA: G12W_OFERTA_FEES,
+    PRODUCT_G11_STANDARD: G11_STANDARD_FEES,
+    PRODUCT_G11_OFERTA: G11_OFERTA_FEES,
     PRODUCT_G12W_URZEDOWA: G12W_URZEDOWA_FEES,
+    PRODUCT_G12W_OFERTA: G12W_OFERTA_FEES,
 }
 
-# Human labels for the Options product selector (PL, verbatim in the form).
-PRODUCT_LABELS = {
-    PRODUCT_G12W_OFERTA: "Oferta Podstawowa (starszy produkt, np. Wiśniowa)",
-    PRODUCT_G12W_URZEDOWA: "Taryfa urzędowa (nowszy produkt, np. Agrestowa)",
+# Tariff family each preset belongs to (drives the Options selector).
+PRODUCT_FAMILIES = {
+    PRODUCT_G11_STANDARD: "G11",
+    PRODUCT_G11_OFERTA: "G11",
+    PRODUCT_G12W_URZEDOWA: "G12W",
+    PRODUCT_G12W_OFERTA: "G12W",
 }
+
+# Human labels for the onboarding / Options product selector (PL, verbatim).
+PRODUCT_LABELS = {
+    PRODUCT_AUTO: "Automatycznie (wnioskowany z systemu rozliczeń)",
+    PRODUCT_G11_STANDARD: "G11 – Standard (taryfa urzędowa, np. Warzywna)",
+    PRODUCT_G11_OFERTA: "G11 – Oferta Podstawowa (np. Bursztynowa)",
+    PRODUCT_G12W_URZEDOWA: "G12W – Taryfa urzędowa (np. Agrestowa)",
+    PRODUCT_G12W_OFERTA: "G12W – Oferta Podstawowa (np. Wiśniowa)",
+}
+
+# Loud, honest provenance warnings (PL) surfaced in the service result and in
+# the ``sensor.*_weryfikacja_rachunku`` attributes.
+DEFAULT_TABLE_WARNING = (
+    "Stawki pochodzą z tabeli domyślnej ({product}: {label}) — mogą nie "
+    "odpowiadać Twojemu produktowi; wybierz produkt w Options (np. "
+    "»G11 – Oferta Podstawowa«)."
+)
+AUTO_PRODUCT_WARNING = (
+    "Produkt taryfowy nie został wybrany — użyto presetu „{product}” na "
+    "podstawie systemu rozliczeń. Jeśli to nie Twój produkt, wybierz go "
+    "w Options, aby uniknąć różnic w rachunku."
+)
+UNRECOGNIZED_PRODUCT_WARNING = (
+    "Nieznany produkt taryfowy „{value}” — użyto tabeli domyślnej; wybierz "
+    "produkt z listy w Options."
+)
 
 # Fee table per tariff family. Unknown tariffs fall back to G12W.
 FEE_TABLES = {
@@ -367,6 +422,58 @@ def tariff_family(tariff: str | None) -> str:
     if name.startswith("G11"):
         return "G11"
     return "G12W"
+
+
+def resolve_product(
+    options: dict | None, tariff: str | None, old_system: bool | None
+) -> tuple[str | None, str]:
+    """Resolve the effective product preset and how it was chosen.
+
+    Returns ``(product_key_or_None, mode)`` where ``mode`` is one of:
+
+    - ``explicit`` — a recognized ``tariff_product`` is stored; the table is
+      authoritative and ``fee_source`` reports ``product``.
+    - ``inferred`` — nothing stored, but the settlement system maps a G12W
+      meter to a product (net-metering -> OFERTA, net-billing -> URZEDOWA).
+    - ``none`` — no product; the per-tariff default table applies. G11 is
+      *named* G11_STANDARD, but stays a warned default because the API cannot
+      tell "Oferta Podstawowa" from the regulated tariff.
+
+    Individual ``tariff_*`` overrides always win over inference (a hand-tuned
+    table must never be silently replaced), exactly as before.
+    """
+    opts = options or {}
+    explicit = normalized_product(opts.get(OPTION_TARIFF_PRODUCT))
+    if explicit is not None:
+        return explicit, "explicit"
+    if tariff_family(tariff) == "G12W":
+        if old_system is None or _fee_source_counts(opts)[0] != "defaults":
+            return None, "none"
+        inferred = product_for_system(old_system)
+        if inferred is not None:
+            return inferred, "inferred"
+    return None, "none"
+
+
+def default_product_for(tariff: str | None, old_system: bool | None) -> str:
+    """Named preset in effect when the user has not chosen one explicitly."""
+    if tariff_family(tariff) == "G11":
+        return PRODUCT_G11_STANDARD
+    return product_for_system(old_system) or PRODUCT_G12W_URZEDOWA
+
+
+def product_option_values(product: str | None) -> dict:
+    """``{tariff_* option key: value}`` for a recognized preset.
+
+    Used by onboarding / Options to materialise a chosen preset. Returns an
+    empty dict for ``None``/``auto``/unknown products.
+    """
+    table = PRODUCT_FEE_TABLES.get(product)
+    if not table:
+        return {}
+    return {
+        _OPTION_KEY_MAP[fee]: float(value) for fee, value in table.items()
+    }
 
 
 def compute_bill(
@@ -555,24 +662,8 @@ def _fee_source_counts(options: dict | None) -> tuple[str, list[str]]:
 def _resolve_product(
     options: dict | None, tariff: str | None, old_system: bool | None
 ) -> str | None:
-    """Product key to use (or ``None``).
-
-    Precedence: an explicit ``tariff_product`` option wins; otherwise the
-    product is inferred from the settlement system *only* when no individual
-    ``tariff_*`` override is configured (so a hand-tuned table is never
-    silently replaced). G11 has no product variants.
-    """
-    opts = options or {}
-    if tariff_family(tariff) != "G12W":
-        return None
-    explicit = normalized_product(opts.get(OPTION_TARIFF_PRODUCT))
-    if explicit is not None:
-        return explicit
-    if old_system is None:
-        return None
-    if _fee_source_counts(opts)[0] != "defaults":
-        return None
-    return product_for_system(old_system)
+    """Product key to use (or ``None``) — see :func:`resolve_product`."""
+    return resolve_product(options, tariff, old_system)[0]
 
 
 def fees_from_options(
@@ -642,18 +733,58 @@ def fee_source(
     """Report where a fee table comes from.
 
     Returns ``(source, missing_fee_keys)`` where ``source`` is one of
-    ``product`` (a recognized ``tariff_product`` table, or the best-effort
-    inference from the settlement system), ``options`` (every mapped
-    ``tariff_*`` key is present — the invoice is reproducible to the grosz),
-    ``partial`` (some are missing and the rest silently fall back to the
-    per-tariff default table) or ``defaults`` (none were configured). The
-    caller surfaces ``partial``/``defaults`` with a warning honestly instead of
-    pretending the defaults are the user's contract.
+    ``product`` (an explicit preset, or the best-effort inference from the
+    settlement system), ``options`` (every mapped ``tariff_*`` key is present —
+    the invoice is reproducible to the grosz), ``partial`` (some are missing
+    and the rest silently fall back to the per-tariff default table) or
+    ``defaults`` (none were configured). The caller surfaces
+    ``partial``/``defaults`` with a warning honestly instead of pretending the
+    defaults are the user's contract.
     """
     opts = options or {}
     if _resolve_product(opts, tariff, old_system) is not None:
         return ("product", [])
     return _fee_source_counts(opts)
+
+
+def fee_warnings(
+    options: dict | None,
+    tariff: str | None = None,
+    *,
+    old_system: bool | None = None,
+) -> list[str]:
+    """PL provenance warnings for defaulted/partial/unrecognized rates.
+
+    Loud and honest (v1.9.2-beta.3):
+
+    - ``defaults`` / ``partial`` (or a product key that is not recognized) ->
+      "Stawki pochodzą z tabeli domyślnej …" naming the effective preset;
+    - a merely *inferred* G12W product -> a softer warning that the product was
+      auto-detected and may not be the user's contract.
+
+    Returns an empty list for explicit presets and fully hand-tuned tables.
+    """
+    opts = options or {}
+    product, mode = resolve_product(opts, tariff, old_system)
+    source, _missing = fee_source(opts, tariff, old_system=old_system)
+    out: list[str] = []
+    raw = opts.get(OPTION_TARIFF_PRODUCT)
+    if raw not in (None, "", PRODUCT_AUTO) and normalized_product(raw) is None:
+        out.append(UNRECOGNIZED_PRODUCT_WARNING.format(value=raw))
+    if source in ("defaults", "partial"):
+        name = product or default_product_for(tariff, old_system)
+        out.append(
+            DEFAULT_TABLE_WARNING.format(
+                product=name, label=PRODUCT_LABELS.get(name, name)
+            )
+        )
+    elif source == "product" and mode == "inferred":
+        out.append(
+            AUTO_PRODUCT_WARNING.format(
+                product=product, label=PRODUCT_LABELS.get(product, product)
+            )
+        )
+    return out
 
 
 def split_cover(total_cover: float, import_day: float, import_night: float) -> tuple[float, float]:

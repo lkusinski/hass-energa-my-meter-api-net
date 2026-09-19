@@ -84,7 +84,13 @@ from .dashboard_generator import (
     DEFAULT_URL_PATH,
     async_provision_dashboard,
 )
-from .tariff import fee_source, fees_from_options
+from .tariff import (
+    default_product_for,
+    fee_source,
+    fee_warnings,
+    fees_from_options,
+    resolve_product,
+)
 
 _LOGGER = logging.getLogger(__name__)
 TIMEZONE = ZoneInfo("Europe/Warsaw")
@@ -1967,22 +1973,27 @@ async def async_verify_period_data(
             tariff=meter.get("tariff"),
             is_prosumer=prosumer,
         )
-        if fee_origin in ("partial", "defaults"):
+        rate_warnings = fee_warnings(
+            entry_options, meter.get("tariff"), old_system=product_system
+        )
+        if rate_warnings:
             invoice.setdefault("warnings", [])
-            invoice["warnings"] = list(invoice["warnings"]) + [
-                "Część stawek taryfowych pochodzi z tabeli domyślnej "
-                f"(źródło: {fee_origin}) — ustaw stawki w opcjach wpisu, aby "
-                "odtworzyć rachunek co do grosza."
-            ]
+            invoice["warnings"] = list(invoice["warnings"]) + rate_warnings
         if deposit_warnings:
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + deposit_warnings
         if rcem_warnings:
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + rcem_warnings
+        product_key, product_mode = resolve_product(
+            entry_options, meter.get("tariff"), product_system
+        )
         result = {
             **invoice,
             "fee_source": fee_origin,
+            "tariff_product": product_key
+            or default_product_for(meter.get("tariff"), product_system),
+            "product_source": product_mode,
             "rcem_source": rcem_source,
             "empty": False,
             "meter_point_id": meter_point_id,

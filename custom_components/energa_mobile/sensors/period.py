@@ -202,6 +202,9 @@ class EnergaPeriodVerificationSensor(CoordinatorEntity, SensorEntity):
         # Always expose the source explicitly (even when the key is absent) so
         # the attribute is never silently ``None`` for a rendered result.
         attrs.setdefault("fee_source", result.get("fee_source"))
+        # v1.9.2-beta.3: product preset provenance (auto/explicit/inferred).
+        attrs.setdefault("tariff_product", result.get("tariff_product"))
+        attrs.setdefault("product_source", result.get("product_source"))
         # v1.9.2-beta.2: opening-balance provenance (override/canonical/recorder/api).
         attrs.setdefault("opening_source", result.get("opening_source"))
         attrs.setdefault("deposit_open_source", result.get("deposit_open_source"))

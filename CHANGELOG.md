@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.9.2-beta.3 (2026-09-19) — nazwane presety produktów + głośne ostrzeżenia o stawkach
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.2`. Dodaje wybór
+produktu sprzedawcy jako nazwane presety oraz uczciwe, głośne ostrzeżenia, gdy
+rachunek liczy się z tabeli domyślnej. Bez zmian API i schematu danych.
+
+- **Cztery nazwane presety produktów** (`tariff.py`), każdy zweryfikowany na
+  fakturze (netto PLN):
+  - `G11_STANDARD` — Warzywna FES/00017: energia 0,6114, handlowa 16,18,
+    abonament 0,70, sieciowa stała 11,77, zmienna 0,3485.
+  - `G11_OFERTA` — Bursztynowa FES/00027: energia 0,605286, handlowa 20,32,
+    abonament 0,74, reszta jak standard.
+  - `G12W_URZEDOWA` — Agrestowa FES/00045: 0,6107/0,3990, handlowa 0,
+    abonament 0,74, stała 20,17, zmienna 0,4017/0,0851.
+  - `G12W_OFERTA` — Wiśniowa FES/00042: 0,7125/0,4622, handlowa 16,18,
+    abonament 0,70, reszta jak urzędowa.
+- **Selektor `tariff_product` w onboardingu i Options** (domyślnie `auto`).
+  `auto` = dotychczasowa inferencja: net-metering → `G12W_OFERTA`,
+  net-billing → `G12W_URZEDOWA`; dla G11 nie ma wiarygodnej inferencji, więc
+  obowiązuje nazwany `G11_STANDARD` **jako domyślny** (i jest ostrzeżenie).
+  Wybranie presetu materializuje wszystkie `tariff_*` → `fee_source=product`.
+- **Koniec z ukrytym uniwersalnym G11:** gdy użytkownik nic nie wybrał/zapisał,
+  produkt jest jawnie nazwany (`G11_STANDARD` / `G12W_URZEDOWA`) i wynik
+  zawiera ostrzeżenie, że stawki mogą nie odpowiadać jego umowie.
+- **Głośne ostrzeżenia** (`tariff.fee_warnings`): dla `fee_source=defaults`
+  lub `partial` oraz dla nieznanego produktu — „Stawki pochodzą z tabeli
+  domyślnej …" w `warnings` usługi `verify_period` **oraz** w atrybutach
+  `sensor.*_weryfikacja_rachunku`; dla produktu tylko *wnioskowanego* —
+  osobne ostrzeżenie o automatycznym rozpoznaniu. Dodano atrybuty
+  `tariff_product` i `product_source`.
+- **Testy:** 723 passed, 1 skipped (nowy `tests/test_tariff_products.py`);
+  `ruff` czysty. Każdy preset odtwarza swoją fakturę co do grosza.
+
 ## v1.9.2-beta.2 (2026-09-19) — porządki P2 z audytu (martwy kod, tłumaczenia, wersje)
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.1`. Bez zmian

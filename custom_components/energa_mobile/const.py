@@ -69,9 +69,9 @@ CONF_TARIFF_QUALITY = "tariff_quality"
 CONF_TARIFF_OZE = "tariff_oze"
 CONF_TARIFF_COGEN = "tariff_cogen"
 CONF_TARIFF_CAPACITY = "tariff_capacity"
-# Seller product selector (v1.9.2): empty = automatic (settlement-system
-# inference in tariff.product_for_system), or a recognized product key such as
-# "G12W_OFERTA" ("Oferta Podstawowa") / "G12W_URZEDOWA" ("taryfa urzędowa").
+# Seller product selector (v1.9.2-beta.3): "auto" = automatic (settlement-
+# system inference for G12W, named G11_STANDARD default for G11), or one of the
+# named presets: G11_STANDARD, G11_OFERTA, G12W_URZEDOWA, G12W_OFERTA.
 CONF_TARIFF_PRODUCT = "tariff_product"
 
 DEFAULT_TARIFF_ENERGY_DAY = 0.6107
