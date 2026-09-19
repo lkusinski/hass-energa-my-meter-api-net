@@ -14,6 +14,22 @@ from custom_components.energa_mobile.dashboard_generator import (
     build_meter_view,
     resolve_entity,
 )
+from custom_components.energa_mobile.dashboard_generator import (
+    is_export_prosumer as dashboard_is_export_prosumer,
+)
+from custom_components.energa_mobile.settlement import (
+    is_export_prosumer as settlement_is_export_prosumer,
+)
+
+
+def test_dashboard_uses_single_is_export_prosumer_definition():
+    """P1.2: the dashboard must not carry a second, divergent classifier."""
+    assert dashboard_is_export_prosumer is settlement_is_export_prosumer
+    # Export detected from a non-zero total even without the seller flag.
+    assert dashboard_is_export_prosumer({"total_minus": 523.5}) is True
+    # ``has_export`` was never assigned anywhere and must not classify.
+    assert dashboard_is_export_prosumer({"has_export": True}) is False
+    assert dashboard_is_export_prosumer({"is_prosumer": True, "total_minus": 0}) is True
 
 
 @pytest.fixture

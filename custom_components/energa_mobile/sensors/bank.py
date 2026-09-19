@@ -98,6 +98,199 @@ def _fifo_bank_from_monthly(monthly: dict, coeff: float, has_zones: bool = False
     return fifo_kwh_bank(flows, coeff)
 
 
+def bank_kwh_snapshot(
+    coordinator,
+    entry,
+    meter_id: str,
+    serial: str = "",
+    has_zones: bool = False,
+) -> dict:
+    """Old-system warehouse (Bank kWh) state — single source of truth (P1.4).
+
+    Previously :class:`EnergaBankKwhSensor` had the full priority chain
+    (invoice cut-off date -> automatic FIFO 12m -> rolling 365d ->
+    baseline) while the bill forecast's ``_warehouse_cover`` only knew the
+    baseline formula and ignored L1/L2. This function reproduces the Bank
+    sensor exactly and is shared by both, so the coverage shown in the
+    bill can never disagree with the Bank.
+
+    Returns a dict. ``bank_kwh`` is ``None`` when the meter has no totals;
+    ``bank_kwh_l1``/``bank_kwh_l2`` are ``None`` when only a total is known.
+    """
+    totals = coordinator._meter_totals.get(str(meter_id))
+    if not totals:
+        return {
+            "totals": None,
+            "bank_kwh": None,
+            "bank_kwh_l1": None,
+            "bank_kwh_l2": None,
+            "initial_kwh": 0.0,
+            "init_l1": 0.0,
+            "init_l2": 0.0,
+            "coefficient": 0.0,
+            "net_import_kwh": 0.0,
+            "net_export_kwh": 0.0,
+            "bilans_kwh": 0.0,
+            "mode": "baseline",
+            "source_desc": "",
+            "formula_desc": "",
+            "settle_str": "",
+            "inv_detail": None,
+            "fifo_detail": None,
+            "coverage_days": 0,
+        }
+
+    opts = entry.options
+    mid = str(meter_id)
+    ser = str(serial)
+
+    # Get baselines
+    bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+    be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
+
+    coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
+    initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
+    bank_1 = None
+    bank_2 = None
+    init_l1 = 0.0
+    init_l2 = 0.0
+
+    if has_zones:
+        # Per-zone baselines if available, else global
+        bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
+        bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
+        be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
+        be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
+
+        imp1 = float(totals.get("import_1", totals.get("import", 0)))
+        imp2 = float(totals.get("import_2", 0))
+        exp1 = float(totals.get("export_1", totals.get("export", 0)))
+        exp2 = float(totals.get("export_2", 0))
+
+        init_l1 = get_meter_initial_bank(opts, "kwh_l1", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L1)
+        init_l2 = get_meter_initial_bank(opts, "kwh_l2", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L2)
+        if init_l1 > 0 or init_l2 > 0:
+            initial = round(init_l1 + init_l2, 2)
+
+        # If per-zone baselines not set, use total baselines with total import/export
+        if bi1 == bi and bi2 == bi:
+            # No per-zone baseline — use total import/export minus global baseline
+            net_imp = float(totals.get("import", 0)) - bi
+            net_exp = float(totals.get("export", 0)) - be
+        else:
+            net_imp = (imp1 - bi1) + (imp2 - bi2)
+            net_exp = (exp1 - be1) + (exp2 - be2)
+
+        # Per-zone net flows & bank for L1 and L2
+        net_imp1 = imp1 - bi1
+        net_exp1 = exp1 - be1
+        bilans1 = (net_exp1 * coeff) - net_imp1
+        bank_1 = round(max(0.0, bilans1) + init_l1, 2)
+
+        net_imp2 = imp2 - bi2
+        net_exp2 = exp2 - be2
+        bilans2 = (net_exp2 * coeff) - net_imp2
+        bank_2 = round(max(0.0, bilans2) + init_l2, 2)
+        bank = round(bank_1 + bank_2, 2)
+        bilans = round(bilans1 + bilans2, 2)
+    else:
+        net_imp = float(totals.get("import", 0)) - bi
+        net_exp = float(totals.get("export", 0)) - be
+        bilans = (net_exp * coeff) - net_imp
+        bank = max(0, bilans) + initial
+    mode = "baseline"
+    source_desc = "net-metering 0.8 roczny (old) — faktury FES"
+    formula_desc = "max(0, (export-baseline)*coeff - (import-baseline)) + initial"
+
+    _LOGGER.debug(
+        "BankKwh %s: imp=%.2f exp=%.2f coeff=%.2f bilans=%.2f initial=%.2f bank=%.2f",
+        mid, net_imp, net_exp, coeff, bilans, initial, bank,
+    )
+
+    monthly = getattr(coordinator, "_monthly", {}).get(str(mid), {})
+    settle_str = str(opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)).strip()
+    fifo_detail = None
+    inv_detail = None
+    coverage = 0
+
+    # v1.5.0 Priority 1: Invoice cut-off date mode
+    if settle_str and monthly and (initial > 0 or init_l1 > 0 or init_l2 > 0):
+        inv_bank, inv_detail = bank_from_invoice_date(
+            settle_str, monthly, init_1=init_l1 or initial, init_2=init_l2, coeff=coeff
+        )
+        if inv_bank is not None and inv_detail:
+            bank = inv_bank
+            bank_1 = inv_detail.get("bank_kwh_l1")
+            bank_2 = inv_detail.get("bank_kwh_l2")
+            mode = "invoice_date"
+            source_desc = f"rozliczenie od daty faktury {settle_str}"
+            formula_desc = f"stan_faktury({settle_str}) + net_export_od_faktury*coeff - net_import_od_faktury"
+            net_imp = inv_detail.get("net_import_kwh", 0.0)
+            net_exp = inv_detail.get("net_export_kwh", 0.0)
+            bilans = inv_detail.get("bilans_kwh", 0.0)
+
+    # v1.5.0 Priority 2: Automatic FIFO mode from API (Zero config out-of-the-box!)
+    elif bi == 0.0 and be == 0.0 and initial == 0.0 and (not init_l1 and not init_l2):
+        if monthly:
+            try:
+                coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
+            except (ValueError, TypeError):
+                coeff_f = DEFAULT_PROSUMER_COEFFICIENT
+            _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f, has_zones=has_zones)
+            if _fifo_bank is not None and fifo_detail is not None:
+                bank = _fifo_bank
+                mode = "fifo_12m_api"
+                source_desc = "automatyczne rozliczenie FIFO 12m z API Energa"
+                formula_desc = "FIFO 12 m-cy wg art. 4 ust. 11 ustawy o OZE"
+                if "bank_kwh_l1" in fifo_detail:
+                    bank_1 = fifo_detail["bank_kwh_l1"]
+                if "bank_kwh_l2" in fifo_detail:
+                    bank_2 = fifo_detail["bank_kwh_l2"]
+                _LOGGER.debug(
+                    "BankKwh %s fifo: bank=%.2f (L1=%s, L2=%s) expired=%.2f uncovered=%.2f",
+                    mid, bank, bank_1, bank_2,
+                    fifo_detail.get("expired_kwh", 0),
+                    fifo_detail.get("uncovered_kwh", 0),
+                )
+
+    # v0.2.11 Priority 3: Rolling 365d if enabled and baseline mode
+    elif opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT) and opts.get(
+        CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D
+    ):
+        rolling = getattr(coordinator, "_rolling_365", {}).get(str(mid), {})
+        coverage = int(rolling.get("_coverage_days", 0))
+        if coverage >= ROLLING_MIN_COVERAGE_DAYS:
+            exp365 = rolling.get(
+                "export",
+                rolling.get("export_1", 0) + rolling.get("export_2", 0),
+            )
+            imp365 = rolling.get(
+                "import",
+                rolling.get("import_1", 0) + rolling.get("import_2", 0),
+            )
+            bank = rolling_kwh_bank(exp365, imp365, coeff)
+            mode = "rolling_365d"
+
+    return {
+        "totals": totals,
+        "bank_kwh": bank,
+        "bank_kwh_l1": bank_1,
+        "bank_kwh_l2": bank_2,
+        "initial_kwh": initial,
+        "init_l1": init_l1,
+        "init_l2": init_l2,
+        "coefficient": coeff,
+        "net_import_kwh": net_imp,
+        "net_export_kwh": net_exp,
+        "bilans_kwh": bilans,
+        "mode": mode,
+        "source_desc": source_desc,
+        "formula_desc": formula_desc,
+        "settle_str": settle_str,
+        "inv_detail": inv_detail,
+        "fifo_detail": fifo_detail,
+        "coverage_days": coverage,
+    }
 
 
 class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
@@ -125,139 +318,35 @@ class EnergaBankKwhSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        totals = self.coordinator._meter_totals.get(str(self._meter_id))
-        if not totals:
+        # v1.9.2 (P1.4): the full priority chain lives in bank_kwh_snapshot()
+        # so the bill coverage and this sensor share one engine.
+        snapshot = bank_kwh_snapshot(
+            self.coordinator,
+            self._entry,
+            self._meter_id,
+            serial=str(getattr(self, "_serial", "")),
+            has_zones=self._has_zones,
+        )
+        if snapshot.get("bank_kwh") is None:
             return None
 
+        totals = snapshot["totals"]
         opts = self._entry.options
-        mid = str(self._meter_id)
-        ser = str(getattr(self, "_serial", ""))
-
-        # Get baselines
-        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-
-        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
-        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
-        bank_1 = None
-        bank_2 = None
-        init_l1 = 0.0
-        init_l2 = 0.0
-
-        if self._has_zones:
-            # Per-zone baselines if available, else global
-            bi1 = get_meter_baseline(opts, "import_1", meter_id=mid, serial=ser, default=bi)
-            bi2 = get_meter_baseline(opts, "import_2", meter_id=mid, serial=ser, default=bi)
-            be1 = get_meter_baseline(opts, "export_1", meter_id=mid, serial=ser, default=be)
-            be2 = get_meter_baseline(opts, "export_2", meter_id=mid, serial=ser, default=be)
-
-            imp1 = float(totals.get("import_1", totals.get("import", 0)))
-            imp2 = float(totals.get("import_2", 0))
-            exp1 = float(totals.get("export_1", totals.get("export", 0)))
-            exp2 = float(totals.get("export_2", 0))
-
-            init_l1 = get_meter_initial_bank(opts, "kwh_l1", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L1)
-            init_l2 = get_meter_initial_bank(opts, "kwh_l2", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH_L2)
-            if init_l1 > 0 or init_l2 > 0:
-                initial = round(init_l1 + init_l2, 2)
-
-            # If per-zone baselines not set, use total baselines with total import/export
-            if bi1 == bi and bi2 == bi:
-                # No per-zone baseline — use total import/export minus global baseline
-                net_imp = float(totals.get("import", 0)) - bi
-                net_exp = float(totals.get("export", 0)) - be
-            else:
-                net_imp = (imp1 - bi1) + (imp2 - bi2)
-                net_exp = (exp1 - be1) + (exp2 - be2)
-
-            # Per-zone net flows & bank for L1 and L2
-            net_imp1 = imp1 - bi1
-            net_exp1 = exp1 - be1
-            bilans1 = (net_exp1 * coeff) - net_imp1
-            bank_1 = round(max(0.0, bilans1) + init_l1, 2)
-
-            net_imp2 = imp2 - bi2
-            net_exp2 = exp2 - be2
-            bilans2 = (net_exp2 * coeff) - net_imp2
-            bank_2 = round(max(0.0, bilans2) + init_l2, 2)
-            bank = round(bank_1 + bank_2, 2)
-            bilans = round(bilans1 + bilans2, 2)
-        else:
-            net_imp = float(totals.get("import", 0)) - bi
-            net_exp = float(totals.get("export", 0)) - be
-            bilans = (net_exp * coeff) - net_imp
-            bank = max(0, bilans) + initial
-        mode = "baseline"
-        source_desc = "net-metering 0.8 roczny (old) — faktury FES"
-        formula_desc = "max(0, (export-baseline)*coeff - (import-baseline)) + initial"
-
-        _LOGGER.debug(
-            "BankKwh %s: imp=%.2f exp=%.2f coeff=%.2f bilans=%.2f initial=%.2f bank=%.2f",
-            mid, net_imp, net_exp, coeff, bilans, initial, bank,
-        )
-
-        monthly = getattr(self.coordinator, "_monthly", {}).get(str(mid), {})
-        settle_str = str(opts.get(CONF_SETTLEMENT_DATE, DEFAULT_SETTLEMENT_DATE)).strip()
-        fifo_detail = None
-        inv_detail = None
-
-        # v1.5.0 Priority 1: Invoice cut-off date mode
-        if settle_str and monthly and (initial > 0 or init_l1 > 0 or init_l2 > 0):
-            inv_bank, inv_detail = bank_from_invoice_date(
-                settle_str, monthly, init_1=init_l1 or initial, init_2=init_l2, coeff=coeff
-            )
-            if inv_bank is not None and inv_detail:
-                bank = inv_bank
-                bank_1 = inv_detail.get("bank_kwh_l1")
-                bank_2 = inv_detail.get("bank_kwh_l2")
-                mode = "invoice_date"
-                source_desc = f"rozliczenie od daty faktury {settle_str}"
-                formula_desc = f"stan_faktury({settle_str}) + net_export_od_faktury*coeff - net_import_od_faktury"
-                net_imp = inv_detail.get("net_import_kwh", 0.0)
-                net_exp = inv_detail.get("net_export_kwh", 0.0)
-                bilans = inv_detail.get("bilans_kwh", 0.0)
-
-        # v1.5.0 Priority 2: Automatic FIFO mode from API (Zero config out-of-the-box!)
-        elif bi == 0.0 and be == 0.0 and initial == 0.0 and (not init_l1 and not init_l2):
-            if monthly:
-                try:
-                    coeff_f = float(opts.get(CONF_PROSUMER_COEFFICIENT, DEFAULT_PROSUMER_COEFFICIENT))
-                except (ValueError, TypeError):
-                    coeff_f = DEFAULT_PROSUMER_COEFFICIENT
-                _fifo_bank, fifo_detail = _fifo_bank_from_monthly(monthly, coeff_f, has_zones=self._has_zones)
-                if _fifo_bank is not None and fifo_detail is not None:
-                    bank = _fifo_bank
-                    mode = "fifo_12m_api"
-                    source_desc = "automatyczne rozliczenie FIFO 12m z API Energa"
-                    formula_desc = "FIFO 12 m-cy wg art. 4 ust. 11 ustawy o OZE"
-                    if "bank_kwh_l1" in fifo_detail:
-                        bank_1 = fifo_detail["bank_kwh_l1"]
-                    if "bank_kwh_l2" in fifo_detail:
-                        bank_2 = fifo_detail["bank_kwh_l2"]
-                    _LOGGER.debug(
-                        "BankKwh %s fifo: bank=%.2f (L1=%s, L2=%s) expired=%.2f uncovered=%.2f",
-                        mid, bank, bank_1, bank_2,
-                        fifo_detail.get("expired_kwh", 0),
-                        fifo_detail.get("uncovered_kwh", 0),
-                    )
-
-        # v0.2.11 Priority 3: Rolling 365d if enabled and baseline mode
-        elif opts.get(CONF_ENABLE_AUTO_SETTLEMENT, DEFAULT_ENABLE_AUTO_SETTLEMENT) and opts.get(
-            CONF_USE_ROLLING_365D, DEFAULT_USE_ROLLING_365D
-        ):
-            rolling = getattr(self.coordinator, "_rolling_365", {}).get(str(mid), {})
-            coverage = int(rolling.get("_coverage_days", 0))
-            if coverage >= ROLLING_MIN_COVERAGE_DAYS:
-                exp365 = rolling.get(
-                    "export",
-                    rolling.get("export_1", 0) + rolling.get("export_2", 0),
-                )
-                imp365 = rolling.get(
-                    "import",
-                    rolling.get("import_1", 0) + rolling.get("import_2", 0),
-                )
-                bank = rolling_kwh_bank(exp365, imp365, coeff)
-                mode = "rolling_365d"
+        bank = snapshot["bank_kwh"]
+        bank_1 = snapshot["bank_kwh_l1"]
+        bank_2 = snapshot["bank_kwh_l2"]
+        initial = snapshot["initial_kwh"]
+        coeff = snapshot["coefficient"]
+        net_imp = snapshot["net_import_kwh"]
+        net_exp = snapshot["net_export_kwh"]
+        bilans = snapshot["bilans_kwh"]
+        mode = snapshot["mode"]
+        source_desc = snapshot["source_desc"]
+        formula_desc = snapshot["formula_desc"]
+        settle_str = snapshot["settle_str"]
+        inv_detail = snapshot["inv_detail"]
+        fifo_detail = snapshot["fifo_detail"]
+        coverage = snapshot["coverage_days"]
 
         # Build rich attributes for Lovelace visibility
         attrs = {

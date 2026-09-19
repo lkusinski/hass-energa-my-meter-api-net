@@ -384,13 +384,18 @@ class HourlyProfileForecaster:
         bill_dict: dict | None = None
 
         if tariff_options:
-            fees = fees_from_options(tariff_options, self.tariff_code)
+            # Same product/rate inference as verify_period and the bill
+            # sensors (net-metering -> Oferta Podstawowa, net-billing ->
+            # taryfa urzędowa); explicit Options always win (P1.3).
+            fees = fees_from_options(
+                tariff_options, self.tariff_code, old_system=is_old_system
+            )
             rce = float(rce_price or 0.25)
             try:
                 bill_res = compute_bill(
                     import_day=float(f_imp_t1),
                     import_night=float(f_imp_t2),
-                    export_total=float(f_exp_total),
+                    export_kwh=float(f_exp_total),
                     rcem=rce,
                     fees=fees,
                     cover_day=warehouse_kwh if is_old_system else 0.0,
@@ -399,8 +404,18 @@ class HourlyProfileForecaster:
                 )
                 payable_pln = Decimal(str(bill_res["do_zaplaty"]))
                 bill_dict = bill_res
-            except Exception as err:
-                _LOGGER.debug("Invoice bill compute failed in forecaster: %s", err)
+            except Exception as err:  # noqa: BLE001 - projection must not break
+                _LOGGER.debug(
+                    "Invoice bill compute failed in forecaster "
+                    "(tariff=%s, imp_day=%.3f, imp_night=%.3f, export=%.3f, "
+                    "old_system=%s): %s",
+                    self.tariff_code,
+                    float(f_imp_t1),
+                    float(f_imp_t2),
+                    float(f_exp_total),
+                    is_old_system,
+                    err,
+                )
 
         confidence = min(0.95, 0.5 + (self.history_days_count / 60.0) * 0.45)
 

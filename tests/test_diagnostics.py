@@ -38,16 +38,21 @@ def test_redact_sensitive_data():
 
     redacted = redact_sensitive_data(raw)
 
-    assert redacted["username"] == "user123"
+    # v1.9.2 (P1.1): username/e-mail are partially masked, never raw.
+    assert redacted["username"] == "u***"
     assert redacted["password"] == "**REDACTED**"
     assert redacted["token"] == "**REDACTED**"
     assert redacted["pesel"] == "**REDACTED**"
     assert redacted["nested"]["street_address"] == "**REDACTED**"
     assert redacted["nested"]["phone_number"] == "**REDACTED**"
     assert redacted["nested"]["safe_param"] == 42
-    assert redacted["items"][0]["email"] == "**REDACTED**"
+    assert redacted["items"][0]["email"] == "t***@e***"
     assert redacted["items"][0]["tariff"] == "G11"
     assert redacted["items"][1]["code"] == "XYZ"
+    # No raw PII anywhere in the tree.
+    serialized = repr(redacted)
+    assert "user123" not in serialized
+    assert "test@example.com" not in serialized
 
 
 @pytest.mark.asyncio
@@ -104,6 +109,8 @@ async def test_async_get_config_entry_diagnostics():
 
     assert diag["entry"]["title"] == "Dom Wiśniowa"
     assert diag["entry"]["data"]["password"] == "**REDACTED**"
+    assert diag["entry"]["data"]["username"] == "u***@t***"
+    assert "user@test.pl" not in repr(diag)
     assert diag["entry"]["options"]["secret_token"] == "**REDACTED**"
     assert diag["coordinator"]["last_update_success"] is True
     assert diag["coordinator"]["meters_count"] == 1

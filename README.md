@@ -10,7 +10,7 @@
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
 ![Tests](https://img.shields.io/badge/tests-350_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.1](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.1)** — auto-saldo depozytu, RCEm/okres, stawki produktu oraz kanoniczna baza sald i start okresu w środku miesiąca. Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2) (pre-release)** — naprawa prognozy rachunku (`forecast_payable_pln`), G12W `reconcile_invoice`, maskowanie e-maila w diagnostyce oraz spójność stawek produktu i pokrycia magazynu z Bankiem. Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5

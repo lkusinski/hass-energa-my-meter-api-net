@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.9.2 (2026-09-19) — naprawa prognozy rachunku, G12W reconcile, PII i spójność stawek/magazynu
+
+Wydanie naprawcze po audycie 1.9.1 (`AUDYT_1.9.1.md`): dwa błędy P0 i cztery
+ryzyka P1 (maskowanie PII, jedna definicja prosumera, stawki produktu w
+sensorach, spójność pokrycia magazynu z Bankiem). Bez zmian w API i schemacie
+danych. **Pre-release** (`v1.9.2`).
+
+- **P0.1 — prognoza rachunku faktycznie liczona.** `HourlyProfileForecaster`
+  wołał `compute_bill(..., export_total=...)`, podczas gdy parametr nazywa się
+  `export_kwh` → `TypeError` połykany w `except`, więc
+  `forecast_payable_pln`/`bill_breakdown` były **zawsze `None`**. Poprawiono
+  nazwę argumentu, dodano log z kontekstem i test gałęzi `tariff_options`
+  (wcześniej niepokrytej). (`projections/forecast.py`)
+- **P0.2 — `reconcile_invoice` G12W liczył od 0 kWh.** Schemat nadawał
+  `day_kwh`/`night_kwh` `default=0.0`, więc fallback `consumption_kwh / 2` był
+  martwy. Usunięto domyślne wartości ze schematu i dodano
+  `_g12w_day_night_split`: brak stref → podział 50/50 z `consumption_kwh`
+  (udokumentowany), jedna strefa → dopełnienie z sumy. Testy usługi i schematu.
+  (`services.py`)
+- **P1.1 — e-mail w diagnostyce maskowany.** `username`/`user`/`login`
+  dołączyły do `TO_REDACT`, a wartości e-mail są częściowo maskowane
+  (`a***@d***`) zamiast trafiać do zrzutu. Test nie utrwala już przecieku.
+  (`diagnostics.py`)
+- **P1.2 — jedna definicja `is_export_prosumer`.** Usunięto sprzeczny duplikat
+  z `dashboard_generator` (`is_prosumer or has_export`; `has_export` nigdzie nie
+  było ustawiane) i zaimportowano wersję z `settlement.py`.
+- **P1.3 — stawki produktu w sensorach rachunku.** Sensory rachunku i forecaster
+  przekazują `old_system` do `fees_from_options`, więc `G12W_OFERTA` /
+  `G12W_URZEDOWA` są inferowane identycznie jak w `verify_period` — prognoza i
+  „Dotychczasowy rachunek” używają tej samej tabeli co kalkulator.
+- **P1.4 — pokrycie magazynu zgodne z Bankiem.** Wydzielono
+  `bank_kwh_snapshot` (wspólny silnik: data faktury → FIFO 12 m-cy → rolling
+  365d → baseline) używany przez sensor „Bank Wirtualny kWh” i rachunek;
+  pokrycie liczone per strefa L1/L2 (`min(bank_lx, import_lx)`, jak w
+  `core/verification.py`), z uwzględnieniem daty rozliczenia.
+  (`sensors/bank.py`, `sensors/bill.py`)
+- **P1.5 — log zamiast cichego `pass`** w best-effort `except` (rejestracja
+  odświeżania godzinowego, cache RCEm, parsowanie punktów pamięciowych).
+- **Regresje bez zmian:** Agrestowa 08.2026 = netto 628,55 / VAT 144,57 /
+  brutto 773,12 / depozyt 157,59 / do zapłaty 615,53; Wiśniowa 07–08.2026 =
+  129,04 / 29,68 / 158,72.
+- **Testy:** 695 passed, 1 skipped; `ruff` czysty.
+
 ## v1.9.1 (2026-09-19) — auto-saldo depozytu, RCEm/okres, stawki produktu, kanoniczna baza
 
 Konsolidacja linii 1.9.1 (dawniej `v1.9.1`–`v1.9.3`). Obejmuje: **auto-saldo

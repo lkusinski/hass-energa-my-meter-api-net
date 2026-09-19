@@ -548,5 +548,79 @@ def test_live_sensor_export_defaults_zero_for_null_prosumer():
     assert sensor_total_imp.native_value == 224110.0
 
 
+def test_bill_warehouse_cover_matches_bank_engine_fifo():
+    """P1.4: bill coverage must use the Bank engine's FIFO L1/L2 balances."""
+    from datetime import date
+    from unittest.mock import MagicMock
+
+    from custom_components.energa_mobile.const import CONF_PROSUMER_COEFFICIENT
+    from custom_components.energa_mobile.sensors.bank import (
+        _fifo_bank_from_monthly,
+        bank_kwh_snapshot,
+    )
+    from custom_components.energa_mobile.sensors.bill import EnergaBillForecastSensor
+    from custom_components.energa_mobile.settlement import trailing_months
+
+    months = trailing_months(date.today(), 13)[-4:-1]  # 3 months before now
+    vals = [
+        (10.0, 100.0, 0.0, 50.0),
+        (20.0, 120.0, 5.0, 60.0),
+        (30.0, 80.0, 10.0, 40.0),
+    ]
+    monthly = {}
+    for (y, m), (i1, e1, i2, e2) in zip(months, vals):
+        monthly[(y, m)] = {
+            "import_1": i1,
+            "export_1": e1,
+            "import_2": i2,
+            "export_2": e2,
+        }
+
+    bank_total, detail = _fifo_bank_from_monthly(monthly, 0.8, has_zones=True)
+    assert bank_total is not None
+    assert detail is not None
+
+    coord = MagicMock()
+    coord.data = [
+        {
+            "meter_point_id": "10000010",
+            "meter_serial": "10000010",
+            "tariff": "G12w",
+            "zone_count": 2,
+            "is_prosumer": True,
+        }
+    ]
+    coord._meter_totals = {
+        "10000010": {"import_1": 60.0, "import_2": 15.0, "export_1": 300.0, "export_2": 150.0}
+    }
+    coord._monthly = {"10000010": monthly}
+    coord._rolling_365 = {}
+    coord._rce_cache = 0.25
+
+    entry = MagicMock()
+    entry.entry_id = "entry_fifo"
+    entry.options = {CONF_PROSUMER_COEFFICIENT: 0.8}
+    entry.data = {}
+
+    snapshot = bank_kwh_snapshot(coord, entry, "10000010", "10000010", has_zones=True)
+    assert snapshot["mode"] == "fifo_12m_api"
+    assert snapshot["bank_kwh"] == bank_total
+    assert snapshot["bank_kwh_l1"] == detail["bank_kwh_l1"]
+    assert snapshot["bank_kwh_l2"] == detail["bank_kwh_l2"]
+
+    sensor = EnergaBillForecastSensor(
+        coordinator=coord,
+        meter_id="10000010",
+        device_info=MagicMock(),
+        entry=entry,
+        has_zones=True,
+        serial="10000010",
+    )
+    assert sensor._warehouse_cover() == max(0.0, bank_total)
+    cover_d, cover_n = sensor._warehouse_cover_zones(100.0, 200.0)
+    assert cover_d == min(detail["bank_kwh_l1"], 100.0)
+    assert cover_n == min(detail["bank_kwh_l2"], 200.0)
+
+
 
 

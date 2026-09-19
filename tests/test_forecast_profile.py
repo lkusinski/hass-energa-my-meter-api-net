@@ -169,3 +169,98 @@ def test_hourly_profile_forecaster_wal_projection():
     # G12w separates zones: both T1 and T2 must be positive
     assert res.forecast_import_t1_kwh > Decimal("0")
     assert res.forecast_import_t2_kwh > Decimal("0")
+
+
+def _synthetic_readings(days: int = 45):
+    readings = []
+    start_dt = datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc)
+    for day in range(days):
+        d_curr = (start_dt + timedelta(days=day)).date()
+        is_wknd = d_curr.weekday() in (5, 6)
+        for hour in range(24):
+            dt = datetime(d_curr.year, d_curr.month, d_curr.day, hour, tzinfo=timezone.utc)
+            if is_wknd:
+                imp = Decimal("1.0")
+            else:
+                imp = Decimal("2.0") if 6 <= hour < 22 else Decimal("0.5")
+            readings.append(
+                IntervalReading(
+                    ppe_id="TEST_PPE",
+                    meter_id="TEST_METER",
+                    register="total",
+                    interval_start_utc=dt,
+                    resolution="1h",
+                    import_kwh=imp,
+                    export_kwh=Decimal("0.3"),
+                )
+            )
+    return readings
+
+
+def test_hourly_profile_forecaster_invoice_branch():
+    """P0.1 regression: with tariff_options the bill must actually compute.
+
+    The buggy call used ``compute_bill(export_total=...)`` while the signature
+    is ``export_kwh``; the resulting TypeError was swallowed, so
+    ``forecast_payable_pln``/``bill_breakdown`` were always None.
+    """
+    from custom_components.energa_mobile.tariff import (
+        G12W_DEFAULT_FEES,
+        G12W_OFERTA_FEES,
+        compute_bill,
+    )
+
+    readings = _synthetic_readings()
+    forecaster = HourlyProfileForecaster(readings=readings, tariff_code="G12w", tz_offset_hours=2)
+    mtd_readings = [
+        r for r in readings
+        if r.interval_start_utc >= datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
+        and r.interval_start_utc < datetime(2026, 9, 10, 0, 0, tzinfo=timezone.utc)
+    ]
+
+    res = forecaster.forecast_month(
+        current_date=date(2026, 9, 10),
+        mtd_readings=mtd_readings,
+        tariff_options={"tariff_product": "G12W_URZEDOWA"},
+        rce_price=0.25,
+    )
+
+    assert res.forecast_payable_pln is not None
+    assert isinstance(res.forecast_payable_pln, Decimal)
+    assert res.bill_breakdown is not None
+    assert "do_zaplaty" in res.bill_breakdown
+    assert res.bill_breakdown["netto"] > 0
+    assert res.bill_breakdown["sale_total"] > 0
+    assert res.forecast_payable_pln == Decimal(str(res.bill_breakdown["do_zaplaty"]))
+
+    # The forecast totals must be fed through the correct compute_bill kwargs.
+    expected = compute_bill(
+        import_day=float(res.forecast_import_t1_kwh),
+        import_night=float(res.forecast_import_t2_kwh),
+        export_kwh=float(res.forecast_export_total_kwh),
+        rcem=0.25,
+        fees=G12W_DEFAULT_FEES,
+    )
+    assert res.bill_breakdown["do_zaplaty"] == expected["do_zaplaty"]
+
+    # Old net-metering branch (warehouse coverage + Oferta Podstawowa).
+    old = forecaster.forecast_month(
+        current_date=date(2026, 9, 10),
+        mtd_readings=mtd_readings,
+        tariff_options={"tariff_product": "G12W_OFERTA"},
+        warehouse_kwh=50.0,
+        is_old_system=True,
+    )
+    assert old.forecast_payable_pln is not None
+    assert old.bill_breakdown is not None
+    old_expected = compute_bill(
+        import_day=float(old.forecast_import_t1_kwh),
+        import_night=float(old.forecast_import_t2_kwh),
+        export_kwh=float(old.forecast_export_total_kwh),
+        rcem=0.25,
+        fees=G12W_OFERTA_FEES,
+        cover_day=50.0,
+        cover_night=0.0,
+        deposit_pln=0.0,
+    )
+    assert old.bill_breakdown["do_zaplaty"] == old_expected["do_zaplaty"]

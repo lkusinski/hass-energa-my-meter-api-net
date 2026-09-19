@@ -7,7 +7,7 @@ import functools
 import json
 import logging
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from time import monotonic
 from zoneinfo import ZoneInfo
 
@@ -138,6 +138,45 @@ def _get_entry_and_api(
 
     entry = entries[0]
     return entry, domain_data.get(entry.entry_id, {}).get("api")
+
+
+def _g12w_day_night_split(
+    call_data: dict, consumption_kwh: Decimal
+) -> tuple[Decimal, Decimal]:
+    """Day/night kWh bases for a G12W reconciliation (P0.2).
+
+    The service schema used to inject ``day_kwh``/``night_kwh`` with a
+    ``default=0.0`` through voluptuous, so ``call.data`` always contained
+    both keys and the ``consumption_kwh / 2`` fallback was dead — the
+    invoice was recomputed from 0 kWh. The schema now leaves the keys
+    absent when the caller omits them.
+
+    Documented choice: with no zone split available the consumption is
+    divided 50/50 (a neutral assumption; callers with real G12W data
+    should pass ``day_kwh``/``night_kwh``). When exactly one zone is
+    given the other is derived from the total so the two never
+    double-count.
+    """
+    def _as_decimal(key: str) -> Decimal | None:
+        raw = (call_data or {}).get(key)
+        if raw is None:
+            return None
+        try:
+            return max(Decimal("0"), Decimal(str(raw)))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    day = _as_decimal("day_kwh")
+    night = _as_decimal("night_kwh")
+    total = max(Decimal("0"), Decimal(str(consumption_kwh or "0")))
+    if day is None and night is None:
+        half = total / Decimal("2")
+        return half, total - half
+    if day is None:
+        return max(Decimal("0"), total - night), night
+    if night is None:
+        return day, max(Decimal("0"), total - day)
+    return day, night
 
 
 async def async_register_services(hass: HomeAssistant) -> None:
@@ -330,8 +369,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
         )
 
         if "12" in tariff_code:
-            day_kwh = Decimal(str(call.data.get("day_kwh", consumption_kwh / 2)))
-            night_kwh = Decimal(str(call.data.get("night_kwh", consumption_kwh / 2)))
+            day_kwh, night_kwh = _g12w_day_night_split(call.data, consumption_kwh)
             comp_lines = calculate_g12w_invoice_lines(
                 day_kwh, night_kwh, months=months, effective_date=d_start
             )
@@ -388,8 +426,10 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 vol.Required("period_end"): str,
                 vol.Optional("tariff", default="G11"): str,
                 vol.Optional("consumption_kwh", default=0.0): vol.Coerce(float),
-                vol.Optional("day_kwh", default=0.0): vol.Coerce(float),
-                vol.Optional("night_kwh", default=0.0): vol.Coerce(float),
+                # No default: absent keys must stay absent so the G12W
+                # 50/50 fallback over consumption_kwh can run (P0.2).
+                vol.Optional("day_kwh"): vol.Coerce(float),
+                vol.Optional("night_kwh"): vol.Coerce(float),
                 vol.Optional("months", default=1.0): vol.Coerce(float),
                 vol.Optional("invoiced_gross"): vol.Coerce(float),
                 vol.Optional("invoiced_lines", default=[]): list,
@@ -629,8 +669,8 @@ async def _resolve_period_rcem(
     if coordinator is not None:
         try:
             coordinator._rcem_monthly = cache
-        except Exception:  # noqa: BLE001 - best-effort cache
-            pass
+        except Exception as err:  # noqa: BLE001 - best-effort cache
+            _LOGGER.debug("Could not cache monthly RCEm on coordinator: %s", err)
 
     warnings: list[str] = []
     if prices:
@@ -1167,8 +1207,8 @@ async def _resolve_monthly_rcem(
     if coordinator is not None:
         try:
             coordinator._rcem_monthly = cache
-        except Exception:  # noqa: BLE001 - best-effort cache
-            pass
+        except Exception as err:  # noqa: BLE001 - best-effort cache
+            _LOGGER.debug("Could not cache monthly RCEm on coordinator: %s", err)
 
     if table:
         source = "pse_table"

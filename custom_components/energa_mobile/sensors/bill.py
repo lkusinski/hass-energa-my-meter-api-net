@@ -16,12 +16,8 @@ from ..const import (
     CONF_BANK_RCE_PRICE,
     CONF_RCE_AUTO_FETCH,
     CONF_TARIFF_CAPACITY,
-    DEFAULT_BALANCE_BASELINE,
-    DEFAULT_BANK_INITIAL_KWH,
     DEFAULT_BANK_RCE_PRICE,
     ROLLING_MIN_COVERAGE_DAYS,
-    get_meter_baseline,
-    get_meter_initial_bank,
     get_price_for_key,
     get_prosumer_coefficient,
 )
@@ -39,6 +35,7 @@ from ..tariff import (
     split_cover,
     tariff_family,
 )
+from .bank import bank_kwh_snapshot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -208,21 +205,48 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         )
         return coeff >= 0.7
 
+    def _warehouse_snapshot(self) -> dict:
+        """Shared Bank kWh engine snapshot (P1.4)."""
+        return bank_kwh_snapshot(
+            self.coordinator,
+            self._entry,
+            self._meter_id,
+            serial=str(getattr(self, "_serial", "")),
+            has_zones=self._has_zones,
+        )
+
     def _warehouse_cover(self):
-        """Current Bank kWh available to cover this month's import."""
-        totals = self.coordinator._meter_totals.get(str(self._meter_id))
-        if not totals:
-            return 0.0
-        opts = self._entry.options
-        mid = str(self._meter_id)
-        ser = str(getattr(self, "_serial", ""))
-        bi = get_meter_baseline(opts, "import", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-        be = get_meter_baseline(opts, "export", meter_id=mid, serial=ser, default=DEFAULT_BALANCE_BASELINE)
-        coeff = get_prosumer_coefficient(opts, meter_id=mid, serial=ser)
-        initial = get_meter_initial_bank(opts, "kwh", meter_id=mid, serial=ser, default=DEFAULT_BANK_INITIAL_KWH)
-        net_imp = float(totals.get("import", 0)) - bi
-        net_exp = float(totals.get("export", 0)) - be
-        return max(0.0, net_exp * coeff - net_imp) + max(0.0, initial)
+        """Current Bank kWh available to cover this month's import.
+
+        v1.9.2 (P1.4): delegates to the Bank sensor engine so FIFO 12m /
+        invoice cut-off / rolling 365d and the initial L1/L2 balances are
+        honoured, matching the "Bank Wirtualny kWh" entity.
+        """
+        bank = self._warehouse_snapshot().get("bank_kwh")
+        return max(0.0, float(bank)) if bank is not None else 0.0
+
+    def _warehouse_cover_zones(self, imp_day: float, imp_night: float):
+        """Per-zone warehouse coverage (L1/L2) for the bill (P1.4).
+
+        When the Bank engine knows both zone balances, each zone covers at
+        most its own import — the same ``min(bank_lx, import_lx)`` rule as
+        ``core/verification.py`` (verify_period). Otherwise the total is
+        split proportionally to the import (legacy behaviour).
+
+        Returns ``(cover_day, cover_night)`` in kWh.
+        """
+        snapshot = self._warehouse_snapshot()
+        bank = snapshot.get("bank_kwh")
+        if bank is None:
+            return 0.0, 0.0
+        bank_1 = snapshot.get("bank_kwh_l1")
+        bank_2 = snapshot.get("bank_kwh_l2")
+        if bank_1 is not None and bank_2 is not None:
+            return (
+                max(0.0, min(float(bank_1), float(imp_day))),
+                max(0.0, min(float(bank_2), float(imp_night))),
+            )
+        return split_cover(max(0.0, float(bank)), imp_day, imp_night)
 
     def _rce(self) -> float:
         opts = self._entry.options
@@ -275,7 +299,13 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
         # === v0.2.14 full-bill math (invoice reconstruction) ===
         # v0.3.0: fee table follows the meter tariff (G11 invoice table
         # for single-zone meters, G12W otherwise).
-        fees = fees_from_options(opts, self._meter_tariff())
+        # v1.9.2 (P1.3): pass the settlement system so the seller product
+        # (Oferta Podstawowa vs taryfa urzędowa) is inferred exactly like
+        # verify_period — the forecast must use the same rate table.
+        old_system = self._is_old_system()
+        fees = fees_from_options(
+            opts, self._meter_tariff(), old_system=old_system
+        )
         # v0.2.18: capacity fee auto-bracket (URE 2026) unless overridden.
         capacity_source = "manual (Options tariff_capacity)"
         if CONF_TARIFF_CAPACITY not in (opts or {}):
@@ -285,11 +315,8 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
                 capacity_source = (
                     f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
                 )
-        old_system = self._is_old_system()
         if old_system:
-            cover_d, cover_n = split_cover(
-                self._warehouse_cover(), imp_d, imp_n
-            )
+            cover_d, cover_n = self._warehouse_cover_zones(imp_d, imp_n)
             # No PLN deposit in the old system — coverage only.
             # (None would auto-compute export×RCEm×1.23.)
             deposit_mtd = 0.0
@@ -383,9 +410,7 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
 
 
         if old_system:
-            f_cover_d, f_cover_n = split_cover(
-                self._warehouse_cover(), f_imp_d, f_imp_n
-            )
+            f_cover_d, f_cover_n = self._warehouse_cover_zones(f_imp_d, f_imp_n)
             f_deposit = 0.0
         else:
             f_cover_d, f_cover_n = 0.0, 0.0
@@ -537,7 +562,11 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
         rce = self._rce()
         today = _date.today()
 
-        fees = fees_from_options(opts, self._meter_tariff())
+        # v1.9.2 (P1.3): same product/rate inference as verify_period.
+        old_system = self._is_old_system()
+        fees = fees_from_options(
+            opts, self._meter_tariff(), old_system=old_system
+        )
         capacity_source = "manual (Options tariff_capacity)"
         if CONF_TARIFF_CAPACITY not in (opts or {}):
             annual = self._annual_import_estimate()
@@ -545,11 +574,8 @@ class EnergaBillCurrentSensor(EnergaBillForecastSensor):
                 fees["capacity"] = capacity_for_annual_use(annual)
                 capacity_source = f"auto URE 2026 (roczny pobór ~{annual:.0f} kWh)"
 
-        old_system = self._is_old_system()
         if old_system:
-            cover_d, cover_n = split_cover(
-                self._warehouse_cover(), imp_d, imp_n
-            )
+            cover_d, cover_n = self._warehouse_cover_zones(imp_d, imp_n)
             deposit_mtd = 0.0
         else:
             cover_d, cover_n = 0.0, 0.0

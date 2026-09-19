@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import storage
 
 from .const import DOMAIN
+from .settlement import is_export_prosumer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,10 +21,10 @@ DEFAULT_URL_PATH = "energa-rachunek"
 DEFAULT_TITLE = "Energa Rozliczenia"
 DEFAULT_ICON = "mdi:lightning-bolt-circle"
 
-
-def is_export_prosumer(meter: dict[str, Any]) -> bool:
-    """Check if meter has export (production/prosumer) configured."""
-    return bool(meter.get("is_prosumer") or meter.get("has_export"))
+# v1.9.2 (P1.2): one definition only. The local duplicate here used
+# ``is_prosumer or has_export`` (``has_export`` is never assigned anywhere),
+# so a meter exporting without the seller flag was misclassified as a
+# consumer. ``settlement.is_export_prosumer`` is now the single source.
 
 
 def _async_lookup_device(dev_reg: Any, identifier: tuple[str, str]) -> Any:

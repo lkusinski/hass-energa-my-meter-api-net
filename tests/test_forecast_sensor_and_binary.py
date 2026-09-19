@@ -12,6 +12,10 @@ from custom_components.energa_mobile.binary_sensor import (
     EnergaBessDischargeWindowBinarySensor,
     EnergaRceNegativePriceBinarySensor,
 )
+from custom_components.energa_mobile.const import (
+    CONF_PROSUMER_COEFFICIENT,
+    DEFAULT_BANK_RCE_PRICE,
+)
 from custom_components.energa_mobile.core.readings.models import IntervalReading
 from custom_components.energa_mobile.projections.arbitrage import (
     ArbitrageEngine,
@@ -22,6 +26,7 @@ from custom_components.energa_mobile.sensor import (
     PseRceArbitrageSpreadSensor,
     PseRceDynamicPriceSensor,
 )
+from custom_components.energa_mobile.tariff import G12W_OFERTA_FEES, compute_bill
 
 
 @pytest.fixture
@@ -97,6 +102,68 @@ def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
     assert attrs["profile_confidence"] > 0.5
     assert attrs["forecast_import_t1_kwh"] > 0
     assert attrs["forecast_import_t2_kwh"] > 0
+
+
+def test_bill_sensor_uses_product_rates_for_old_system():
+    """P1.3: net-metering G12W must use the Oferta Podstawowa rate table.
+
+    Before the fix the bill sensors called ``fees_from_options`` without
+    ``old_system``, so ``_resolve_product`` never inferred the product and the
+    invoice silently fell back to the (net-billing) default table.
+    """
+    from custom_components.energa_mobile.sensors.bill import EnergaBillCurrentSensor
+
+    coord = MagicMock()
+    coord.data = [
+        {
+            "meter_point_id": "10000009",
+            "meter_serial": "10000009",
+            "tariff": "G12w",
+            "zone_count": 2,
+            "is_prosumer": True,
+            "total_minus": 10.0,
+        }
+    ]
+    coord._mtd = {
+        "10000009": {"import_1": 100.0, "import_2": 50.0, "export_1": 0.0, "export_2": 0.0}
+    }
+    coord._meter_totals = {
+        "10000009": {"import": 150.0, "export": 0.0, "import_1": 100.0,
+                      "import_2": 50.0, "export_1": 0.0, "export_2": 0.0}
+    }
+    coord._monthly = {"10000009": {}}
+    coord._rolling_365 = {"10000009": {"_coverage_days": 0}}
+    coord._rce_cache = None
+
+    entry = MagicMock()
+    entry.entry_id = "test_entry_product"
+    entry.options = {CONF_PROSUMER_COEFFICIENT: 0.8}
+    entry.data = {}
+
+    sensor = EnergaBillCurrentSensor(
+        coordinator=coord,
+        meter_id="10000009",
+        device_info=MagicMock(),
+        entry=entry,
+        has_zones=True,
+        serial="10000009",
+    )
+
+    bill, _attrs = sensor._calculate_bill_mtd()
+    assert bill is not None
+    # Oferta Podstawowa handlowa is 16.18; the default (net-billing) table is 0.
+    assert bill["trade_fee"] == 16.18
+    expected = compute_bill(
+        100.0,
+        50.0,
+        0.0,
+        DEFAULT_BANK_RCE_PRICE,
+        G12W_OFERTA_FEES,
+        cover_day=0.0,
+        cover_night=0.0,
+        deposit_pln=0.0,
+    )
+    assert bill["do_zaplaty"] == expected["do_zaplaty"]
 
 
 def test_arbitrage_binary_sensors(mock_entry):

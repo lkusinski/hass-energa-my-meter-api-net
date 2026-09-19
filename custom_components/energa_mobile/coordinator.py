@@ -863,7 +863,12 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         try:
                             from datetime import datetime as _dt
                             p_start = _dt.fromisoformat(p_start)
-                        except Exception:
+                        except Exception as err:  # noqa: BLE001 - skip bad point
+                            _LOGGER.debug(
+                                "Skipping memory point with invalid start %r: %s",
+                                p_start,
+                                err,
+                            )
                             continue
                     if p_start.tzinfo is None:
                         p_start = p_start.replace(tzinfo=tz)

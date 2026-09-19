@@ -25,8 +25,34 @@ TO_REDACT = {
     "address",
     "phone",
     "email",
+    # v1.9.2 (P1.1): the Energa login is the account e-mail; it used to
+    # pass through diagnostics unmasked despite the "strict PII" docstring.
+    "username",
+    "user",
+    "login",
     "client_secret",
 }
+
+# Keys whose value is shown partially (a***@d***) instead of fully hidden,
+# so a support engineer can still tell which account a dump belongs to
+# without exposing the address.
+_PARTIAL_MASK_KEYS = {"username", "user", "login", "email"}
+
+
+def _mask_email_like(value: Any) -> str:
+    """Mask an e-mail/login to ``a***@d***`` (or ``a***`` when no domain)."""
+    text = str(value or "")
+    if "@" in text:
+        local, _, domain = text.partition("@")
+        return f"{local[:1] or '*'}***@{domain[:1] or '*'}***"
+    return f"{text[:1] or '*'}***"
+
+
+def _redacted_value(key_lower: str, value: Any) -> str:
+    """Return the display value for a sensitive key."""
+    if any(target in key_lower for target in _PARTIAL_MASK_KEYS):
+        return _mask_email_like(value)
+    return "**REDACTED**"
 
 
 def redact_sensitive_data(data: Any) -> Any:
@@ -36,7 +62,7 @@ def redact_sensitive_data(data: Any) -> Any:
         for key, value in data.items():
             k_lower = str(key).lower()
             if any(target in k_lower for target in TO_REDACT):
-                redacted[key] = "**REDACTED**"
+                redacted[key] = _redacted_value(k_lower, value)
             elif isinstance(value, (dict, list)):
                 redacted[key] = redact_sensitive_data(value)
             else:

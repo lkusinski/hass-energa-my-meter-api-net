@@ -298,8 +298,10 @@ class EnergaTaniaStrefaBinarySensor(CoordinatorEntity, BinarySensorEntity):
                     self.hass, _hourly_update, minute=0, second=0
                 )
             )
-        except Exception:
-            pass
+        except Exception as err:  # noqa: BLE001 - must not break entity setup
+            # v1.9.2 (P1.5): log instead of a silent pass — a failed hourly
+            # subscription otherwise disables refreshes with no trace.
+            _LOGGER.debug("Failed to register hourly arbitrage refresh: %s", err)
 
     @property
     def device_info(self) -> DeviceInfo:
