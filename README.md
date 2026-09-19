@@ -10,7 +10,7 @@
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
 ![Tests](https://img.shields.io/badge/tests-350_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.2-beta.4](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2-beta.4) (pre-release)** — jasna etykieta „Oferta / cennik Energa (produkt)" w onboardingu i Options oraz domknięcie porządków P2 z audytu (bez zmian wyników rozliczeń). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.2-beta.5](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2-beta.5) (pre-release)** — naprawa fresh onboardingu: wybrany produkt jest teraz zapisywany (`product_source=explicit`) i pusty `inverter_energy_entity` nie blokuje zapisu Options (bez zmian wyników rozliczeń). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5

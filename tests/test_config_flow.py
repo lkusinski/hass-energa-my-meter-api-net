@@ -605,3 +605,325 @@ class TestLocalizedProductLabels:
             if getattr(k, "schema", None) == CONF_TARIFF_PRODUCT
         )
         assert "G12W – Regulated tariff" in validator.container.values()
+
+
+class TestOnboardingProductPersistence:
+    """v1.9.2-beta.5 regression: a fresh onboarding must persist the product.
+
+    Before the fix ``async_step_system``/``_fallback`` built ``options`` from
+    ``_pending_options`` only and never merged ``user_input``, so the chosen
+    ``tariff_product`` was silently dropped (``product_source=inferred/none``).
+    On G11 that fell back to the default table -> a wrong bill.
+    """
+
+    def _make_flow(self):
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow._pending_title = "test@example.com"
+        flow._pending_data = {}
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "title": title,
+                "data": data,
+                "options": options or {},
+            }
+        )
+        return flow
+
+    async def _onboard(self, system, product):
+        """Run the onboarding up to the created entry; return its options."""
+        flow = self._make_flow()
+        if system == "stare":
+            res = await flow.async_step_system(
+                {"system": "stare", "tariff_product": product}
+            )
+            assert res["step_id"] == "net_metering_survey"
+            res = await flow.async_step_net_metering_survey(
+                {
+                    CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                    CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+                }
+            )
+        else:
+            res = await flow.async_step_system(
+                {"system": system, "tariff_product": product}
+            )
+        assert res["type"] == "create_entry"
+        return res["options"]
+
+    @pytest.mark.asyncio
+    async def test_g11_oferta_saved_as_explicit(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G11_OFERTA,
+            fee_source,
+            product_option_values,
+            resolve_product,
+        )
+
+        options = await self._onboard("nowe", PRODUCT_G11_OFERTA)
+        assert options[CONF_TARIFF_PRODUCT] == PRODUCT_G11_OFERTA
+        for key, value in product_option_values(PRODUCT_G11_OFERTA).items():
+            assert options[key] == value
+        assert resolve_product(options, "G11", False) == (
+            PRODUCT_G11_OFERTA,
+            "explicit",
+        )
+        assert fee_source(options, "G11")[0] == "product"
+
+    @pytest.mark.asyncio
+    async def test_g12w_urzedowa_saved_as_explicit(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G12W_URZEDOWA,
+            fee_source,
+            resolve_product,
+        )
+
+        options = await self._onboard("nowe", PRODUCT_G12W_URZEDOWA)
+        assert options[CONF_TARIFF_PRODUCT] == PRODUCT_G12W_URZEDOWA
+        assert resolve_product(options, "G12W", False) == (
+            PRODUCT_G12W_URZEDOWA,
+            "explicit",
+        )
+        assert fee_source(options, "G12W")[0] == "product"
+
+    @pytest.mark.asyncio
+    async def test_g12w_oferta_saved_as_explicit_old_system(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G12W_OFERTA,
+            fee_source,
+            resolve_product,
+        )
+
+        options = await self._onboard("stare", PRODUCT_G12W_OFERTA)
+        assert options[CONF_TARIFF_PRODUCT] == PRODUCT_G12W_OFERTA
+        assert resolve_product(options, "G12W", True) == (
+            PRODUCT_G12W_OFERTA,
+            "explicit",
+        )
+        assert fee_source(options, "G12W")[0] == "product"
+
+    @pytest.mark.asyncio
+    async def test_auto_keeps_inference_without_baking_rates(self):
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_AUTO,
+            PRODUCT_G12W_OFERTA,
+            fee_source,
+            resolve_product,
+        )
+
+        options = await self._onboard("stare", PRODUCT_AUTO)
+        assert options.get(CONF_TARIFF_PRODUCT) in (None, PRODUCT_AUTO)
+        # No hand-typed tariff_* must be stored: the settlement system infers.
+        assert not any(
+            key.startswith("tariff_") and key != CONF_TARIFF_PRODUCT
+            for key in options
+        )
+        assert resolve_product(options, "G12W", True) == (
+            PRODUCT_G12W_OFERTA,
+            "inferred",
+        )
+        assert fee_source(options, "G12W", old_system=True)[0] == "product"
+
+    @pytest.mark.asyncio
+    async def test_fallback_step_also_persists_product(self):
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+        from custom_components.energa_mobile.tariff import PRODUCT_G11_OFERTA
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow._pending_title = "test@example.com"
+        flow._pending_data = {}
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "options": options or {},
+            }
+        )
+        res = await flow.async_step_system_fallback(
+            {"system": "brak", "tariff_product": PRODUCT_G11_OFERTA}
+        )
+        assert res["options"][CONF_TARIFF_PRODUCT] == PRODUCT_G11_OFERTA
+
+
+class TestOnboardingBillingRegression:
+    """A fresh onboarding choice must reproduce the invoice (Faza B)."""
+
+    def _make_flow(self):
+        from custom_components.energa_mobile.config_flow import EnergaConfigFlow
+
+        flow = EnergaConfigFlow()
+        flow.hass = MagicMock()
+        flow._pending_title = "test@example.com"
+        flow._pending_data = {}
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data, options=None: {
+                "type": "create_entry",
+                "options": options or {},
+            }
+        )
+        return flow
+
+    async def _options_for(self, system, product):
+        flow = self._make_flow()
+        if system == "stare":
+            await flow.async_step_system(
+                {"system": "stare", "tariff_product": product}
+            )
+            res = await flow.async_step_net_metering_survey(
+                {
+                    CONF_PROSUMER_POWER_GROUP: POWER_GROUP_LE_10KW,
+                    CONF_ENERGY_DASHBOARD_MODE: ENERGY_MODE_VIRTUAL_STORAGE,
+                }
+            )
+        else:
+            res = await flow.async_step_system(
+                {"system": system, "tariff_product": product}
+            )
+        return res["options"]
+
+    @pytest.mark.asyncio
+    async def test_bursztynowa_08_2026_from_onboarding(self):
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G11_OFERTA,
+            compute_bill,
+            fees_from_options,
+        )
+
+        options = await self._options_for("nowe", PRODUCT_G11_OFERTA)
+        fees = fees_from_options(options, "G11", old_system=False)
+        res = compute_bill(
+            import_day=30.0,
+            import_night=0.0,
+            export_kwh=192.0,
+            rcem=0.1988,
+            fees=fees,
+            excise_day=149.0,
+            excise_night=0.0,
+            add_excise=True,
+            deposit_pln=129.82,
+        )
+        assert (res["netto"], res["vat"], res["brutto"]) == (87.56, 20.14, 107.70)
+        assert res["do_zaplaty"] == 84.44
+
+    @pytest.mark.asyncio
+    async def test_wisniowa_from_onboarding(self):
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G12W_OFERTA,
+            compute_bill,
+            fees_from_options,
+        )
+
+        options = await self._options_for("stare", PRODUCT_G12W_OFERTA)
+        fees = fees_from_options(options, "G12W", old_system=True)
+        res = compute_bill(
+            83.0,
+            342.0,
+            1904.0,
+            0.0,
+            fees,
+            months=2,
+            cover_day=83.0,
+            cover_night=342.0,
+            excise_day=120.0,
+            excise_night=372.0,
+            add_excise=True,
+            deposit_pln=0.0,
+        )
+        assert (res["netto"], res["vat"], res["brutto"]) == (129.04, 29.68, 158.72)
+        assert res["do_zaplaty"] == 158.72
+
+    @pytest.mark.asyncio
+    async def test_agrestowa_from_onboarding(self):
+        from custom_components.energa_mobile.tariff import (
+            PRODUCT_G12W_URZEDOWA,
+            compute_bill,
+            fees_from_options,
+        )
+
+        options = await self._options_for("nowe", PRODUCT_G12W_URZEDOWA)
+        fees = fees_from_options(options, "G12W", old_system=False)
+        res = compute_bill(
+            398.0,
+            309.0,
+            435.0,
+            0.29453,
+            fees,
+            excise_day=38.0,
+            excise_night=23.0,
+            add_excise=True,
+        )
+        assert (res["netto"], res["vat"], res["brutto"]) == (628.55, 144.57, 773.12)
+        assert res["do_zaplaty"] == 615.53
+
+
+class TestOptionsInverterEntity:
+    """v1.9.2-beta.5 (P2): an empty inverter-entity default must not block save."""
+
+    def _flow(self):
+        from custom_components.energa_mobile.config_flow import EnergaOptionsFlow
+
+        entry = MagicMock()
+        entry.options = {}
+        entry.entry_id = "entry-id"
+        flow = EnergaOptionsFlow(entry)
+        flow.hass = MagicMock()
+        flow.async_show_form = MagicMock(
+            side_effect=lambda **kwargs: {"type": "form", **kwargs}
+        )
+        return flow
+
+    def _inverter_field(self, schema):
+        for marker, validator in schema.schema.items():
+            if getattr(marker, "schema", None) == "inverter_energy_entity":
+                return marker, validator
+        raise AssertionError("inverter field missing from schema")
+
+    @pytest.mark.asyncio
+    async def test_prices_form_empty_inverter_default_is_none(self):
+        flow = self._flow()
+        res = await flow.async_step_prices(None)
+        marker, _validator = self._inverter_field(res["data_schema"])
+        assert marker.default() is None
+
+    @pytest.mark.asyncio
+    async def test_prices_form_keeps_configured_inverter_default(self):
+        flow = self._flow()
+        flow._config_entry.options = {"inverter_energy_entity": "sensor.solar_kwh"}
+        res = await flow.async_step_prices(None)
+        marker, _validator = self._inverter_field(res["data_schema"])
+        assert marker.default() == "sensor.solar_kwh"
+
+    @pytest.mark.asyncio
+    async def test_options_save_without_inverter_entity(self):
+        flow = self._flow()
+        flow.async_create_entry = MagicMock(
+            side_effect=lambda title, data: {"type": "create_entry", "data": data}
+        )
+        res = await flow.async_step_prices(
+            {
+                "import_price": 0.61,
+                "export_price": 0.2,
+                "prosumer_coefficient": 0.0,
+                "tariff_product": "G11_OFERTA",
+            }
+        )
+        assert res["type"] == "create_entry"
+        assert res["data"]["tariff_product"] == "G11_OFERTA"
+        assert res["data"]["tariff_energy_day"] == 0.605286

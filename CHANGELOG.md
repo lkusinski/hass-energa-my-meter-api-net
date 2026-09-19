@@ -1,5 +1,42 @@
 # Changelog
 
+## v1.9.2-beta.5 (2026-09-19) — naprawa fresh onboardingu (P1) + P2 encji falownika
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.4`. Naprawia **krytyczny
+błąd z weryfikacji beta.4 (Faza B)**: świeży onboarding po cichu odrzucał
+wybrany produkt. Bez zmian API, schematu danych i logiki rozliczeń — naprawa
+wyłącznie w `config_flow.py` (zapisywanie wyboru) oraz regresje testowe.
+
+- **P1 — onboarding zapisuje wybrany produkt.** Kroki `async_step_system` i
+  `async_step_system_fallback` budowały `options` tylko z `_pending_options`,
+  a `user_input` (z polem `tariff_product`) **nie był scalany**. Skutek:
+  `product_source=inferred`/`none` zamiast `explicit`; na G11 brak inferencji →
+  tabela domyślna → błędny rachunek (Bursztynowa 08.2026: 79,30 zamiast 84,44).
+  Nowy helper `_merge_onboarding_choice(user_input, pending)` scala pola
+  formularza (`tariff_product`, `create_settlement_dashboard`,
+  `energy_dashboard_mode`) do `options` **przed** `_apply_tariff_product`, więc:
+  wybór presetu materializuje wszystkie `tariff_*` i daje `product_source=explicit`
+  / `fee_source=product`, a `auto` pozostaje inferencją z systemu rozliczeń
+  (bez zapisywania domyślnych stawek jako ręcznych). Ścieżka `stare` →
+  `net_metering_survey` zachowuje scalone opcje.
+- **P2 — pusty `inverter_energy_entity` nie blokuje Options.** Pole w kroku
+  „Ceny" miało `default=""`, co jest odrzucane przez `EntitySelector` i
+  uniemożliwiało zapis formularza bez wybranej encji falownika. Teraz
+  `default=current_inverter or None` — zapis przechodzi.
+- **Logika rozliczeń bez zmian** (`tariff.py`, `settlement.py`,
+  `core/verification.py` nietknięte).
+- **Testy regresyjne (nowe):** `TestOnboardingProductPersistence` (end-to-end
+  flow: `G11_OFERTA`/`G12W_URZEDOWA`/`G12W_OFERTA` → `explicit` + wszystkie
+  `tariff_*`; `auto` → `inferred` bez wpisanych stawek; `system_fallback` też),
+  `TestOnboardingBillingRegression` (Bursztynowa 08.2026 **84,44**, Wiśniowa
+  **158,72**, Agrestowa **615,53** — z opcji uzyskanych przez onboarding, nie
+  ręcznie) oraz `TestOptionsInverterEntity` (pusty default = `None`, zapis
+  formularza bez encji falownika przechodzi). Razem: **738 passed, 1 skipped**;
+  `ruff` czysty.
+- **Weryfikacja na labach (Faza B po fixie):** fresh onboarding na 123–127 z
+  wyborem właściwego produktu → `product_source=explicit`, `fee_source=product`
+  i wyniki zgodne z Fazą A (szczegóły: `WNIOSKI_LAB.md`).
+
 ## v1.9.2-beta.4 (2026-09-19) — jasna etykieta „produktu" + domknięcie P2 (bez zmian rozliczeń)
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.3`. Bez zmian API,

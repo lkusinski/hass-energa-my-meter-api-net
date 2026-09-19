@@ -218,6 +218,35 @@ def _apply_tariff_product(user_input: dict, prior_options: dict | None) -> None:
             user_input.pop(key, None)
 
 
+def _merge_onboarding_choice(user_input: dict, pending: dict | None) -> dict:
+    """Merge the wizard's own fields into the pending options (v1.9.2-beta.5).
+
+    The ``system`` / ``system_fallback`` steps used to build ``options`` from
+    ``_pending_options`` only and feed it to :func:`_apply_tariff_product`,
+    silently dropping the selected ``tariff_product`` (and any other form
+    field). The product was therefore never persisted, so a fresh onboarding
+    resolved to ``inferred``/``none`` and — on G11 — fell back to the per-tariff
+    default table (a wrong bill). Merging the user input first keeps an explicit
+    selection and lets ``auto`` keep the inference instead of baking defaults in.
+    """
+    options = dict(pending or {})
+    for key in (
+        CONF_TARIFF_PRODUCT,
+        CONF_CREATE_SETTLEMENT_DASHBOARD,
+        CONF_ENERGY_DASHBOARD_MODE,
+    ):
+        if key in user_input:
+            options[key] = user_input[key]
+    options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
+        user_input.get(
+            CONF_CREATE_SETTLEMENT_DASHBOARD,
+            DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
+        )
+    )
+    _apply_tariff_product(options, pending)
+    return options
+
+
 def _onboarding_product_field(language: str = "pl") -> dict:
     """Product preset selector for the onboarding wizard (all families).
 
@@ -434,15 +463,11 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             choice = user_input.get("system")
             # Seed from any pre-selected options (a detected one-way consumer
-            # arrives with prosumer_coefficient pinned to 0.0).
-            options = dict(getattr(self, "_pending_options", {}) or {})
-            options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
-                user_input.get(
-                    CONF_CREATE_SETTLEMENT_DASHBOARD,
-                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
-                )
+            # arrives with prosumer_coefficient pinned to 0.0) and merge the
+            # form's own fields — notably ``tariff_product`` (v1.9.2-beta.5).
+            options = _merge_onboarding_choice(
+                user_input, getattr(self, "_pending_options", None)
             )
-            _apply_tariff_product(options, None)
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -487,14 +512,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Prompt user for prosumer system when auto-detection timed out."""
         if user_input is not None:
             choice = user_input.get("system")
-            options = {}
-            options[CONF_CREATE_SETTLEMENT_DASHBOARD] = bool(
-                user_input.get(
-                    CONF_CREATE_SETTLEMENT_DASHBOARD,
-                    DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
-                )
-            )
-            _apply_tariff_product(options, None)
+            options = _merge_onboarding_choice(user_input, None)
             if choice == "stare":
                 self._pending_options = options
                 return await self.async_step_net_metering_survey()
@@ -970,8 +988,13 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
+                        # v1.9.2-beta.5: an empty string default is rejected by
+                        # the entity selector and blocked saving the form when
+                        # no inverter entity is configured (P2). ``None`` keeps
+                        # the field optional and savable.
                         vol.Optional(
-                            CONF_INVERTER_ENERGY_ENTITY, default=current_inverter
+                            CONF_INVERTER_ENERGY_ENTITY,
+                            default=current_inverter or None,
                         ): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="sensor", device_class="energy")
                         ) if hasattr(selector, "EntitySelector") else str,
@@ -1036,8 +1059,13 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
+                        # v1.9.2-beta.5: an empty string default is rejected by
+                        # the entity selector and blocked saving the form when
+                        # no inverter entity is configured (P2). ``None`` keeps
+                        # the field optional and savable.
                         vol.Optional(
-                            CONF_INVERTER_ENERGY_ENTITY, default=current_inverter
+                            CONF_INVERTER_ENERGY_ENTITY,
+                            default=current_inverter or None,
                         ): selector.EntitySelector(
                             selector.EntitySelectorConfig(domain="sensor", device_class="energy")
                         ) if hasattr(selector, "EntitySelector") else str,
