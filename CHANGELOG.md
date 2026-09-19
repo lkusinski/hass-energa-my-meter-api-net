@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.9.3 (2026-09-18) — kanoniczna baza jako źródło salda + start w środku miesiąca
+
+- **Kanoniczna baza SQLite jako źródło salda w `verify_period` (LUKA 1).**
+  Salda otwarcia (magazyn kWh i depozyt PLN) są teraz zapisywane i odczytywane
+  z kanonicznego magazynu (`.storage/energa_canonical.db`, tabele
+  `settlement_lot`/`market_price`). Precedencja:
+  `override` (wejście) → `canonical` (snapshot w bazie) → `recorder`/`api`
+  (przeliczenie z historii). Gdy bazy nie ma lotów na dany moment, wynik jest
+  liczony z recordera/API i **zapisywany** (snapshot lotów per strefa +
+  historyczne `RCEM` do `market_price`), więc kolejne przeliczenie tego samego
+  okresu nie powtarza kosztownej rekonstrukcji. Wynik zwraca `opening_source`
+  (`override`/`canonical`/`recorder`/`api`) i ostrzeżenia. Snapshot ma
+  deterministyczny `lot_id` (`open_<ppe>_<unit>_<zone>_<data>`) i
+  `rule_version=opening_snapshot_v1`; przed zapisem lotu zakładany jest wiersz
+  `ppe` (FK).
+- **Spójność z Bankiem (LUKA 1).** Wartość magazynu użyta jako saldo otwarcia
+  pochodzi z tego samego silnika FIFO 12 m-cy, co sensory
+  `*_bank_wirtualny_kwh`/`..._bank_kwh_l1/l2` (`fifo_kwh_bank` /
+  `fifo_dual_zone_kwh_bank`); test akceptacyjny porównuje saldo `verify_period`
+  z `_fifo_bank_from_monthly` dla tego samego momentu.
+- **Start okresu w środku miesiąca (LUKA 2).** `verify_period` dolicza
+  częściowy miesiąc startowy: przepływy od 1. dnia miesiąca startowego do
+  `period_start` (dzienne/godzinowe `change` z recordera) wchodzą do FIFO kWh
+  oraz do depozytu PLN (M → M+1, ważność 12 m-cy). Dzięki temu
+  `bank_open_1/2` i `deposit_open` opisują stan **na moment `period_start`**,
+  a nie na 1. dnia miesiąca. Gdy dostępny jest wyłącznie miesięczny cache API
+  (bez podziału na dni), miesiąc startowy jest pomijany, a wynik dostaje
+  czytelne ostrzeżenie (saldo na 1. dnia). Okresy pełnomiesięczne bez zmian.
+- **Testy**: 684 passed, 1 skipped; `ruff` czysty.
+
 ## v1.9.2 (2026-09-18) — RCEm per miesiąc okresu + stawki produktu
 
 - **RCEm z miesiąca oddania energii (PSE), nie z opcji.** `verify_period`

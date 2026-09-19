@@ -44,6 +44,18 @@ from ..tariff import (
 SOURCE_ENERGA_API = "energa_api"
 SOURCE_RECORDER = "recorder_hourly"
 
+# Opening-balance precedence returned by the verify_period service (Faza 4).
+# ``override`` (service call) > ``canonical`` (SQLite snapshots) >
+# ``recorder``/``api`` (recomputed from the flow history).
+OPENING_SOURCE_OVERRIDE = "override"
+OPENING_SOURCE_CANONICAL = "canonical"
+OPENING_SOURCE_RECORDER = "recorder"
+OPENING_SOURCE_API = "api"
+
+# Rule version stamped on canonical opening snapshots so a later read can tell
+# them apart from real FIFO lots produced by the settlement engines.
+CANONICAL_OPENING_RULE = "opening_snapshot_v1"
+
 # kWh bases surfaced in the response (all JSON-serialisable floats).
 # ``gross_1/2`` are kept for backward compatibility; ``gross_import_1/2``
 # is the invoice-aligned name. ``cover_1/2`` is the warehouse coverage.
@@ -103,6 +115,60 @@ def format_period_date(value) -> str | None:
     """Normalise any accepted date value to ``YYYY-MM-DD`` (or ``None``)."""
     parsed = parse_period_date(value)
     return parsed.isoformat() if parsed is not None else None
+
+
+def canonical_opening_lot_id(
+    ppe_id: str, unit: str, zone: str, reference_date: date
+) -> str:
+    """Deterministic id of a canonical opening-balance snapshot lot.
+
+    One snapshot is stored per (PPE, unit, zone, reference date). The
+    reference date is the period start (the *moment* the balance describes),
+    so re-running the same period reuses the first computed snapshot instead
+    of recomputing it.
+    """
+    return f"open_{ppe_id}_{unit}_{zone}_{reference_date.isoformat()}"
+
+
+def openings_from_canonical_lots(
+    lots,
+    *,
+    unit: str,
+    zones,
+    reference_date: date,
+) -> dict | None:
+    """Opening balances (per zone) from canonical snapshot lots.
+
+    Returns ``{zone: float}`` when *every* requested zone has a snapshot lot
+    for ``reference_date`` (rule version :data:`CANONICAL_OPENING_RULE`),
+    otherwise ``None`` so the caller falls back to the recorder/API. Pure and
+    defensive: lots may be any object exposing ``unit``/``zone``/``assigned_at``/
+    ``remaining_amount``/``rule_version`` (duck-typed for unit-testing).
+    """
+    wanted = {str(zone) for zone in (zones or [])}
+    if not wanted:
+        return None
+    out: dict = {}
+    for lot in lots or []:
+        try:
+            if str(getattr(lot, "unit", "")) != unit:
+                continue
+            if str(getattr(lot, "rule_version", "")) != CANONICAL_OPENING_RULE:
+                continue
+            assigned = getattr(lot, "assigned_at", None)
+            if isinstance(assigned, datetime):
+                assigned = assigned.date()
+            if assigned != reference_date:
+                continue
+            zone = str(getattr(lot, "zone", ""))
+            if zone not in wanted:
+                continue
+            out[zone] = float(getattr(lot, "remaining_amount", 0.0) or 0.0)
+        except (ValueError, TypeError, AttributeError):
+            continue
+    if wanted.issubset(out):
+        return out
+    return None
 
 
 def period_is_historical(start, end, *, today: date | None = None) -> bool:
@@ -503,6 +569,12 @@ def opening_deposit_from_monthly_flows(
       charge (energy sale + excise, gross) — never distribution or fixed fees;
     * the remainder rolls over to the next month.
 
+    Mid-month starts: the period-start month contributes its day-accurate
+    (partial) flows when ``period_start.day > 1`` — the caller passes only the
+    days from the 1st up to ``period_start`` so the result is the balance at
+    ``period_start``, not at the 1st of the month. On the 1st the start month
+    is ignored (there is nothing elapsed to settle).
+
     Args:
         monthly_flows: ``{(year, month): {"import_1"/"export_1"/...}}`` (single
             zone rows may use ``import``/``export``).
@@ -543,9 +615,13 @@ def opening_deposit_from_monthly_flows(
             year, month = int(key[0]), int(key[1])
         except (TypeError, ValueError, IndexError):
             continue
-        # The start month is still being settled (its invoice/deposit is not
-        # final yet), so it never contributes to the opening balance.
-        if (year, month) >= ref_ym:
+        # Months after the reference month never contribute. The reference
+        # month itself only contributes for a mid-month period start, where the
+        # caller supplies the partial (day-accurate) flows; on the 1st there is
+        # nothing elapsed to settle.
+        if (year, month) > ref_ym:
+            continue
+        if (year, month) == ref_ym and ref.day <= 1:
             continue
         row = monthly_flows.get(key) or {}
         imp1, imp2, exp1, exp2 = _monthly_flow_row(row)
@@ -674,16 +750,23 @@ def deposit_ledger_close(entries, *, initial: float = 0.0) -> float:
 
 
 __all__ = [
+    "CANONICAL_OPENING_RULE",
+    "OPENING_SOURCE_API",
+    "OPENING_SOURCE_CANONICAL",
+    "OPENING_SOURCE_OVERRIDE",
+    "OPENING_SOURCE_RECORDER",
     "PERIOD_KWH_KEYS",
     "SOURCE_ENERGA_API",
     "SOURCE_RECORDER",
     "build_period_invoice",
+    "canonical_opening_lot_id",
     "choose_period_source",
     "deposit_ledger_close",
     "format_period_date",
     "has_two_zones",
     "opening_bank_from_monthly_flows",
     "opening_deposit_from_monthly_flows",
+    "openings_from_canonical_lots",
     "parse_period_date",
     "period_is_historical",
 ]

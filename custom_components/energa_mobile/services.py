@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -28,6 +29,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
+from .adapters.pse.models import MarketPriceRecord
 from .api import EnergaAPI
 from .const import (
     CONF_BANK_INITIAL_KWH,
@@ -56,15 +58,24 @@ from .core.completeness import (
     registers_for_meter,
     unknown_result,
 )
+from .core.identity.models import PPE, SettlementType
+from .core.settlement.models import SettlementLot
 from .core.verification import (
+    CANONICAL_OPENING_RULE,
+    OPENING_SOURCE_API,
+    OPENING_SOURCE_CANONICAL,
+    OPENING_SOURCE_OVERRIDE,
+    OPENING_SOURCE_RECORDER,
     PERIOD_KWH_KEYS,
     SOURCE_ENERGA_API,
     SOURCE_RECORDER,
     build_period_invoice,
+    canonical_opening_lot_id,
     choose_period_source,
     format_period_date,
     opening_bank_from_monthly_flows,
     opening_deposit_from_monthly_flows,
+    openings_from_canonical_lots,
     period_is_historical,
 )
 from .dashboard_generator import (
@@ -1168,36 +1179,221 @@ async def _resolve_monthly_rcem(
     return prices, missing, source
 
 
-def _prior_months(monthly: dict, start_dt: datetime) -> list[tuple[int, int]]:
-    """``(year, month)`` keys of ``monthly`` strictly before the start month."""
+async def _prior_monthly_flows(
+    hass: HomeAssistant, meter: dict, coordinator, start_dt: datetime
+) -> tuple[dict, bool]:
+    """Monthly flows before ``start_dt``: recorder daily rows, else coordinator.
+
+    The recorder's daily ``change`` rows are preferred (they are the true daily
+    increments); when it has no history at all the coordinator's ``_monthly``
+    cache (API YEAR charts / locally computed sums) is used so opening balances
+    do not silently degrade to ``coverage_unknown``.
+
+    Returns ``(monthly, day_accurate)``. ``day_accurate`` is ``True`` for the
+    recorder source: its period-start month bucket then contains only the days
+    elapsed up to ``start_dt`` (a true partial month). The coordinator cache is
+    whole-month only (``False``), so a mid-month caller cannot split its start
+    month and must drop it (see :func:`_drop_month`).
+    """
+    monthly = await _collect_monthly_flows(hass, meter, start_dt)
+    if monthly:
+        return monthly, True
+    if coordinator is not None:
+        cached = getattr(coordinator, "_monthly", None)
+        if isinstance(cached, dict):
+            mid = str(meter.get("meter_point_id", ""))
+            cached_monthly = cached.get(mid) or {}
+            if isinstance(cached_monthly, dict):
+                return cached_monthly, False
+    return {}, True
+
+
+def _drop_month(monthly: dict, ym: tuple[int, int]) -> dict:
+    """Return ``monthly`` without the ``(year, month)`` bucket (never raises)."""
+    out: dict = {}
+    for key, value in (monthly or {}).items():
+        try:
+            if (int(key[0]), int(key[1])) == ym:
+                continue
+        except (TypeError, ValueError, IndexError):
+            pass
+        out[key] = value
+    return out
+
+
+def _months_through(monthly: dict, start_dt: datetime) -> list[tuple[int, int]]:
+    """``(year, month)`` keys of ``monthly`` at or before the start month."""
     keys: list[tuple[int, int]] = []
     for key in list(monthly or {}):
         try:
             year, month = int(key[0]), int(key[1])
         except (TypeError, ValueError, IndexError):
             continue
-        if (year, month) < (start_dt.year, start_dt.month):
+        if (year, month) <= (start_dt.year, start_dt.month):
             keys.append((year, month))
     return sorted(set(keys))
 
 
-async def _prior_monthly_flows(
-    hass: HomeAssistant, meter: dict, coordinator, start_dt: datetime
-) -> dict:
-    """Monthly flows before ``start_dt``: recorder daily rows, else coordinator.
+def _canonical_storage(hass: HomeAssistant, entry) -> object | None:
+    """Return the canonical SQLite storage bound to ``entry`` (or ``None``)."""
+    try:
+        edata = (hass.data.get(DOMAIN, {}) or {}).get(entry.entry_id, {})
+    except Exception:  # noqa: BLE001 - plain test doubles may lack .data
+        return None
+    if not isinstance(edata, dict):
+        return None
+    return edata.get("storage")
 
-    The recorder's daily ``change`` rows are preferred (they are the true daily
-    increments); when it has no history at all the coordinator's ``_monthly``
-    cache (API YEAR charts / locally computed sums) is used so opening balances
-    do not silently degrade to ``coverage_unknown``. Always returns a dict.
-    """
-    monthly = await _collect_monthly_flows(hass, meter, start_dt)
-    if not monthly and coordinator is not None:
-        cached = getattr(coordinator, "_monthly", None)
-        if isinstance(cached, dict):
-            mid = str(meter.get("meter_point_id", ""))
-            monthly = cached.get(mid) or {}
-    return monthly if isinstance(monthly, dict) else {}
+
+def _canonical_ppe_id(entry, meter: dict) -> str:
+    """PPE id used for canonical settlement lots (mirrors the data updater)."""
+    data = getattr(entry, "data", None)
+    if isinstance(data, dict):
+        value = data.get("ppe_id")
+        if isinstance(value, str) and value:
+            return value
+    mid = str(meter.get("meter_point_id", ""))
+    return f"PPE_{mid}" if mid else ""
+
+
+def _kwh_zones(has_zones: bool) -> list[str]:
+    """Zone names used for canonical kWh lots (matches the FIFO engines)."""
+    return ["day", "night"] if has_zones else ["total"]
+
+
+def _read_canonical_kwh_opening(
+    storage, ppe_id: str, has_zones: bool, reference_date: date
+):
+    """``(bank_open_1, bank_open_2)`` from canonical snapshots, else ``None``."""
+    if storage is None or not ppe_id:
+        return None
+    try:
+        lots = storage.get_settlement_lots(ppe_id, unit="kWh")
+    except Exception as err:  # noqa: BLE001 - canonical read must never break
+        _LOGGER.debug("verify_period canonical kWh lots read failed: %s", err)
+        return None
+    values = openings_from_canonical_lots(
+        lots, unit="kWh", zones=_kwh_zones(has_zones), reference_date=reference_date
+    )
+    if values is None:
+        return None
+    if has_zones:
+        return float(values.get("day", 0.0)), float(values.get("night", 0.0))
+    return float(values.get("total", 0.0)), 0.0
+
+
+def _read_canonical_pln_opening(storage, ppe_id: str, reference_date: date):
+    """Opening deposit (PLN) from canonical snapshots, else ``None``."""
+    if storage is None or not ppe_id:
+        return None
+    try:
+        lots = storage.get_settlement_lots(ppe_id, unit="PLN")
+    except Exception as err:  # noqa: BLE001 - canonical read must never break
+        _LOGGER.debug("verify_period canonical PLN lots read failed: %s", err)
+        return None
+    values = openings_from_canonical_lots(
+        lots, unit="PLN", zones=["total"], reference_date=reference_date
+    )
+    if values is None:
+        return None
+    return float(values.get("total", 0.0))
+
+
+def _write_canonical_opening(
+    storage,
+    ppe_id: str,
+    unit: str,
+    zones: list[str],
+    reference_date: date,
+    amounts: list,
+    provenance: dict,
+) -> None:
+    """Persist one opening snapshot lot per zone (idempotent, best effort)."""
+    if storage is None or not ppe_id:
+        return
+    # settlement_lot has a FK to ppe; make sure the identity row exists first
+    # (never clobber an existing, richer record).
+    try:
+        if storage.get_ppe(ppe_id) is None:
+            storage.upsert_ppe(
+                PPE(
+                    ppe_id=ppe_id,
+                    settlement_type=(
+                        SettlementType.NET_METERING
+                        if unit == "kWh"
+                        else SettlementType.NET_BILLING_RCEM
+                    ),
+                )
+            )
+    except Exception as err:  # noqa: BLE001 - persistence must never break a call
+        _LOGGER.debug("verify_period canonical PPE upsert failed: %s", err)
+    now = datetime.now(timezone.utc)
+    lots: list[SettlementLot] = []
+    for zone, amount in zip(zones, amounts):
+        if amount is None:
+            continue
+        try:
+            value = Decimal(str(round(float(amount), 4)))
+        except (ValueError, TypeError):
+            continue
+        lots.append(
+            SettlementLot(
+                lot_id=canonical_opening_lot_id(ppe_id, unit, zone, reference_date),
+                ppe_id=ppe_id,
+                unit=unit,
+                zone=zone,
+                original_amount=value,
+                remaining_amount=value,
+                created_at_utc=now,
+                assigned_at=reference_date,
+                expires_at=reference_date,
+                rule_version=CANONICAL_OPENING_RULE,
+                provenance=json.dumps(
+                    provenance, ensure_ascii=False, sort_keys=True, default=str
+                ),
+            )
+        )
+    if not lots:
+        return
+    try:
+        storage.save_settlement_lots(lots)
+    except Exception as err:  # noqa: BLE001 - persistence must never break a call
+        _LOGGER.debug("verify_period canonical opening write failed: %s", err)
+
+
+def _write_canonical_market_prices(storage, monthly_rcem: dict) -> None:
+    """Persist the monthly RCEm values used for the opening FIFO (best effort)."""
+    if storage is None or not monthly_rcem:
+        return
+    records: list[MarketPriceRecord] = []
+    for (year, month), price in (monthly_rcem or {}).items():
+        try:
+            value = float(price)
+            year_i, month_i = int(year), int(month)
+        except (ValueError, TypeError):
+            continue
+        if not 1 <= month_i <= 12:
+            continue
+        records.append(
+            MarketPriceRecord(
+                price_type="RCEM",
+                applicable_year=year_i,
+                applicable_month=month_i,
+                publication_date=date(year_i, month_i, 1),
+                revision=1,
+                price_mwh=Decimal(str(round(value * 1000.0, 4))),
+                price_kwh=Decimal(str(round(value, 6))),
+                source_url="verify_period",
+                raw_snippet="verify_period history cache",
+                resolution="1M",
+            )
+        )
+    if not records:
+        return
+    try:
+        storage.save_market_prices(records)
+    except Exception as err:  # noqa: BLE001 - persistence must never break a call
+        _LOGGER.debug("verify_period canonical market_price write failed: %s", err)
 
 
 def _period_has_positive_import(hourly: dict) -> bool:
@@ -1536,81 +1732,185 @@ async def async_verify_period_data(
         deposit_open_source: str | None = None
         deposit_detail: dict | None = None
         deposit_warnings: list[str] = []
+        opening_source: str | None = None
+
+        storage_inst = _canonical_storage(hass, entry)
+        ppe_id = _canonical_ppe_id(entry, meter)
+        reference_date = start_dt.date()
+        start_is_month_start = start_dt.day <= 1
+
         if old_system and prosumer:
             if override_bank_1 is not None or override_bank_2 is not None:
                 bank_open_1 = override_bank_1 if override_bank_1 is not None else 0.0
                 bank_open_2 = override_bank_2 if override_bank_2 is not None else 0.0
+                opening_source = OPENING_SOURCE_OVERRIDE
             else:
-                monthly = await _prior_monthly_flows(
-                    hass, meter, coordinator, start_dt
+                canonical = _read_canonical_kwh_opening(
+                    storage_inst, ppe_id, has_zones, reference_date
                 )
-                bank_open_1, bank_open_2, _bank_detail = (
-                    opening_bank_from_monthly_flows(
-                        monthly,
-                        coefficient,
-                        has_zones=has_zones,
-                        period_start=start_dt,
+                if canonical is not None:
+                    bank_open_1, bank_open_2 = canonical
+                    opening_source = OPENING_SOURCE_CANONICAL
+                else:
+                    monthly, day_accurate = await _prior_monthly_flows(
+                        hass, meter, coordinator, start_dt
                     )
-                )
-                # Honest reconstruction guard: a 0/0 warehouse on a window with
-                # real positive imports is only trustworthy when the history
-                # actually contained export (otherwise the old state-column bug
-                # produced exactly this). With export history a 0 warehouse is a
-                # legitimate "fully consumed" result and must not degrade to
-                # coverage_unknown.
-                if (
-                    not (bank_open_1 or bank_open_2)
-                    and _period_has_positive_import(hourly)
-                    and not _monthly_has_export(monthly)
-                ):
-                    bank_open_1 = None
-                    bank_open_2 = None
-        elif prosumer and override_deposit is None:
-            monthly = await _prior_monthly_flows(hass, meter, coordinator, start_dt)
-            prior = _prior_months(monthly, start_dt)
-            if prior:
-                monthly_rcem, _missing_rcem, monthly_rcem_source = (
-                    await _resolve_monthly_rcem(api, coordinator, prior)
-                )
-                deposit_open, dep_detail = opening_deposit_from_monthly_flows(
-                    monthly,
-                    monthly_rcem,
-                    fees,
-                    period_start=start_dt,
-                    fallback_rcem=meter_rcem,
-                )
-                deposit_detail = dep_detail
-                if deposit_open is not None:
-                    deposit_open_source = "history"
-                    _LOGGER.debug(
-                        "verify_period deposit_open %s = %.2f PLN "
-                        "(generated=%.2f applied=%.2f expired=%.2f months=%s rcem=%s)",
-                        meter_point_id,
-                        deposit_open,
-                        dep_detail.get("generated_pln", 0.0),
-                        dep_detail.get("applied_pln", 0.0),
-                        dep_detail.get("expired_pln", 0.0),
-                        dep_detail.get("months_used"),
-                        monthly_rcem_source,
+                    if not start_is_month_start and not day_accurate:
+                        monthly = _drop_month(
+                            monthly, (start_dt.year, start_dt.month)
+                        )
+                        deposit_warnings.append(
+                            "Miesiąc startowy pochodzi z miesięcznego cache (API) — "
+                            "bez podziału na dni; saldo magazynu policzono na 1. "
+                            "dnia miesiąca startowego, nie na datę startu okresu."
+                        )
+                    bank_open_1, bank_open_2, _bank_detail = (
+                        opening_bank_from_monthly_flows(
+                            monthly,
+                            coefficient,
+                            has_zones=has_zones,
+                            period_start=start_dt,
+                        )
                     )
-                # Only months with real export matter; ``missing_rcem`` is
-                # reported by the pure ledger and respects that.
-                missing_export_rcem = list(dep_detail.get("missing_rcem") or [])
-                if missing_export_rcem:
-                    deposit_warnings.append(
-                        "Brak historycznych cen RCEm (PSE) dla miesięcy: "
-                        f"{', '.join(missing_export_rcem)} — użyto bieżącej/"
-                        "ostatniej znanej ceny jako przybliżenia salda depozytu."
+                    # Honest reconstruction guard: a 0/0 warehouse on a window
+                    # with real positive imports is only trustworthy when the
+                    # history actually contained export (otherwise the old
+                    # state-column bug produced exactly this). With export
+                    # history a 0 warehouse is a legitimate "fully consumed"
+                    # result and must not degrade to coverage_unknown.
+                    if (
+                        not (bank_open_1 or bank_open_2)
+                        and _period_has_positive_import(hourly)
+                        and not _monthly_has_export(monthly)
+                    ):
+                        bank_open_1 = None
+                        bank_open_2 = None
+                    opening_source = (
+                        OPENING_SOURCE_API
+                        if source == SOURCE_ENERGA_API
+                        else OPENING_SOURCE_RECORDER
                     )
+                    _write_canonical_opening(
+                        storage_inst,
+                        ppe_id,
+                        "kWh",
+                        _kwh_zones(has_zones),
+                        reference_date,
+                        [bank_open_1, bank_open_2],
+                        {
+                            "opening_source": opening_source,
+                            "has_zones": has_zones,
+                            "start": base["period_start"],
+                            "day_accurate": day_accurate,
+                        },
+                    )
+        elif prosumer:
+            if override_deposit is not None:
+                deposit_open = override_deposit
+                deposit_open_source = "override"
+                opening_source = OPENING_SOURCE_OVERRIDE
             else:
-                deposit_warnings.append(
-                    "Brak miesięcznej historii przepływów przed okresem: nie "
-                    "odtworzono salda początkowego depozytu (net-billing)."
+                canonical_dep = _read_canonical_pln_opening(
+                    storage_inst, ppe_id, reference_date
                 )
+                if canonical_dep is not None:
+                    deposit_open = canonical_dep
+                    deposit_open_source = "canonical"
+                    opening_source = OPENING_SOURCE_CANONICAL
+                else:
+                    monthly, day_accurate = await _prior_monthly_flows(
+                        hass, meter, coordinator, start_dt
+                    )
+                    if not start_is_month_start and not day_accurate:
+                        monthly = _drop_month(
+                            monthly, (start_dt.year, start_dt.month)
+                        )
+                        deposit_warnings.append(
+                            "Miesiąc startowy pochodzi z miesięcznego cache (API) — "
+                            "bez podziału na dni; saldo depozytu policzono na 1. "
+                            "dnia miesiąca startowego, nie na datę startu okresu."
+                        )
+                    wanted = _months_through(monthly, start_dt)
+                    if wanted:
+                        monthly_rcem, _missing_rcem, monthly_rcem_source = (
+                            await _resolve_monthly_rcem(api, coordinator, wanted)
+                        )
+                        deposit_open, dep_detail = (
+                            opening_deposit_from_monthly_flows(
+                                monthly,
+                                monthly_rcem,
+                                fees,
+                                period_start=start_dt,
+                                fallback_rcem=meter_rcem,
+                            )
+                        )
+                        deposit_detail = dep_detail
+                        if deposit_open is not None:
+                            deposit_open_source = "history"
+                            _LOGGER.debug(
+                                "verify_period deposit_open %s = %.2f PLN "
+                                "(generated=%.2f applied=%.2f expired=%.2f "
+                                "months=%s rcem=%s)",
+                                meter_point_id,
+                                deposit_open,
+                                dep_detail.get("generated_pln", 0.0),
+                                dep_detail.get("applied_pln", 0.0),
+                                dep_detail.get("expired_pln", 0.0),
+                                dep_detail.get("months_used"),
+                                monthly_rcem_source,
+                            )
+                        # Only months with real export matter; ``missing_rcem``
+                        # is reported by the pure ledger and respects that.
+                        missing_export_rcem = list(
+                            dep_detail.get("missing_rcem") or []
+                        )
+                        if missing_export_rcem:
+                            deposit_warnings.append(
+                                "Brak historycznych cen RCEm (PSE) dla miesięcy: "
+                                f"{', '.join(missing_export_rcem)} — użyto "
+                                "bieżącej/ostatniej znanej ceny jako przybliżenia "
+                                "salda depozytu."
+                            )
+                        if deposit_open is not None:
+                            opening_source = (
+                                OPENING_SOURCE_API
+                                if source == SOURCE_ENERGA_API
+                                else OPENING_SOURCE_RECORDER
+                            )
+                            _write_canonical_opening(
+                                storage_inst,
+                                ppe_id,
+                                "PLN",
+                                ["total"],
+                                reference_date,
+                                [deposit_open],
+                                {
+                                    "opening_source": opening_source,
+                                    "start": base["period_start"],
+                                    "day_accurate": day_accurate,
+                                    "months_used": dep_detail.get("months_used"),
+                                },
+                            )
+                            _write_canonical_market_prices(
+                                storage_inst, monthly_rcem
+                            )
+                    else:
+                        deposit_warnings.append(
+                            "Brak miesięcznej historii przepływów przed okresem: "
+                            "nie odtworzono salda początkowego depozytu "
+                            "(net-billing)."
+                        )
+                    if opening_source is None:
+                        opening_source = (
+                            OPENING_SOURCE_API
+                            if source == SOURCE_ENERGA_API
+                            else OPENING_SOURCE_RECORDER
+                        )
         else:
             deposit_open = override_deposit
             if override_deposit is not None:
                 deposit_open_source = "override"
+                opening_source = OPENING_SOURCE_OVERRIDE
 
         invoice = build_period_invoice(
             hourly,
@@ -1654,6 +1954,7 @@ async def async_verify_period_data(
             "period_end": base["period_end"],
             "source": source,
             "cached": False,
+            "opening_source": opening_source,
             "deposit_open_source": deposit_open_source,
             "deposit_history": deposit_detail,
         }
