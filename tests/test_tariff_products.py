@@ -229,3 +229,23 @@ class TestFeeWarnings:
             {"tariff_product": "NOPE"}, "G12W", old_system=False
         )
         assert any("Nieznany produkt" in w for w in warnings)
+
+
+class TestProductLabels:
+    """v1.9.2-beta.4: clearer PL/EN labels for the product selector."""
+
+    def test_pl_labels_name_the_offer_not_the_code(self):
+        labels = _mod.product_labels("pl")
+        assert labels[PRODUCT_G11_STANDARD] == "G11 – Cennik standardowy"
+        assert labels[PRODUCT_G12W_URZEDOWA] == "G12W – Taryfa urzędowa"
+        # no "np. <lokalizacja>" leftovers
+        assert not any("np." in value for value in labels.values())
+
+    def test_en_labels(self):
+        labels = _mod.product_labels("en")
+        assert labels[PRODUCT_AUTO] == "Automatic (based on the settlement system)"
+        assert labels[PRODUCT_G11_OFERTA] == "G11 – Basic offer"
+
+    def test_language_falls_back_to_pl(self):
+        assert _mod.product_labels(None) == _mod.PRODUCT_LABELS
+        assert _mod.product_labels("de") == _mod.PRODUCT_LABELS

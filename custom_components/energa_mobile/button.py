@@ -821,6 +821,8 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         }
         coro = self._run_verification(data)
         try:
+            # TODO(v1.9.x): hasattr to relikt zgodności — nowe HA zawsze ma
+            # async_create_background_task; usunąć po deklaracji min. wersji HA.
             if hasattr(self._entry, "async_create_background_task"):
                 self._entry.async_create_background_task(
                     self.hass, coro, name=f"energa_verify_period_{self._meter_id}"

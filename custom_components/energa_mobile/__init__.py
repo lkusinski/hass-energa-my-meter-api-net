@@ -448,6 +448,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # v0.3.0 / v1.1.2: blind 730-day auto-backfill in the background when the
     # entry has no statistics yet (fresh first boot). Uses background task
     # so HA startup bootstrap is never blocked.
+    # TODO(v1.9.x): hasattr to relikt zgodności — nowe HA zawsze ma
+    # async_create_background_task; usunąć fallback po deklaracji min. HA.
     if hasattr(entry, "async_create_background_task"):
         entry.async_create_background_task(
             hass, _maybe_auto_backfill(hass, api, entry), name="energa_auto_backfill"

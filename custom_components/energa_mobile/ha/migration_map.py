@@ -5,6 +5,11 @@ Invariants:
 - Maps legacy meter-serial based IDs (sensor.energa_{serial}_...) to stable PPE-based IDs.
 - Meter replacement continuity: ensures replacing physical meter keeps continuous cumulative sums
   for the PPE without step jumps, negative drops, or loss of history in Energy Dashboard.
+
+NOTE (audyt P2.3): `MigrationMap` nie jest instancjonowany w produkcji (usunięto
+go z `hass.data` w v1.9.2-beta.2) i nie ma konsumenta poza testami. Świadomie
+zostaje oznaczony jako test-only scaffold do decyzji o usunięciu (razem z
+`projections/statistics.py`) w kolejnym wydaniu. Nie wpływa na rozliczenia.
 """
 
 from __future__ import annotations

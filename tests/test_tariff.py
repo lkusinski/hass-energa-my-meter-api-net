@@ -140,26 +140,6 @@ class TestFeesFromOptions:
         fees = fees_from_options({"import_price_1": 9.99})
         assert fees == G12W_DEFAULT_FEES
 
-    def test_const_defaults_parity(self):
-        # const.py DEFAULT_TARIFF_* must mirror tariff.G12W_DEFAULT_FEES
-        from custom_components.energa_mobile import const as _const
-
-        mapping = {
-            "energy_day": _const.DEFAULT_TARIFF_ENERGY_DAY,
-            "energy_night": _const.DEFAULT_TARIFF_ENERGY_NIGHT,
-            "excise_mwh": _const.DEFAULT_TARIFF_EXCISE_MWH,
-            "trade_fee": _const.DEFAULT_TARIFF_TRADE_FEE,
-            "abonament": _const.DEFAULT_TARIFF_ABONAMENT,
-            "grid_fixed": _const.DEFAULT_TARIFF_GRID_FIXED,
-            "grid_var_day": _const.DEFAULT_TARIFF_GRID_VAR_DAY,
-            "grid_var_night": _const.DEFAULT_TARIFF_GRID_VAR_NIGHT,
-            "quality": _const.DEFAULT_TARIFF_QUALITY,
-            "oze": _const.DEFAULT_TARIFF_OZE,
-            "cogen": _const.DEFAULT_TARIFF_COGEN,
-            "capacity": _const.DEFAULT_TARIFF_CAPACITY,
-        }
-        assert mapping == G12W_DEFAULT_FEES
-
 
 class TestSplitCover:
     def test_proportional_split(self):

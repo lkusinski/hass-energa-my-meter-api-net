@@ -129,7 +129,10 @@ _TARIFF_KEY_MAP = {
 
 
 def _tariff_fee_schema(
-    options: dict, tariff: str | None = None, old_system: bool | None = None
+    options: dict,
+    tariff: str | None = None,
+    old_system: bool | None = None,
+    language: str = "pl",
 ) -> dict:
     """Tariff product preset + fee overrides for the full-bill forecast.
 
@@ -138,20 +141,21 @@ def _tariff_fee_schema(
     G11 now has "Standard" and "Oferta Podstawowa" too). Defaults follow an
     explicitly selected product, else the product inferred from the settlement
     system (G12W only), else the per-tariff table. An unchanged field keeps the
-    default via fees_from_options.
+    default via fees_from_options. ``language`` selects PL/EN option labels.
     """
     from .tariff import (
         FEE_TABLES,
         PRODUCT_AUTO,
         PRODUCT_FAMILIES,
         PRODUCT_FEE_TABLES,
-        PRODUCT_LABELS,
         default_product_for,
         normalized_product,
         product_for_system,
+        product_labels,
         tariff_family,
     )
 
+    labels = product_labels(language)
     opts = options or {}
     family = tariff_family(tariff)
     explicit = normalized_product(opts.get(CONF_TARIFF_PRODUCT))
@@ -172,9 +176,9 @@ def _tariff_fee_schema(
         return opts.get(opt_key, table[fee])
 
     choices = {
-        PRODUCT_AUTO: PRODUCT_LABELS[PRODUCT_AUTO],
+        PRODUCT_AUTO: labels[PRODUCT_AUTO],
         **{
-            key: PRODUCT_LABELS[key]
+            key: labels[key]
             for key, fam in PRODUCT_FAMILIES.items()
             if fam == family
         },
@@ -214,17 +218,19 @@ def _apply_tariff_product(user_input: dict, prior_options: dict | None) -> None:
             user_input.pop(key, None)
 
 
-def _onboarding_product_field() -> dict:
+def _onboarding_product_field(language: str = "pl") -> dict:
     """Product preset selector for the onboarding wizard (all families).
 
     ``auto`` keeps the settlement-system inference (G12W) / named G11 default;
     picking a concrete preset materialises its invoice-verified rates.
+    ``language`` selects PL/EN option labels.
     """
-    from .tariff import PRODUCT_AUTO, PRODUCT_FAMILIES, PRODUCT_LABELS
+    from .tariff import PRODUCT_AUTO, PRODUCT_FAMILIES, product_labels
 
-    choices = {PRODUCT_AUTO: PRODUCT_LABELS[PRODUCT_AUTO]}
+    labels = product_labels(language)
+    choices = {PRODUCT_AUTO: labels[PRODUCT_AUTO]}
     for key in PRODUCT_FAMILIES:
-        choices[key] = PRODUCT_LABELS[key]
+        choices[key] = labels[key]
     return {
         vol.Optional(CONF_TARIFF_PRODUCT, default=PRODUCT_AUTO): vol.In(choices)
     }
@@ -465,7 +471,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_CREATE_SETTLEMENT_DASHBOARD,
                 default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
             ): bool,
-            **_onboarding_product_field(),
+            **_onboarding_product_field(_wizard_language(self.hass)),
         }
         # A two-way meter with no PV source yet in the Energy panel: nudge the
         # user to add one. Detection runs once per form render and never blocks
@@ -518,7 +524,7 @@ class EnergaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_CREATE_SETTLEMENT_DASHBOARD,
                         default=DEFAULT_CREATE_SETTLEMENT_DASHBOARD,
                     ): bool,
-                    **_onboarding_product_field(),
+                    **_onboarding_product_field(_wizard_language(self.hass)),
                 }
             ),
         )
@@ -985,6 +991,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                             self._config_entry.options,
                             self._dominant_tariff(),
                             self._old_system_hint(),
+                            _wizard_language(self.hass),
                         ),
                     }
                 ),
@@ -1050,6 +1057,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                             self._config_entry.options,
                             self._dominant_tariff(),
                             self._old_system_hint(),
+                            _wizard_language(self.hass),
                         ),
                     }
                 ),

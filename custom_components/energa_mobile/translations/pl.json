@@ -19,10 +19,12 @@
           "system_choice_nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
           "system_choice_stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
           "system_choice_brak": "Tylko konsument — brak instalacji PV",
-          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)"
+          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)",
+          "tariff_product": "Oferta / cennik Energa (produkt)"
         },
         "data_description": {
-          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie.",
+          "tariff_product": "Nazwa Twojej oferty z faktury (pole »Produkt: …«), np. »Taryfa urzędowa«, »Oferta Podstawowa«, »Cennik standardowy«. Ten sam G11/G12W może mieć różne stawki — wybór zapewnia zgodność z fakturą."
         }
       },
       "system_fallback": {
@@ -34,10 +36,12 @@
           "system_choice_nowe": "Nowe zasady (net-billing, rozliczenie miesięczne w PLN)",
           "system_choice_stare": "Stare zasady (net-metering, magazyn kWh 0.8, instalacje do 03.2022)",
           "system_choice_brak": "Tylko konsument — brak instalacji PV",
-          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)"
+          "system_choice_brak_detected": "Tylko konsument — brak instalacji PV (wykryto)",
+          "tariff_product": "Oferta / cennik Energa (produkt)"
         },
         "data_description": {
-          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie."
+          "create_settlement_dashboard": "Zalecane: panel zbiera w jednym miejscu prognozę i bieżący rachunek, bank/depozyt, taryfy, autokonsumpcję oraz kalkulator weryfikacji rachunku (2 daty + «Przelicz okres rozliczeniowy»). Bez niego te dane nadal są dostępne jako encje, ale trzeba je ręcznie układać na pulpicie.",
+          "tariff_product": "Nazwa Twojej oferty z faktury (pole »Produkt: …«), np. »Taryfa urzędowa«, »Oferta Podstawowa«, »Cennik standardowy«. Ten sam G11/G12W może mieć różne stawki — wybór zapewnia zgodność z fakturą."
         }
       },
       "net_metering_survey": {
@@ -152,7 +156,10 @@
           "tariff_oze": "Taryfa: opłata OZE [PLN/kWh]",
           "tariff_cogen": "Taryfa: opłata kogeneracyjna [PLN/kWh]",
           "tariff_capacity": "Taryfa: opłata mocowa [PLN/mies.] (puste = auto próg URE 2026)",
-          "tariff_product": "Taryfa: produkt sprzedawcy (tabela stawek) — puste = automatycznie"
+          "tariff_product": "Oferta / cennik Energa (produkt)"
+        },
+        "data_description": {
+          "tariff_product": "Nazwa Twojej oferty z faktury (pole »Produkt: …«), np. »Taryfa urzędowa«, »Oferta Podstawowa«, »Cennik standardowy«. Ten sam G11/G12W może mieć różne stawki — wybór zapewnia zgodność z fakturą."
         }
       },
       "history": {

@@ -177,6 +177,8 @@ class EnergaPeriodCompletenessSensor(CoordinatorEntity, SensorEntity):
     def _create_refresh_task(self, coro) -> None:
         """Create the background task on the event loop and keep a reference."""
         try:
+            # TODO(v1.9.x): hasattr to relikt zgodności — nowe HA zawsze ma
+            # async_create_background_task; usunąć po deklaracji min. wersji HA.
             if hasattr(self._entry, "async_create_background_task"):
                 self._refresh_task = self._entry.async_create_background_task(
                     self.hass, coro, name=f"energa_completeness_{self._meter_id}"

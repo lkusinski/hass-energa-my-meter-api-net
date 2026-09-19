@@ -7,6 +7,10 @@ Reference: Energa HA Skorygowana Architektura Docelowa (04.09.2026), Rozdzial 6,
 - Allocation: consumed strictly by eligible energy purchase lines (never distribution).
 - Cash-out: max 20% (RCEm) or 30% (RCE) refund of unexhausted deposit upon expiry.
 - Negative price floor: configurable / temporal (e.g. max(price, 0.0) where mandated).
+
+NOTE (audyt P2.4): to równoległy, testowy silnik FIFO; produkcja rozlicza
+depozyt w `core/verification.py`. Świadomie NIE jest scalany w tym wydaniu
+(osobny, zweryfikowany refaktor). Używany wyłącznie przez testy.
 """
 
 from __future__ import annotations

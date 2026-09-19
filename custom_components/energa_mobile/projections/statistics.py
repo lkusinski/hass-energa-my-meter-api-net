@@ -6,6 +6,13 @@ Key invariants:
 - Cumulative sums are strictly monotonically increasing.
 - Derived deterministically from canonical readings (never directly editing Recorder tables).
 - Anchoring support: preserves running sum across partial re-imports.
+
+NOTE (audyt P2.3): ten moduł nie jest podpięty do żadnej ścieżki produkcyjnej —
+jest używany wyłącznie przez testy i przez `ha/migration_map.MigrationMap`
+(również test-only). Jego usunięcie pociąga za sobą usunięcie
+`MigrationMap` i kilku plików testów, więc świadomie zostaje oznaczony
+jako scaffolting canonical do decyzji w kolejnym wydaniu. Nie zmienia
+wyników rozliczeń.
 """
 
 from __future__ import annotations

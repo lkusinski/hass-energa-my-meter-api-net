@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.9.2-beta.4 (2026-09-19) — jasna etykieta „produktu" + domknięcie P2 (bez zmian rozliczeń)
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.3`. Bez zmian API,
+schematu danych i **wyników rozliczeń** — doprecyzowanie UI oraz dalsze
+porządki P2 z audytu (`AUDYT_1.9.1.md`).
+
+- **Czytelna etykieta „produktu" (PL/EN).** Selektor `tariff_product` w
+  onboardingu i Options ma teraz nagłówek **„Oferta / cennik Energa
+  (produkt)"** i podpowiedź, że to nazwa oferty z faktury (pole »Produkt: …«),
+  np. »Taryfa urzędowa«, »Oferta Podstawowa«, »Cennik standardowy«; ten sam
+  G11/G12W może mieć różne stawki. Etykiety opcji: `G11 – Cennik standardowy`,
+  `G11 – Oferta Podstawowa`, `G12W – Taryfa urzędowa`, `G12W – Oferta
+  Podstawowa` (EN odpowiednio). **Klucze techniczne presetów bez zmian**
+  (`auto`, `G11_STANDARD`, `G11_OFERTA`, `G12W_URZEDOWA`, `G12W_OFERTA`).
+  Nowy `tariff.product_labels(language)`; onboarding/Options wybierają PL/EN
+  przez `_wizard_language(hass)`.
+- **P2 — usunięto martwy kod:** `settlement.latest_official_rcem` (używane
+  tylko przez testy; `parse_official_rcem_table` nadal w produkcji) oraz stałe
+  `const.DEFAULT_TARIFF_*` (duplikat tabel `tariff.*_FEES`; źródłem prawdy są
+  `tariff.G11_DEFAULT_FEES`/`G12W_DEFAULT_FEES` i presety). Usunięto
+  odpowiadające im testy.
+- **P2 — oznaczone jako test-only (bez usuwania):** `projections/statistics.py`
+  i `ha/migration_map.MigrationMap` (scaffolding canonical bez konsumenta w
+  produkcji) — jawna nota w docstringu, do decyzji o usunięciu w kolejnym
+  wydaniu.
+- **P2 — równoległe silniki FIFO** (`core/settlement/fifo_net_metering.py`,
+  `fifo_net_billing.py`): świadomie **NIE scalone** — produkcja używa
+  `settlement.fifo_kwh_bank`/`fifo_dual_zone_kwh_bank` i `core/verification.py`;
+  scalanie to osobny, zweryfikowany refaktor (ryzyko rozjazdu vs zmiana
+  wyników). Nota w docstringach.
+- **P2 — `hasattr`-owe relikty** kompatybilności (`async_create_background_task`
+  w `__init__.py`, `button.py`, `sensors/completeness.py`) oznaczone
+  `TODO(v1.9.x)` — usunięcie po deklaracji minimalnej wersji HA (wymaga
+  przeglądu mocków w testach).
+- **i18n/`services.yaml`:** zweryfikowano kompletność 5 usług i encji
+  (`fetch_history`, `generate_dashboard`, `reconcile_invoice`, `verify_period`,
+  `clear_period`) — brakujące pola już uzupełnione w `v1.9.2-beta.2`; dodano
+  opisy `tariff_product` w krokach `system`/`system_fallback`/`prices`.
+- **Wersje:** komentarze produktu zaktualizowane do `v1.9.2-beta.4`;
+  historyczne znaczniki pochodzenia funkcji pozostawione celowo.
+- **Testy:** 727 passed, 1 skipped; `ruff` czysty (dodano
+  `TestProductLabels`, `TestLocalizedProductLabels`). Regresje faktur bez
+  zmian: Agrestowa 08.2026 = 615,53; Wiśniowa 07–08.2026 = 158,72;
+  Bursztynowa 08.2026 = 84,44.
+
 ## v1.9.2-beta.3 (2026-09-19) — nazwane presety produktów + głośne ostrzeżenia o stawkach
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.2`. Dodaje wybór

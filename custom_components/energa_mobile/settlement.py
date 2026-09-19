@@ -272,25 +272,6 @@ def parse_official_rcem_table(html: str) -> list[tuple[int, int, float]]:
     return out
 
 
-def latest_official_rcem(
-    html: str, today: date | None = None
-) -> tuple[int, int, float] | None:
-    """Latest RCEm published on/before today from PSE page HTML."""
-    today = today or date.today()
-    rows = parse_official_rcem_table(html)
-    # Publication date of RCEm(M) is ~11th of M+1; keep rows published already
-    valid = []
-    for year, month in [(r[0], r[1]) for r in rows]:
-        pub_y, pub_m = (year, month + 1) if month < 12 else (year + 1, 1)
-        pub_days = calendar.monthrange(pub_y, pub_m)[1]
-        pub_day = min(PSE_RCEM_PUBLICATION_DAY, pub_days)
-        if date(pub_y, pub_m, pub_day) <= today:
-            valid.append(next(r for r in rows if r[0] == year and r[1] == month))
-    if not valid:
-        return None
-    return max(valid)
-
-
 def rolling_kwh_bank(
     export_365d: float, import_365d: float, coefficient: float
 ) -> float:

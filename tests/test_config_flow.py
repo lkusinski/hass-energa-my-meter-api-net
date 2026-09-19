@@ -563,3 +563,45 @@ class TestSystemStepSolarDetection:
         marker, validator = self._field(res, "system")
         assert marker.default() == "brak"
         assert validator.container["brak"].endswith("(wykryto)")
+
+
+class TestLocalizedProductLabels:
+    """v1.9.2-beta.4: product selector labels follow the HA language."""
+
+    def test_onboarding_field_defaults_to_polish(self):
+        from custom_components.energa_mobile.config_flow import (
+            _onboarding_product_field,
+        )
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+
+        schema = _onboarding_product_field()
+        validator = next(
+            v for k, v in schema.items()
+            if getattr(k, "schema", None) == CONF_TARIFF_PRODUCT
+        )
+        assert "G11 – Cennik standardowy" in validator.container.values()
+
+    def test_onboarding_field_english(self):
+        from custom_components.energa_mobile.config_flow import (
+            _onboarding_product_field,
+        )
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+
+        schema = _onboarding_product_field("en")
+        validator = next(
+            v for k, v in schema.items()
+            if getattr(k, "schema", None) == CONF_TARIFF_PRODUCT
+        )
+        assert "G12W – Basic offer" in validator.container.values()
+        assert "G12W – Oferta Podstawowa" not in validator.container.values()
+
+    def test_options_schema_english_labels(self):
+        from custom_components.energa_mobile.config_flow import _tariff_fee_schema
+        from custom_components.energa_mobile.const import CONF_TARIFF_PRODUCT
+
+        schema = _tariff_fee_schema({}, "G12W", None, "en")
+        validator = next(
+            v for k, v in schema.items()
+            if getattr(k, "schema", None) == CONF_TARIFF_PRODUCT
+        )
+        assert "G12W – Regulated tariff" in validator.container.values()

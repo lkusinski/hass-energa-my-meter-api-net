@@ -15,7 +15,6 @@ from custom_components.energa_mobile.settlement import (
     fifo_kwh_bank,
     flow_history_series,
     is_export_prosumer,
-    latest_official_rcem,
     month_to_date_forecast,
     next_settlement_date,
     orphan_bank_uids,
@@ -90,12 +89,6 @@ class TestOfficialRcemTable:
         assert (2026, 6, 0.2732) in rows
         assert (2026, 7, 0.26288) in rows
         assert (2026, 8, 0.3011) in rows
-
-    def test_latest_respects_publication(self):
-        # Sep 3: August RCEm (publ. Sep 11) not yet out -> July
-        assert latest_official_rcem(SAMPLE_HTML, date(2026, 9, 3)) == (2026, 7, 0.26288)
-        # Sep 15: August available
-        assert latest_official_rcem(SAMPLE_HTML, date(2026, 9, 15))[2] == 0.3011
 
 
 class TestRollingBank:

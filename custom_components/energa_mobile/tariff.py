@@ -351,14 +351,34 @@ PRODUCT_FAMILIES = {
     PRODUCT_G12W_OFERTA: "G12W",
 }
 
-# Human labels for the onboarding / Options product selector (PL, verbatim).
+# Human labels for the onboarding / Options product selector. The visible text
+# answers "which offer from my invoice is this?", not the tariff code: the same
+# G11/G12W can be billed with different seller rates.
+# v1.9.2-beta.4: wording clarified (oferta/cennik from the invoice) — technical
+# preset keys (auto/G11_STANDARD/G11_OFERTA/G12W_URZEDOWA/G12W_OFERTA) unchanged.
 PRODUCT_LABELS = {
-    PRODUCT_AUTO: "Automatycznie (wnioskowany z systemu rozliczeń)",
-    PRODUCT_G11_STANDARD: "G11 – Standard (taryfa urzędowa, np. Warzywna)",
-    PRODUCT_G11_OFERTA: "G11 – Oferta Podstawowa (np. Bursztynowa)",
-    PRODUCT_G12W_URZEDOWA: "G12W – Taryfa urzędowa (np. Agrestowa)",
-    PRODUCT_G12W_OFERTA: "G12W – Oferta Podstawowa (np. Wiśniowa)",
+    PRODUCT_AUTO: "Automatycznie (na podstawie systemu rozliczeń)",
+    PRODUCT_G11_STANDARD: "G11 – Cennik standardowy",
+    PRODUCT_G11_OFERTA: "G11 – Oferta Podstawowa",
+    PRODUCT_G12W_URZEDOWA: "G12W – Taryfa urzędowa",
+    PRODUCT_G12W_OFERTA: "G12W – Oferta Podstawowa",
 }
+
+PRODUCT_LABELS_EN = {
+    PRODUCT_AUTO: "Automatic (based on the settlement system)",
+    PRODUCT_G11_STANDARD: "G11 – Standard price list",
+    PRODUCT_G11_OFERTA: "G11 – Basic offer",
+    PRODUCT_G12W_URZEDOWA: "G12W – Regulated tariff",
+    PRODUCT_G12W_OFERTA: "G12W – Basic offer",
+}
+
+
+def product_labels(language: str | None = None) -> dict[str, str]:
+    """Product selector labels for ``language`` (Polish default, English on ``en``)."""
+    if isinstance(language, str) and language.lower().startswith("en"):
+        return PRODUCT_LABELS_EN
+    return PRODUCT_LABELS
+
 
 # Loud, honest provenance warnings (PL) surfaced in the service result and in
 # the ``sensor.*_weryfikacja_rachunku`` attributes.

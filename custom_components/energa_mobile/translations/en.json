@@ -19,10 +19,12 @@
           "system_choice_nowe": "New rules (net-billing, monthly settlement in PLN)",
           "system_choice_stare": "Old rules (net-metering, 0.8 kWh storage, installations before 03.2022)",
           "system_choice_brak": "Consumer only — no PV installation",
-          "system_choice_brak_detected": "Consumer only — no PV (detected)"
+          "system_choice_brak_detected": "Consumer only — no PV (detected)",
+          "tariff_product": "Energa offer / price list (product)"
         },
         "data_description": {
-          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually.",
+          "tariff_product": "The name of your offer from the invoice (the »Product: …« field), e.g. »Regulated tariff«, »Basic offer«, »Standard price list«. The same G11/G12W can have different rates — this choice keeps the bill matching your invoice."
         }
       },
       "system_fallback": {
@@ -34,10 +36,12 @@
           "system_choice_nowe": "New rules (net-billing, monthly settlement in PLN)",
           "system_choice_stare": "Old rules (net-metering, 0.8 kWh storage, installations before 03.2022)",
           "system_choice_brak": "Consumer only — no PV installation",
-          "system_choice_brak_detected": "Consumer only — no PV (detected)"
+          "system_choice_brak_detected": "Consumer only — no PV (detected)",
+          "tariff_product": "Energa offer / price list (product)"
         },
         "data_description": {
-          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually."
+          "create_settlement_dashboard": "Recommended: the dashboard gathers the forecast and current bill, the bank/deposit, tariffs, self-consumption and the invoice verification calculator (2 dates + «Recalculate billing period») in one place. Without it this data is still available as entities, but you have to arrange it on a dashboard manually.",
+          "tariff_product": "The name of your offer from the invoice (the »Product: …« field), e.g. »Regulated tariff«, »Basic offer«, »Standard price list«. The same G11/G12W can have different rates — this choice keeps the bill matching your invoice."
         }
       },
       "net_metering_survey": {
@@ -152,7 +156,10 @@
           "tariff_oze": "Tariff: OZE fee [PLN/kWh]",
           "tariff_cogen": "Tariff: cogeneration fee [PLN/kWh]",
           "tariff_capacity": "Tariff: capacity fee [PLN/month] (empty = auto URE 2026 bracket)",
-          "tariff_product": "Tariff: seller product (rate table) — empty = automatic"
+          "tariff_product": "Energa offer / price list (product)"
+        },
+        "data_description": {
+          "tariff_product": "The name of your offer from the invoice (the »Product: …« field), e.g. »Regulated tariff«, »Basic offer«, »Standard price list«. The same G11/G12W can have different rates — this choice keeps the bill matching your invoice."
         }
       },
       "history": {

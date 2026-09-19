@@ -5,6 +5,12 @@ Reference: Energa HA Skorygowana Architektura Docelowa (04.09.2026), Rozdzial 6,
 - Expiry: 12 rolling months from the end of introduction month M (i.e. end of M+12).
 - Allocation order: oldest unexpired lot first (FIFO).
 - Full provenance and allocation tracing.
+
+NOTE (audyt P2.4): to równoległy, testowy silnik FIFO (produkcja liczy FIFO w
+`settlement.fifo_kwh_bank`/`fifo_dual_zone_kwh_bank` i `core/verification.py`).
+Świadomie NIE jest scalany w tym wydaniu — dwa niezależne silniki tej samej
+reguły to ryzyko rozjazdu, ale scalanie wymaga osobnego, zweryfikowanego
+refaktoru bez zmiany wyników. Używany wyłącznie przez testy.
 """
 
 from __future__ import annotations
