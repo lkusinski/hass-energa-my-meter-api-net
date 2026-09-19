@@ -1,15 +1,44 @@
 # Changelog
 
-## v1.9.3 (2026-09-18) — kanoniczna baza jako źródło salda + start w środku miesiąca
+## v1.9.1 (2026-09-19) — auto-saldo depozytu, RCEm/okres, stawki produktu, kanoniczna baza
 
+Konsolidacja linii 1.9.1 (dawniej `v1.9.1`–`v1.9.3`). Obejmuje: **auto-saldo
+początkowe depozytu (FIFO 12 m-cy + RCEm/mies.)**, **RCEm per okres z tabeli
+PSE**, **stawki produktu (`G12W_OFERTA`/`G12W_URZEDOWA`)**, **kanoniczną bazę
+jako źródło salda + `opening_source`**, **start okresu w środku miesiąca** oraz
+usługę **`clear_period`**.
+
+- **Automatyczne saldo początkowe depozytu (FIFO 12 m-cy + RCEm/mies.).**
+  `verify_period` sam liczy saldo depozytu na początek okresu z całej historii
+  (FIFO 12 m-cy, RCEm per miesiąc), zamiast wymagać ręcznego `deposit_open_pln`;
+  nadpisania ręczne nadal działają. Nowe: `opening_deposit_from_monthly_flows`,
+  `async_fetch_official_rcem_map` (cała tabela PSE raz/dzień, cache),
+  `deposit_open_source`/`deposit_history`/`warnings`; magistrala recorder→API
+  YEAR. Magazyn net-meteringu: FIFO kWh także z cache koordynatora; 0 kWh przy
+  historii z eksportem nie degraduje już do `coverage_unknown`.
+- **RCEm z miesiąca oddania energii (PSE), nie z opcji.** `verify_period`
+  rozwiązuje RCEm dla każdego miesiąca okresu z całej tabeli PSE
+  (`async_fetch_official_rcem_map`); dla okresu wielomiesięcznego depozyt jest
+  ważony per miesiąc. `bank_rce_price`/`_rce_cache` to wyłącznie fallback
+  (z ostrzeżeniem), a jawne `rcem_pln`/`rcem` nadal nadpisuje wszystko. Wynik
+  zwraca `rcem` (użyty) i `rcem_source` (`pse_table`/`option`/`override`).
+- **Stawki produktu.** Dwie wariantowe tabele: `G12W_OFERTA` („Oferta
+  Podstawowa”, net-metering — energia 0,7125/0,4622, handlowa 16,18,
+  abonament 0,70) i `G12W_URZEDOWA` („taryfa urzędowa”, net-billing — jak
+  dotychczasowe `G12W_DEFAULT_FEES`). API nie podaje nazwy produktu, więc
+  produkt jest inferowany z systemu rozliczeń, gdy stawek nie ma w opcjach,
+  oraz jawnie wybierany w Options (`tariff_product`). `fee_source` przyjmuje
+  `options`/`product`/`partial`/`defaults`; przy `partial`/`defaults` jest
+  ostrzeżenie. Options: nowy selektor produktu w sekcji cen + zapis wszystkich
+  `tariff_*`.
 - **Kanoniczna baza SQLite jako źródło salda w `verify_period` (LUKA 1).**
-  Salda otwarcia (magazyn kWh i depozyt PLN) są teraz zapisywane i odczytywane
+  Salda otwarcia (magazyn kWh i depozyt PLN) są zapisywane i odczytywane
   z kanonicznego magazynu (`.storage/energa_canonical.db`, tabele
   `settlement_lot`/`market_price`). Precedencja:
   `override` (wejście) → `canonical` (snapshot w bazie) → `recorder`/`api`
   (przeliczenie z historii). Gdy bazy nie ma lotów na dany moment, wynik jest
   liczony z recordera/API i **zapisywany** (snapshot lotów per strefa +
-  historyczne `RCEM` do `market_price`), więc kolejne przeliczenie tego samego
+  historyczne `RCEm` do `market_price`), więc kolejne przeliczenie tego samego
   okresu nie powtarza kosztownej rekonstrukcji. Wynik zwraca `opening_source`
   (`override`/`canonical`/`recorder`/`api`) i ostrzeżenia. Snapshot ma
   deterministyczny `lot_id` (`open_<ppe>_<unit>_<zone>_<data>`) i
@@ -28,9 +57,14 @@
   a nie na 1. dnia miesiąca. Gdy dostępny jest wyłącznie miesięczny cache API
   (bez podziału na dni), miesiąc startowy jest pomijany, a wynik dostaje
   czytelne ostrzeżenie (saldo na 1. dnia). Okresy pełnomiesięczne bez zmian.
+- **Nowa usługa `clear_period`** (czyści zapisane daty okresu).
 - **Testy**: 684 passed, 1 skipped; `ruff` czysty.
 
-## v1.9.2 (2026-09-18) — RCEm per miesiąc okresu + stawki produktu
+**Weryfikacja (2026-09-19):** 5/5 labów + prod. Wiśniowa 129,04/29,68/158,72;
+Agrestowa 614,87; po `ha core stop`/`start` drugi `verify_period` daje
+`opening_source=canonical` przy identycznych liczbach.
+
+## v1.9.1-beta.2 (2026-09-18) — RCEm per miesiąc okresu + stawki produktu
 
 - **RCEm z miesiąca oddania energii (PSE), nie z opcji.** `verify_period`
   rozwiązuje RCEm dla każdego miesiąca okresu z całej tabeli PSE
@@ -53,7 +87,7 @@
   typowych produktów (Wiśniowa vs Agrestowa) + zapis wszystkich `tariff_*`.
 - **Testy**: 671 passed, 1 skipped; `ruff` czysty.
 
-## v1.9.1 (2026-09-18) — automatyczne saldo początkowe depozytu (FIFO 12 m-cy + RCEm)
+## v1.9.1-beta.1 (2026-09-18) — automatyczne saldo początkowe depozytu (FIFO 12 m-cy + RCEm)
 
 - **`verify_period` sam liczy saldo depozytu na początek okresu** z całej historii (FIFO 12 m-cy, RCEm per miesiąc), zamiast wymagać ręcznego `deposit_open_pln`; nadpisania ręczne nadal działają.
 - Nowe: `opening_deposit_from_monthly_flows`, `async_fetch_official_rcem_map` (cała tabela PSE raz/dzień, cache), `deposit_open_source`/`deposit_history`/`warnings`; magistrala recorder→API YEAR.
