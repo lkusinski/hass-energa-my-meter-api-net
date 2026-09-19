@@ -20,9 +20,13 @@ wyłącznie w `config_flow.py` (zapisywanie wyboru) oraz regresje testowe.
   (bez zapisywania domyślnych stawek jako ręcznych). Ścieżka `stare` →
   `net_metering_survey` zachowuje scalone opcje.
 - **P2 — pusty `inverter_energy_entity` nie blokuje Options.** Pole w kroku
-  „Ceny" miało `default=""`, co jest odrzucane przez `EntitySelector` i
-  uniemożliwiało zapis formularza bez wybranej encji falownika. Teraz
-  `default=current_inverter or None` — zapis przechodzi.
+  „Ceny" miało `default=""`, a `EntitySelector` odrzuca **zarówno `""`, jak i
+  `None`** (`Entity None is neither a valid entity ID nor a valid UUID`) —
+  formularza nie dało się zapisać bez wybranej encji falownika. Nowy helper
+  `_inverter_entity_field` dokłada pole **bez defaultu**, gdy nic nie
+  skonfigurowano (pole nieobecne w payloadzie → nie jest walidowane), a z
+  defaultem tylko gdy encja już istnieje. Zweryfikowane na labie 126:
+  Options → Ceny zapisuje produkt bez encji falownika.
 - **Logika rozliczeń bez zmian** (`tariff.py`, `settlement.py`,
   `core/verification.py` nietknięte).
 - **Testy regresyjne (nowe):** `TestOnboardingProductPersistence` (end-to-end
