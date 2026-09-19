@@ -34,8 +34,9 @@ wyłącznie w `config_flow.py` (zapisywanie wyboru) oraz regresje testowe.
   `tariff_*`; `auto` → `inferred` bez wpisanych stawek; `system_fallback` też),
   `TestOnboardingBillingRegression` (Bursztynowa 08.2026 **84,44**, Wiśniowa
   **158,72**, Agrestowa **615,53** — z opcji uzyskanych przez onboarding, nie
-  ręcznie) oraz `TestOptionsInverterEntity` (pusty default = `None`, zapis
-  formularza bez encji falownika przechodzi). Razem: **738 passed, 1 skipped**;
+  ręcznie) oraz `TestOptionsInverterEntity` (pole bez defaultu przy pustej encji,
+  default zachowany przy skonfigurowanej; zapis formularza bez encji falownika
+  przechodzi). Razem: **738 passed, 1 skipped**;
   `ruff` czysty.
 - **Weryfikacja na labach (Faza B po fixie):** fresh onboarding na 123–127 z
   wyborem właściwego produktu → `product_source=explicit`, `fee_source=product`
