@@ -247,6 +247,30 @@ def _merge_onboarding_choice(user_input: dict, pending: dict | None) -> dict:
     return options
 
 
+def _inverter_entity_field(current: str | None):
+    """Optional inverter-entity selector that never blocks saving (v1.9.2-beta.5).
+
+    The entity selector rejects an empty value: a ``default=""`` fails front-end
+    validation and a ``default=None`` is echoed back as ``None`` and rejected by
+    the selector (``Entity None is neither a valid entity ID nor a valid UUID``).
+    The field is therefore added *without* any default when nothing is
+    configured — an untouched optional field is simply absent from the payload —
+    and seeded with the stored entity when one exists.
+    """
+    entity_selector = (
+        selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="energy")
+        )
+        if hasattr(selector, "EntitySelector")
+        else str
+    )
+    if current:
+        return {
+            vol.Optional(CONF_INVERTER_ENERGY_ENTITY, default=current): entity_selector
+        }
+    return {vol.Optional(CONF_INVERTER_ENERGY_ENTITY): entity_selector}
+
+
 def _onboarding_product_field(language: str = "pl") -> dict:
     """Product preset selector for the onboarding wizard (all families).
 
@@ -988,16 +1012,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
-                        # v1.9.2-beta.5: an empty string default is rejected by
-                        # the entity selector and blocked saving the form when
-                        # no inverter entity is configured (P2). ``None`` keeps
-                        # the field optional and savable.
-                        vol.Optional(
-                            CONF_INVERTER_ENERGY_ENTITY,
-                            default=current_inverter or None,
-                        ): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="sensor", device_class="energy")
-                        ) if hasattr(selector, "EntitySelector") else str,
+                        **_inverter_entity_field(current_inverter),
                         vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
                         ): bool,
@@ -1059,16 +1074,7 @@ class EnergaOptionsFlow(config_entries.OptionsFlow):
                         vol.Optional(
                             CONF_BANK_INITIAL_PLN, default=current_initial_pln
                         ): vol.Coerce(float),
-                        # v1.9.2-beta.5: an empty string default is rejected by
-                        # the entity selector and blocked saving the form when
-                        # no inverter entity is configured (P2). ``None`` keeps
-                        # the field optional and savable.
-                        vol.Optional(
-                            CONF_INVERTER_ENERGY_ENTITY,
-                            default=current_inverter or None,
-                        ): selector.EntitySelector(
-                            selector.EntitySelectorConfig(domain="sensor", device_class="energy")
-                        ) if hasattr(selector, "EntitySelector") else str,
+                        **_inverter_entity_field(current_inverter),
                         vol.Optional(
                             CONF_RCE_AUTO_FETCH, default=current_rce_auto
                         ): bool,

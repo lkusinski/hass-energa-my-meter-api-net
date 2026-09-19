@@ -7,6 +7,7 @@ without instantiating the full HA config flow machinery.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous
 
 # conftest.py sets up HA module mocks
 from homeassistant.data_entry_flow import AbortFlow
@@ -896,11 +897,13 @@ class TestOptionsInverterEntity:
         raise AssertionError("inverter field missing from schema")
 
     @pytest.mark.asyncio
-    async def test_prices_form_empty_inverter_default_is_none(self):
+    async def test_prices_form_empty_inverter_has_no_default(self):
         flow = self._flow()
         res = await flow.async_step_prices(None)
         marker, _validator = self._inverter_field(res["data_schema"])
-        assert marker.default() is None
+        # v1.9.2-beta.5: no default at all, so the untouched optional field is
+        # absent from the payload and never blocks the entity selector.
+        assert marker.default is voluptuous.UNDEFINED
 
     @pytest.mark.asyncio
     async def test_prices_form_keeps_configured_inverter_default(self):
@@ -908,6 +911,7 @@ class TestOptionsInverterEntity:
         flow._config_entry.options = {"inverter_energy_entity": "sensor.solar_kwh"}
         res = await flow.async_step_prices(None)
         marker, _validator = self._inverter_field(res["data_schema"])
+        assert marker.default is not None
         assert marker.default() == "sensor.solar_kwh"
 
     @pytest.mark.asyncio
