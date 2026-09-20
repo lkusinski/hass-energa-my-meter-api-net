@@ -994,6 +994,7 @@ class TestVerificationSensor:
                 "kwh": {"saldo_plus_1": 398.0},
                 "rcem": 0.29453,
                 "source": SOURCE_ENERGA_API,
+                "kwh_source": "canonical",
                 "cached": False,
                 "period_start": "2026-08-01T00:00:00+02:00",
                 "period_end": "2026-09-01T00:00:00+02:00",
@@ -1003,6 +1004,7 @@ class TestVerificationSensor:
         assert sensor.available is True
         attrs = sensor.extra_state_attributes
         assert attrs["source"] == SOURCE_ENERGA_API
+        assert attrs["kwh_source"] == "canonical"
         assert attrs["kwh"]["saldo_plus_1"] == 398.0
         assert attrs["netto"] == 628.55
         assert sensor._attr_state_class is None

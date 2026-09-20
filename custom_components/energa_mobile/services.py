@@ -63,6 +63,7 @@ from .core.identity.models import PPE, SettlementType
 from .core.settlement.models import SettlementLot
 from .core.verification import (
     CANONICAL_OPENING_RULE,
+    KWH_SOURCE_CANONICAL,
     OPENING_SOURCE_API,
     OPENING_SOURCE_CANONICAL,
     OPENING_SOURCE_OVERRIDE,
@@ -72,8 +73,10 @@ from .core.verification import (
     SOURCE_RECORDER,
     build_period_invoice,
     canonical_opening_lot_id,
+    canonical_series_covers_period,
     choose_period_source,
     format_period_date,
+    kwh_source_for_period_source,
     opening_bank_from_monthly_flows,
     opening_deposit_from_monthly_flows,
     openings_from_canonical_lots,
@@ -1342,6 +1345,109 @@ def _read_canonical_pln_opening(storage, ppe_id: str, reference_date: date):
     return float(values.get("total", 0.0))
 
 
+def _as_utc(value) -> datetime | None:
+    """Convert a tz-aware datetime to UTC (or ``None`` for bad input).
+
+    Naive values are assumed to already be UTC so a comparison against the
+    canonical store (which persists UTC ISO strings) is stable regardless of
+    the Home Assistant timezone.
+    """
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _canonical_hourly_registers(has_zones: bool, prosumer: bool) -> list[str]:
+    """``interval_reading`` register suffixes required for a period invoice.
+
+    Mirrors :func:`_collect_meter_hourly`: single-zone meters store the day
+    total under ``import``/``export``, two-zone meters under
+    ``import_1``/``import_2`` (and the export pair for a prosumer).
+    """
+    if has_zones:
+        registers = ["import_1", "import_2"]
+        if prosumer:
+            registers += ["export_1", "export_2"]
+    else:
+        registers = ["import"]
+        if prosumer:
+            registers.append("export")
+    return registers
+
+
+def _read_canonical_hourly(
+    storage,
+    ppe_id: str,
+    c_meter_id: str,
+    registers: list[str],
+    start_dt: datetime,
+    end_dt: datetime,
+) -> dict:
+    """Build ``{register: {epoch_hour: kWh}}`` from canonical readings.
+
+    Bug A: the canonical SQLite ``interval_reading`` series is the preferred
+    hourly source for ``verify_period`` once it covers the period. Returns an
+    empty dict on any problem so the caller falls back to recorder/API.
+    """
+    if storage is None or not ppe_id or not registers:
+        return {}
+    # Canonical readings are stored in UTC (``interval_start_utc``); the period
+    # bounds arrive tz-aware in the HA timezone, so normalise to UTC before the
+    # string-based range filter or a non-UTC offset would silently exclude rows.
+    start_utc = _as_utc(start_dt)
+    end_utc = _as_utc(end_dt)
+    try:
+        hourly: dict[str, dict[int, float]] = {}
+        for register in registers:
+            readings = storage.get_readings(
+                ppe_id=ppe_id,
+                register=register,
+                start_utc=start_utc,
+                end_utc=end_utc,
+                resolution="1h",
+                meter_id=c_meter_id or None,
+            )
+            series: dict[int, float] = {}
+            for reading in readings or []:
+                try:
+                    ts = int(reading.interval_start_utc.timestamp())
+                except (ValueError, TypeError, AttributeError):
+                    continue
+                try:
+                    kwh = float(
+                        reading.import_kwh
+                        if str(register).startswith("import")
+                        else reading.export_kwh
+                    )
+                except (ValueError, TypeError):
+                    continue
+                if kwh < 0.0:
+                    continue
+                series[ts] = series.get(ts, 0.0) + kwh
+            if series:
+                hourly[register] = series
+        return hourly
+    except Exception as err:  # noqa: BLE001 - canonical read must never break
+        _LOGGER.debug("verify_period canonical hourly read failed: %s", err)
+        return {}
+
+
+def _promote_canonical_hourly(hourly: dict, has_zones: bool, prosumer: bool) -> dict:
+    """Re-key a canonical ``import``/``export`` series to the invoice ``_1`` shape."""
+    if has_zones:
+        return hourly
+    out: dict = {}
+    if "import" in hourly:
+        out["import_1"] = hourly["import"]
+    if "export" in hourly:
+        out["export_1"] = hourly["export"]
+    for key, value in hourly.items():
+        out.setdefault(key, value)
+    return out
+
+
 def _write_canonical_opening(
     storage,
     ppe_id: str,
@@ -1721,33 +1827,73 @@ async def async_verify_period_data(
             results.append({**cached, "cached": True})
             continue
 
-        hourly = await _collect_meter_hourly(hass, meter, start_dt, end_dt)
-        recorder_points = sum(len(zone) for zone in hourly.values())
-        source = choose_period_source(
-            api_available=api_available,
-            historical=historical,
-            recorder_empty=recorder_points == 0,
+        # --- Hourly kWh source selection (Bug A) ------------------------
+        # Precedence: override (service-call hourly, not exposed today) ->
+        # canonical SQLite interval_reading (preferred once it covers the
+        # period) -> recorder -> API. ``kwh_source`` reports the hourly source
+        # with the documented {canonical, recorder, api} vocabulary; the legacy
+        # Faza-2 ``source`` stays {energa_api, recorder_hourly, mixed}.
+        storage_inst = _canonical_storage(hass, entry)
+        ppe_id = _canonical_ppe_id(entry, meter)
+        c_meter_id = canonical_meter_id(meter, fallback=meter_point_id)
+        entry_options = dict(entry.options or {})
+
+        kwh_warnings: list[str] = []
+        canonical_registers = _canonical_hourly_registers(has_zones, prosumer)
+        canonical_hourly = _read_canonical_hourly(
+            storage_inst,
+            ppe_id,
+            c_meter_id,
+            canonical_registers,
+            start_dt,
+            end_dt,
         )
-        if source == SOURCE_ENERGA_API:
-            api_hourly = await _collect_meter_hourly_api(
-                api, meter, start_dt, end_dt, on_progress
+        if canonical_hourly and canonical_series_covers_period(
+            canonical_hourly, canonical_registers, start=start_dt, end=end_dt, tz=TIMEZONE
+        ):
+            hourly = _promote_canonical_hourly(canonical_hourly, has_zones, prosumer)
+            # The legacy Faza-2 ``source`` keeps its historical vocabulary; the
+            # precise hourly origin is reported via ``kwh_source``.
+            source = SOURCE_ENERGA_API
+            kwh_source = KWH_SOURCE_CANONICAL
+        else:
+            if canonical_hourly and canonical_registers:
+                kwh_warnings.append(
+                    "Kanoniczna baza odczytów godzinowych nie pokrywa całego "
+                    "okresu (per strefa, godzinowo) — użyto zapasowego źródła "
+                    "(recorder/API)."
+                )
+            hourly = await _collect_meter_hourly(hass, meter, start_dt, end_dt)
+            recorder_points = sum(len(zone) for zone in hourly.values())
+            source = choose_period_source(
+                api_available=api_available,
+                historical=historical,
+                recorder_empty=recorder_points == 0,
             )
-            if sum(len(zone) for zone in api_hourly.values()) > 0:
-                hourly = api_hourly
-            else:
-                source = SOURCE_RECORDER
+            if source == SOURCE_ENERGA_API:
+                api_hourly = await _collect_meter_hourly_api(
+                    api, meter, start_dt, end_dt, on_progress
+                )
+                if sum(len(zone) for zone in api_hourly.values()) > 0:
+                    hourly = api_hourly
+                else:
+                    source = SOURCE_RECORDER
+            kwh_source = kwh_source_for_period_source(source)
 
         meter_rcem = _effective_period_rcem(
             rcem_scalar, rcem_prices, hourly, base_rcem
         )
         total_points = sum(len(zone) for zone in hourly.values())
         if total_points == 0:
+            empty = _empty_period_result(meter, old_system, prosumer)
+            empty["warnings"] = list(empty.get("warnings", [])) + kwh_warnings
             results.append(
                 {
-                    **_empty_period_result(meter, old_system, prosumer),
+                    **empty,
                     "rcem": meter_rcem,
                     "rcem_source": rcem_source,
                     "source": source,
+                    "kwh_source": kwh_source,
                     "cached": False,
                 }
             )
@@ -1759,7 +1905,6 @@ async def async_verify_period_data(
         # monthly flows, each month valued with its own historical RCEm from the
         # PSE table. Explicit ``bank_open_1/2`` / ``deposit_open_pln`` from the
         # service call remain manual overrides and skip the reconstruction.
-        entry_options = dict(entry.options or {})
         # The seller product is only inferable for a real prosumer with an
         # explicitly configured settlement coefficient (the system
         # discriminates "Oferta Podstawowa" vs "taryfa urzędowa"); a plain
@@ -1784,8 +1929,6 @@ async def async_verify_period_data(
         deposit_warnings: list[str] = []
         opening_source: str | None = None
 
-        storage_inst = _canonical_storage(hass, entry)
-        ppe_id = _canonical_ppe_id(entry, meter)
         reference_date = start_dt.date()
         start_is_month_start = start_dt.day <= 1
 
@@ -1962,6 +2105,20 @@ async def async_verify_period_data(
                 deposit_open_source = "override"
                 opening_source = OPENING_SOURCE_OVERRIDE
 
+        # --- Generated-deposit RCEm (Bug B) -----------------------------
+        # The seller prices the generated deposit with its own value, which is
+        # NOT the PSE RCEm of the delivery month (M) nor of the preceding
+        # month (M-1). Evidence: Bursztynowa 06.2026 = 258 x 0.19248 x 1.23 =
+        # 61.08 and 08.2026 = 192 x 0.19880 x 1.23 = 46.95, while PSE RCEm was
+        # 0.27320/0.29453 (M) and 0.19137/0.26288 (M-1). Agrestowa/Wiśniowa
+        # use PSE RCEm(M) = RCEm(M-1), so a blanket M-1 rule would break their
+        # invoices. The seller's rate is therefore a contract-specific value
+        # supplied via ``rcem_deposit_pln`` (Bug 2 override); by default the
+        # period RCEm keeps the invoice energy correct and only the generated
+        # deposit may differ.
+        effective_deposit_rcem = override_deposit_rcem
+        deposit_rcem_source = "override" if override_deposit_rcem is not None else "period"
+
         invoice = build_period_invoice(
             hourly,
             fees=fees,
@@ -1969,7 +2126,7 @@ async def async_verify_period_data(
             months=months,
             old_system=old_system,
             deposit_open_pln=deposit_open,
-            deposit_rcem=override_deposit_rcem,
+            deposit_rcem=effective_deposit_rcem,
             cover_day=0.0,
             cover_night=0.0,
             bank_open_1=bank_open_1,
@@ -1990,6 +2147,9 @@ async def async_verify_period_data(
         if rcem_warnings:
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + rcem_warnings
+        if kwh_warnings:
+            invoice.setdefault("warnings", [])
+            invoice["warnings"] = list(invoice["warnings"]) + kwh_warnings
         product_key, product_mode = resolve_product(
             entry_options, meter.get("tariff"), product_system
         )
@@ -2009,13 +2169,12 @@ async def async_verify_period_data(
             "period_start": base["period_start"],
             "period_end": base["period_end"],
             "source": source,
+            "kwh_source": kwh_source,
             "cached": False,
             "opening_source": opening_source,
             "deposit_open_source": deposit_open_source,
             "deposit_history": deposit_detail,
-            "rcem_deposit_source": (
-                "override" if override_deposit_rcem is not None else "period"
-            ),
+            "rcem_deposit_source": deposit_rcem_source,
         }
         # Do not memoise an "unknown opening balance" result: once the recorder
         # backfill completes, the next press must recompute instead of serving

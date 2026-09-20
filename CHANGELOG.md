@@ -1,5 +1,54 @@
 # Changelog
 
+## v1.9.3-beta.2 (2026-09-20) — kanoniczna baza jako źródło godzinowe + reguła RCEm depozytu (pre-release)
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.1`. Domyka follow-up
+Bug A: godzinowa ścieżka `verify_period` preferuje teraz **kanoniczną bazę**
+odczytów (`CanonicalStorage.interval_reading`) przed recorderem/API i zwraca
+`kwh_source`. Bug B (reguła RCEm depozytu *wygenerowanego*) został **zbadany i
+udokumentowany**: hipoteza „M-1" **nie potwierdziła się** na fakturach, więc
+nie wprowadzono reguły psującej Agrestową/Wiśniową — pozostaje jawne
+nadpisanie `rcem_deposit_pln`. Bez zmian API i schematu konfiguracji.
+
+- **BUG A — kanoniczna baza jako preferowane źródło godzinowe
+  (`core/verification.py`, `services.py`).** Precedencja źródeł kWh:
+  `override` → **`canonical`** → `recorder` → `api`. Gdy kanoniczny szereg
+  `interval_reading` **pokrywa cały okres** (per strefa, godzinowo), to on jest
+  wejściem do `build_period_invoice`, a recorder/API nie są w ogóle czytane.
+  Wynik zwraca `kwh_source` ∈ `{canonical, recorder, api}` (stary `source`
+  zachowany jako `energa_api`/`recorder_hourly`/`mixed`). Gdy kanoniczna baza
+  nie pokrywa okresu (częściowy backfill, starsze okresy bez podziału na
+  strefy) — **fallback** + `warning` w `warnings`. Nowe czyste helpery:
+  `canonical_series_covers_period` (pokrycie per strefa/dzień, strefa
+  Europe/Warsaw), `kwh_source_for_period_source`, `canonical_series_has_zones`.
+  `_read_canonical_hourly` normalizuje granice okresu do UTC (baza zapisuje
+  UTC), więc filtr zakresu działa niezależnie od strefy HA.
+- **BUG B — reguła RCEm depozytu wygenerowanego: ZBADANA, NIE WDROŻONA
+  (`core/verification.py`, `services.py`).** Dowody z faktur (kwoty i ilości z
+  faktur, bez danych osobowych): Bursztynowa FES/00025 (06.2026) 258 kWh →
+  49,66/61,08 ⇒ ≈**0,19248**; FES/00027 (08.2026) 192 kWh → 38,17/46,95 ⇒
+  ≈**0,19880**. Tabela PSE 2026: RCEm(05)=0,19137, (06)=0,27320, (07)=0,26288,
+  (08)=0,29453. **Żadna** z hipotez (M ani M-1) nie odtwarza tych stawek
+  (M-1: 0,19137≠0,19248 i 0,26288≠0,19880). Agrestowa FES/00045 (08.2026)
+  435×0,29453×1,23 = **157,59** używa RCEm(M) — reguła M-1 dałaby 140,65 i
+  **zepsuła** fakturę; Wiśniowa analogicznie. Wniosek: stawka depozytu jest
+  **kontraktowa** (sprzedawcy), nie PSE — pozostaje jawne nadpisanie
+  `rcem_deposit_pln`/`rcem_generated_pln`; domyślnie okresowy RCEm utrzymuje
+  poprawność energii, a różni się wyłącznie depozyt *wygenerowany*. Helpery
+  `deposit_rcem_month`/`deposit_rcem_from_table` zachowane jako **czyste,
+  przetestowane** narzędzie badawcze (z jawną notą, że nie są stosowane
+  domyślnie).
+- **Regresje faktur (bez zmian):** Agrestowa 08.2026 = **628,55 / 144,57 /
+  773,12 / 157,59 / 615,53**; Wiśniowa 07–08.2026 = **129,04 / 29,68 /
+  158,72**; Bursztynowa 08.2026 = **87,56 / 20,14 / 107,70 / 84,44**.
+- **Testy:** **765 passed, 1 skipped**; `ruff` czysty. Nowe:
+  `tests/test_period_kwh_source.py` (precedencja źródeł, pokrycie per
+  strefa/dzień, fallback + warning, te same wyniki faktur niezależnie od
+  źródła, Wiśniowa przez kanoniczną bazę) oraz
+  `tests/test_deposit_rcem_rule.py` (dowody RCEm z faktur, reguła M vs M-1,
+  nadpisanie bez wpływu na energie/„do zapłaty").
+- **Wydanie:** `1.9.3-beta.2`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.1 (2026-09-20) — kanoniczna tożsamość odczytów + RCEm depozytu (pre-release)
 
 Wydanie **pre-release** (nie stabilne) po stabilnej `v1.9.2`. Naprawia

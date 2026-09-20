@@ -219,9 +219,12 @@ verify_period:
       name: Deposit RCEm (PLN/kWh)
       description: >-
         Optional RCEm used ONLY to value the deposit generated in the period
-        (export x RCEm x 1.23). Sellers may credit the deposit with the market
-        price of a different month than the energy, so this can differ from
-        rcem_pln. Defaults to rcem_pln when omitted.
+        (export x RCEm x 1.23). The seller prices the generated deposit with a
+        contract-specific rate that is NOT the PSE RCEm of the delivery month
+        (M) nor of the preceding month (M-1): Bursztynowa 06.2026 used ~0.19248
+        and 08.2026 ~0.19880 (PSE was 0.27320/0.29453 and 0.19137/0.26288).
+        Use this override to reproduce the invoice; defaults to rcem_pln when
+        omitted (energy stays exact, only the generated deposit may differ).
       required: false
       selector:
         number:

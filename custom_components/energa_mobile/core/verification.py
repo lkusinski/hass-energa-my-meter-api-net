@@ -30,7 +30,7 @@ Faza 1 scope / deliberate limitations:
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from ..settlement import deposit_valid_until, fifo_kwh_bank
 from ..tariff import (
@@ -44,6 +44,16 @@ from ..tariff import (
 SOURCE_ENERGA_API = "energa_api"
 SOURCE_RECORDER = "recorder_hourly"
 
+# Hourly kWh data sources surfaced as ``kwh_source`` (Bug A, v1.9.3-beta.2).
+# Precedence: ``override`` (service-call hourly) -> ``canonical`` (SQLite
+# ``interval_reading``) -> ``recorder`` (HA long-term statistics) -> ``api``
+# (Energa ``mchart`` day-by-day). The canonical series is the single source of
+# truth once it covers the whole period (per zone, hourly).
+KWH_SOURCE_OVERRIDE = "override"
+KWH_SOURCE_CANONICAL = "canonical"
+KWH_SOURCE_RECORDER = "recorder"
+KWH_SOURCE_API = "api"
+
 # Opening-balance precedence returned by the verify_period service (Faza 4).
 # ``override`` (service call) > ``canonical`` (SQLite snapshots) >
 # ``recorder``/``api`` (recomputed from the flow history).
@@ -51,6 +61,20 @@ OPENING_SOURCE_OVERRIDE = "override"
 OPENING_SOURCE_CANONICAL = "canonical"
 OPENING_SOURCE_RECORDER = "recorder"
 OPENING_SOURCE_API = "api"
+
+# Mapping from the internal Faza-2 source label (``energa_api`` /
+# ``recorder_hourly``) to the ``kwh_source`` vocabulary
+# (``api`` / ``recorder``). Keeps the Faza-2 ``source`` contract intact while
+# exposing the hourly source with the documented ``kwh_source`` values.
+KWH_SOURCE_BY_PERIOD_SOURCE = {
+    SOURCE_ENERGA_API: KWH_SOURCE_API,
+    SOURCE_RECORDER: KWH_SOURCE_RECORDER,
+}
+
+# Zones of the ``CanonicalStorage`` ``interval_reading`` table exposed by the
+# Energa live/history paths. These are *hourly*, so the canonical series can
+# fully replace the recorder/API series when every required zone is present.
+CANONICAL_HOURLY_REGISTERS = ("import_1", "import_2", "export_1", "export_2")
 
 # Rule version stamped on canonical opening snapshots so a later read can tell
 # them apart from real FIFO lots produced by the settlement engines.
@@ -201,6 +225,135 @@ def choose_period_source(
     if api_available and (historical or recorder_empty):
         return SOURCE_ENERGA_API
     return SOURCE_RECORDER
+
+
+def kwh_source_for_period_source(period_source: str | None) -> str:
+    """Map a Faza-2 ``source`` label to the documented ``kwh_source`` value."""
+    return KWH_SOURCE_BY_PERIOD_SOURCE.get(period_source, KWH_SOURCE_RECORDER)
+
+
+def canonical_series_covers_period(
+    canonical_hourly: dict,
+    zones: list,
+    *,
+    start,
+    end,
+    tz=None,
+) -> bool:
+    """True when canonical hourly readings cover the whole ``[start, end)``.
+
+    Bug A guard: the canonical SQLite ``interval_reading`` series is only a
+    valid replacement for the recorder/API series when, for **every** required
+    zone, it has a reading in *each* day of the period. A partial series (or a
+    legacy period stored without per-zone rows) must fall back with a warning
+    rather than silently producing a short invoice.
+
+    ``start``/``end`` may be ``date``/``datetime``/ISO strings; the window is
+    half-open (``end`` exclusive). Epoch-hour keys are bucketed by ``tz``
+    (default Europe/Warsaw) so a local calendar day is matched against the
+    local-day boundaries the invoice uses. Pure and defensive: anything
+    unparseable returns ``False`` so the caller falls back.
+    """
+    wanted = [str(zone) for zone in (zones or []) if zone]
+    if not wanted:
+        return False
+    start_date = parse_period_date(start)
+    end_date = parse_period_date(end)
+    if start_date is None or end_date is None or end_date <= start_date:
+        return False
+
+    zone_info = tz
+    if zone_info is None:
+        from zoneinfo import ZoneInfo
+
+        zone_info = ZoneInfo("Europe/Warsaw")
+
+    day_count = (end_date - start_date).days
+    per_zone_days: dict[str, set] = {zone: set() for zone in wanted}
+    pending = set(wanted)
+    for zone, series in (canonical_hourly or {}).items():
+        zone_name = str(zone)
+        if zone_name not in per_zone_days or not series:
+            continue
+        days = per_zone_days[zone_name]
+        for ts in series:
+            moment = _epoch_hour_date(ts, zone_info)
+            if moment is None:
+                continue
+            if start_date <= moment < end_date:
+                days.add(moment)
+        if len(days) >= day_count:
+            pending.discard(zone_name)
+        if not pending:
+            return True
+    return not pending
+
+
+def _epoch_hour_date(value, tz=None):
+    """Local date of an epoch-seconds/hour key, or ``None`` when unparseable."""
+    try:
+        moment = datetime.fromtimestamp(int(float(value)), tz=timezone.utc)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return None
+    if tz is not None:
+        moment = moment.astimezone(tz)
+    return moment.date()
+
+
+def canonical_series_has_zones(canonical_hourly: dict) -> bool:
+    """True when the canonical series carries a real second metering zone."""
+    canonical = canonical_hourly or {}
+    return bool(canonical.get("import_2") or canonical.get("export_2"))
+
+
+def deposit_rcem_month(year: int, month: int) -> tuple[int, int]:
+    """Calendar month ``(year, month)`` immediately before the given one.
+
+    Bug B: the seller credits the generated deposit with the RCEm of the month
+    **preceding** the delivery month (M-1). ``deposit_rcem_month(2026, 1)`` is
+    therefore ``(2025, 12)``.
+    """
+    if month <= 1:
+        return (int(year) - 1, 12)
+    return (int(year), int(month) - 1)
+
+
+def deposit_rcem_from_table(
+    monthly_rcem: dict,
+    year: int,
+    month: int,
+    *,
+    fallback: float | None = None,
+) -> tuple[float | None, bool]:
+    """RCEm of the preceding month (M-1) for a delivery month, else M.
+
+    Bug B investigation helper — **not applied by the service by default**.
+    The seller's generated-deposit rate looked like it might be the RCEm of
+    the month *before* delivery (M-1), but the on-invoice evidence disproves a
+    blanket rule: Bursztynowa 06.2026 used 0.19248 and 08.2026 used 0.19880,
+    while PSE RCEm was 0.19137/0.26288 (M-1) and 0.27320/0.29453 (M) — neither
+    matches. Agrestowa/Wiśniowa use PSE RCEm(M) = RCEm(M-1). The service
+    therefore keeps the period RCEm and only accepts the seller rate via the
+    explicit ``rcem_deposit_pln`` override.
+
+    Kept as a pure, tested utility: returns ``(value, fell_back)`` where
+    ``value`` is the M-1 RCEm when present (``fell_back=False``), otherwise the
+    delivery month's own RCEm (``fell_back=True``), otherwise ``fallback``.
+    """
+    table = monthly_rcem or {}
+    prev = deposit_rcem_month(year, month)
+    if prev in table:
+        try:
+            return float(table[prev]), False
+        except (ValueError, TypeError):
+            pass
+    own = table.get((int(year), int(month)))
+    if own is not None:
+        try:
+            return float(own), True
+        except (ValueError, TypeError):
+            pass
+    return (float(fallback) if fallback is not None else None), True
 
 
 def build_period_invoice(
@@ -762,7 +915,13 @@ def deposit_ledger_close(entries, *, initial: float = 0.0) -> float:
 
 
 __all__ = [
+    "CANONICAL_HOURLY_REGISTERS",
     "CANONICAL_OPENING_RULE",
+    "KWH_SOURCE_API",
+    "KWH_SOURCE_BY_PERIOD_SOURCE",
+    "KWH_SOURCE_CANONICAL",
+    "KWH_SOURCE_OVERRIDE",
+    "KWH_SOURCE_RECORDER",
     "OPENING_SOURCE_API",
     "OPENING_SOURCE_CANONICAL",
     "OPENING_SOURCE_OVERRIDE",
@@ -772,10 +931,15 @@ __all__ = [
     "SOURCE_RECORDER",
     "build_period_invoice",
     "canonical_opening_lot_id",
+    "canonical_series_covers_period",
+    "canonical_series_has_zones",
     "choose_period_source",
     "deposit_ledger_close",
+    "deposit_rcem_from_table",
+    "deposit_rcem_month",
     "format_period_date",
     "has_two_zones",
+    "kwh_source_for_period_source",
     "opening_bank_from_monthly_flows",
     "opening_deposit_from_monthly_flows",
     "openings_from_canonical_lots",
