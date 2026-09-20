@@ -78,5 +78,21 @@ podaje użyte kWh w atrybucie `kwh` wyniku (m.in. `saldo_plus_1`/`saldo_plus_2` 
 sumy godzinowych sald dodatnich per strefa), więc każdy może porównać je
 z fakturą i samodzielnie ocenić, że różnica to 1 kWh, a nie błąd rozliczeń.
 
+## 6. Nota akcyzy a wiersz faktury
+
+Na fakturach Energa nota „Na fakturze naliczono akcyzę …" podaje akcyzę liczoną od
+**poboru brutto**, a wiersz pozycji „akcyza" — od **nakładki** (pobór brutto − salda
+dodatnie). Przykłady:
+
+| Faktura | Nota (pobór brutto) | Wiersz „akcyza" (nakładka) |
+|---|---|---|
+| Bursztynowa FES/00027 (08.2026) | 0,90 zł za 179 kWh | 0,149 MWh = **0,75 zł** |
+| Bursztynowa FES/00025 (06.2026) | 0,81 zł za 161 kWh | 0,147 MWh = **0,74 zł** |
+| Agrestowa FES/00045 (08.2026) | 3,85 zł za 768 kWh | 0,038 + 0,023 MWh = **0,31 zł** |
+
+Wniosek: do rachunku wchodzi akcyza **od nakładki**; nota to ustawowy odczyt od energii
+pobranej (pobór brutto) i należy ją ignorować przy obliczeniach. Kalkulator integracji
+postępuje zgodnie z wierszem (potwierdzone co do grosza na FES/00025 i FES/00027).
+
 Powiązane: [`DASHBOARD.md`](DASHBOARD.md) (studium przypadku „weryfikacja co do
 grosza"), [`BANK.md`](BANK.md) (weryfikacja fakturowa i kotwice liczbowe).
