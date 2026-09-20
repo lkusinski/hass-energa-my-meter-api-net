@@ -1,0 +1,189 @@
+{
+  "dual": {
+    "dual_empty": {
+      "bank": 0.0,
+      "detail": {
+        "bank_kwh_l1": 0.0,
+        "bank_kwh_l2": 0.0,
+        "bank_l1_share_pct": 0.0,
+        "bank_l2_share_pct": 0.0,
+        "deposits_kwh": 0.0,
+        "detail_l1": {
+          "deposits_kwh": 0.0,
+          "expired_kwh": 0.0,
+          "months_used": 0,
+          "uncovered_kwh": 0.0
+        },
+        "detail_l2": {
+          "deposits_kwh": 0.0,
+          "expired_kwh": 0.0,
+          "months_used": 0,
+          "uncovered_kwh": 0.0
+        },
+        "expired_kwh": 0.0,
+        "months_used": 0,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "dual_mixed": {
+      "bank": 74.0,
+      "detail": {
+        "bank_kwh_l1": 23.0,
+        "bank_kwh_l2": 51.0,
+        "bank_l1_share_pct": 31.1,
+        "bank_l2_share_pct": 68.9,
+        "deposits_kwh": 228.0,
+        "detail_l1": {
+          "deposits_kwh": 148.0,
+          "expired_kwh": 0.0,
+          "months_used": 3,
+          "uncovered_kwh": 0.0
+        },
+        "detail_l2": {
+          "deposits_kwh": 80.0,
+          "expired_kwh": 0.0,
+          "months_used": 3,
+          "uncovered_kwh": 16.0
+        },
+        "expired_kwh": 0.0,
+        "months_used": 3,
+        "uncovered_kwh": 16.0
+      }
+    },
+    "dual_realistic": {
+      "bank": 92.0,
+      "detail": {
+        "bank_kwh_l1": 70.0,
+        "bank_kwh_l2": 22.0,
+        "bank_l1_share_pct": 76.1,
+        "bank_l2_share_pct": 23.9,
+        "deposits_kwh": 464.0,
+        "detail_l1": {
+          "deposits_kwh": 344.0,
+          "expired_kwh": 0.0,
+          "months_used": 3,
+          "uncovered_kwh": 36.0
+        },
+        "detail_l2": {
+          "deposits_kwh": 120.0,
+          "expired_kwh": 0.0,
+          "months_used": 3,
+          "uncovered_kwh": 82.0
+        },
+        "expired_kwh": 0.0,
+        "months_used": 3,
+        "uncovered_kwh": 118.0
+      }
+    }
+  },
+  "single": {
+    "big_numbers": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 64000.0,
+        "expired_kwh": 14000.0,
+        "months_used": 1,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "empty": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 0.0,
+        "expired_kwh": 0.0,
+        "months_used": 0,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "expiry_after_M12": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 80.0,
+        "expired_kwh": 30.0,
+        "months_used": 1,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "expiry_inside_M12": {
+      "bank": 30.0,
+      "detail": {
+        "deposits_kwh": 80.0,
+        "expired_kwh": 0.0,
+        "months_used": 1,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "float_precision": {
+      "bank": 66.71,
+      "detail": {
+        "deposits_kwh": 365.75,
+        "expired_kwh": 0.0,
+        "months_used": 4,
+        "uncovered_kwh": 34.49
+      }
+    },
+    "future_ignored": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 0.0,
+        "expired_kwh": 0.0,
+        "months_used": 0,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "malformed": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 0.0,
+        "expired_kwh": 0.0,
+        "months_used": 0,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "multi_same_month": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 64.0,
+        "expired_kwh": 0.0,
+        "months_used": 1,
+        "uncovered_kwh": 36.0
+      }
+    },
+    "realistic_18m": {
+      "bank": 786.0,
+      "detail": {
+        "deposits_kwh": 2764.0,
+        "expired_kwh": 0.0,
+        "months_used": 18,
+        "uncovered_kwh": 377.0
+      }
+    },
+    "single_month": {
+      "bank": 60.0,
+      "detail": {
+        "deposits_kwh": 160.0,
+        "expired_kwh": 0.0,
+        "months_used": 1,
+        "uncovered_kwh": 0.0
+      }
+    },
+    "uncovered": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 8.0,
+        "expired_kwh": 0.0,
+        "months_used": 1,
+        "uncovered_kwh": 492.0
+      }
+    },
+    "zero_coeff": {
+      "bank": 0.0,
+      "detail": {
+        "deposits_kwh": 0.0,
+        "expired_kwh": 0.0,
+        "months_used": 1,
+        "uncovered_kwh": 100.0
+      }
+    }
+  }
+}

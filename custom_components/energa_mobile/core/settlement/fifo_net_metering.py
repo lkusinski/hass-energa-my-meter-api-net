@@ -6,11 +6,11 @@ Reference: Energa HA Skorygowana Architektura Docelowa (04.09.2026), Rozdzial 6,
 - Allocation order: oldest unexpired lot first (FIFO).
 - Full provenance and allocation tracing.
 
-NOTE (audyt P2.4): to równoległy, testowy silnik FIFO (produkcja liczy FIFO w
-`settlement.fifo_kwh_bank`/`fifo_dual_zone_kwh_bank` i `core/verification.py`).
-Świadomie NIE jest scalany w tym wydaniu — dwa niezależne silniki tej samej
-reguły to ryzyko rozjazdu, ale scalanie wymaga osobnego, zweryfikowanego
-refaktoru bez zmiany wyników. Używany wyłącznie przez testy.
+NOTE (audyt P2.1): this is now a thin presentation layer over the SHARED engine
+`core/settlement/fifo_engine.py` — the same allocation algorithm that production
+(`settlement.fifo_kwh_bank`) uses. It no longer re-implements FIFO, so tests and
+production can no longer drift apart. The engine output is pinned byte-for-byte
+by `tests/test_fifo_golden.py`.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ import calendar
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+from .fifo_engine import fifo_kwh_bank_trace
 from .models import LotAllocation, SettlementLot, SettlementSummary
 
 
@@ -34,6 +35,11 @@ def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
     return (total_m // 12, (total_m % 12) + 1)
 
 
+def _dec(value) -> Decimal:
+    """Exact Decimal from a float/int/str engine value."""
+    return Decimal(str(value))
+
+
 def run_fifo_net_metering(
     ppe_id: str,
     monthly_flows: list[dict],
@@ -41,7 +47,10 @@ def run_fifo_net_metering(
     today: date | None = None,
     zone: str = "total",
 ) -> SettlementSummary:
-    """Run pure FIFO allocation for net-metering physical energy warehouse.
+    """Run FIFO allocation for the net-metering physical energy warehouse.
+
+    Delegates the allocation to `fifo_engine.fifo_kwh_bank_trace` (shared with
+    production) and wraps the resulting trace in the rich domain models.
 
     Args:
         ppe_id: Logical delivery point ID.
@@ -56,95 +65,69 @@ def run_fifo_net_metering(
     as_of = today or date.today()
     summary = SettlementSummary(unit="kWh")
 
-    # Sort flows chronologically
-    sorted_flows = sorted(monthly_flows, key=lambda x: (int(x["year"]), int(x["month"])))
-
-    lots: list[SettlementLot] = []
-    allocations: list[LotAllocation] = []
-
-    total_deposited = Decimal("0.0")
-    total_consumed = Decimal("0.0")
-    total_uncovered = Decimal("0.0")
-
-    for flow in sorted_flows:
-        y = int(flow["year"])
-        m = int(flow["month"])
-        imp = Decimal(str(flow.get("import_kwh", "0.0")))
-        exp = Decimal(str(flow.get("export_kwh", "0.0")))
-
-        # Check for expiry of existing lots up to the start of this month
-        month_start = date(y, m, 1)
-        for lot in lots:
-            if not lot.is_exhausted and lot.is_expired(month_start):
-                summary.total_expired += lot.remaining_amount
-                lot.remaining_amount = Decimal("0.0")
-
-        # 1. New deposit lot from export in this month
-        if exp > Decimal("0.0"):
-            credited = round(exp * coefficient, 3)
-            assigned_at = _month_end(y, m)
-            exp_y, exp_m = _add_months(y, m, 12)
-            expires_at = _month_end(exp_y, exp_m)
-
-            lot_id = f"lot_{ppe_id}_{zone}_{y}_{m:02d}"
-            lot = SettlementLot(
-                lot_id=lot_id,
-                ppe_id=ppe_id,
-                unit="kWh",
-                zone=zone,
-                original_amount=credited,
-                remaining_amount=credited,
-                created_at_utc=datetime.now(timezone.utc),
-                assigned_at=assigned_at,
-                expires_at=expires_at,
-                rule_version="net_metering_fifo_12m",
-                provenance=f"Export {exp} kWh * coeff {coefficient} in {y}-{m:02d}",
+    rows = []
+    for flow in monthly_flows or []:
+        rows.append(
+            (
+                flow["year"],
+                flow["month"],
+                flow.get("import_kwh", "0.0"),
+                flow.get("export_kwh", "0.0"),
             )
-            lots.append(lot)
-            total_deposited += credited
+        )
 
-        # 2. Consume import from oldest unexpired lots (FIFO)
-        remaining_import = imp
-        if remaining_import > Decimal("0.0"):
-            for lot in lots:
-                if lot.is_exhausted or lot.is_expired(month_start):
-                    continue
+    _bank, detail, trace = fifo_kwh_bank_trace(rows, coefficient, today=as_of)
 
-                take = min(lot.remaining_amount, remaining_import)
-                if take > Decimal("0.0"):
-                    lot.remaining_amount -= take
-                    remaining_import -= take
-                    total_consumed += take
-                    alloc = LotAllocation(
-                        allocation_id=f"alloc_{lot.lot_id}_{y}_{m:02d}",
-                        lot_id=lot.lot_id,
-                        consumption_target_id=f"imp_{ppe_id}_{zone}_{y}_{m:02d}",
-                        allocated_amount=take,
-                        allocated_at_utc=datetime.now(timezone.utc),
-                        notes=f"Covered import {y}-{m:02d}",
-                    )
-                    allocations.append(alloc)
+    lot_models: dict[int, SettlementLot] = {}
+    for lot in trace["lots"]:
+        y, m = int(lot["year"]), int(lot["month"])
+        exp_y, exp_m = _add_months(y, m, 12)
+        expired = lot["expired_kwh"] > 0.0
+        model = SettlementLot(
+            lot_id=f"lot_{ppe_id}_{zone}_{y}_{m:02d}",
+            ppe_id=ppe_id,
+            unit="kWh",
+            zone=zone,
+            original_amount=_dec(lot["credited_kwh"]),
+            remaining_amount=Decimal("0.0") if expired else _dec(max(0.0, lot["remaining_kwh"])),
+            created_at_utc=datetime.now(timezone.utc),
+            assigned_at=_month_end(y, m),
+            expires_at=_month_end(exp_y, exp_m),
+            rule_version="net_metering_fifo_12m",
+            provenance=(
+                f"Export credited {lot['credited_kwh']} kWh in {y}-{m:02d} "
+                f"(coeff {coefficient})"
+            ),
+        )
+        lot_models[id(lot)] = model
 
-                if remaining_import <= Decimal("0.0"):
-                    break
+    allocations: list[LotAllocation] = []
+    consumed = 0.0
+    for alloc in trace["allocations"]:
+        take = alloc["amount_kwh"]
+        consumed += take
+        lot = lot_models[id(alloc["lot"])]
+        allocations.append(
+            LotAllocation(
+                allocation_id=f"alloc_{lot.lot_id}_{alloc['year']}_{alloc['month']:02d}",
+                lot_id=lot.lot_id,
+                consumption_target_id=(
+                    f"imp_{ppe_id}_{zone}_{alloc['year']}_{alloc['month']:02d}"
+                ),
+                allocated_amount=_dec(take),
+                allocated_at_utc=datetime.now(timezone.utc),
+                notes=f"Covered import {alloc['year']}-{alloc['month']:02d}",
+            )
+        )
 
-            if remaining_import > Decimal("0.0"):
-                total_uncovered += remaining_import
+    all_lots = list(lot_models.values())
+    active_lots = [lot for lot in all_lots if not lot.is_exhausted]
 
-    # Final pass for expiry as of `as_of` date
-    for lot in lots:
-        if not lot.is_exhausted and lot.is_expired(as_of):
-            summary.total_expired += lot.remaining_amount
-            lot.remaining_amount = Decimal("0.0")
-
-    active_lots = [lot for lot in lots if not lot.is_exhausted]
-    total_active = sum((lot.remaining_amount for lot in active_lots), Decimal("0.0"))
-
-    summary.total_active_balance = round(total_active, 2)
-    summary.total_deposited = round(total_deposited, 2)
-    summary.total_consumed = round(total_consumed, 2)
-    summary.total_expired = round(summary.total_expired, 2)
-    summary.total_uncovered = round(total_uncovered, 2)
+    summary.total_active_balance = _dec(_bank)
+    summary.total_deposited = _dec(detail["deposits_kwh"])
+    summary.total_consumed = _dec(round(consumed, 2))
+    summary.total_expired = _dec(detail["expired_kwh"])
+    summary.total_uncovered = _dec(detail["uncovered_kwh"])
     summary.active_lots = active_lots
     summary.allocations = allocations
 
@@ -158,7 +141,7 @@ def run_dual_zone_fifo_net_metering(
     coefficient: Decimal = Decimal("0.8"),
     today: date | None = None,
 ) -> tuple[SettlementSummary, SettlementSummary, Decimal]:
-    """Run pure FIFO allocation for dual-zone net-metering physical energy warehouse.
+    """Run FIFO allocation for dual-zone net-metering physical energy warehouse.
 
     Args:
         ppe_id: Logical delivery point ID.
@@ -178,4 +161,3 @@ def run_dual_zone_fifo_net_metering(
     )
     total_active = round(summary_1.total_active_balance + summary_2.total_active_balance, 2)
     return summary_1, summary_2, total_active
-

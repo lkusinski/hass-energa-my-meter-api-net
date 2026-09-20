@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — P2.1: scalenie silnika FIFO (bez zmian wyników)
+
+Refaktor porządkowy z audytu P2.1. Produkcja i warstwa czysta korzystają teraz
+z **jednego** algorytmu FIFO 12 m-cy — koniec ryzyka, że testy walidują inny
+algorytm niż produkcja. **Zero zmian w wynikach:** faktury nadal co do grosza
+(patrz golden testy).
+
+- **Nowy wspólny silnik `core/settlement/fifo_engine.py`.** Cały algorytm FIFO
+  wyjęty z `settlement.py` (float, clamp ujemnych, pomijanie przyszłych
+  miesięcy, agregacja per miesiąc, `round(..., 2)` na końcu).
+  `fifo_kwh_bank`/`fifo_dual_zone_kwh_bank` w `settlement.py` to teraz cienkie
+  wrappery — publiczne API i sygnatury bez zmian.
+- **Warstwa czysta (`core/settlement/fifo_net_metering.py`) deleguje do
+  wspólnego silnika.** `run_fifo_net_metering` nie reimplementuje już FIFO;
+  buduje `SettlementLot`/`LotAllocation`/`SettlementSummary` z trace silnika.
+  Usunięte rozjazdy: `round(exp*coeff, 3)` per wpłata, brak agregacji per
+  miesiąc, brak pomijania przyszłych miesięcy, brak sanityzacji wejścia.
+- **Testy charakteryzujące (golden) — `tests/test_fifo_golden.py` +
+  `tests/data/fifo_golden.json`.** Zamrażają wyniki produkcyjnego silnika
+  byte-for-byte (12 przypadków osi + 3 dwustrefowe) oraz pilnują, by warstwa
+  czysta zgadzała się z produkcją. Fixture wygenerowano **przed** refaktorem.
+- **Świadomie poza zakresem:** `core/settlement/fifo_net_billing.py` (osobny,
+  analogiczny refaktor; produkcja depozytu w `core/verification.py`).
+- **Testy:** 797 passed, 1 skipped; brak nowych uwag ruff (`fifo_engine.py`
+  i nowe testy czyste).
+
 ## v1.9.3-beta.3 (2026-09-21) — przycisk Panelu Energia nie kasuje źródeł innych liczników (pre-release)
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.2`. Naprawia **poważny
