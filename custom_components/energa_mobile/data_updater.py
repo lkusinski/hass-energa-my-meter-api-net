@@ -197,7 +197,11 @@ class EnergaDataUpdater:
         self, meter_id: str, data_key: str, hourly_data: list[dict]
     ) -> None:
         """Canonically archive interval readings into SQLite WAL database."""
-        ppe_id = self.entry.data.get("ppe_id") or f"PPE_{meter_id}"
+        from .core.identity import canonical_meter_id, canonical_ppe_id
+
+        meter = {"meter_point_id": meter_id}
+        ppe_id = canonical_ppe_id(getattr(self.entry, "data", None), meter)
+        canonical_mid = canonical_meter_id(meter, fallback=str(meter_id))
         readings: list[IntervalReading] = []
         is_export = data_key.startswith("export")
         for point in hourly_data:
@@ -210,7 +214,7 @@ class EnergaDataUpdater:
             readings.append(
                 IntervalReading(
                     ppe_id=ppe_id,
-                    meter_id=str(meter_id),
+                    meter_id=canonical_mid,
                     register=data_key,
                     interval_start_utc=utc_dt,
                     resolution="1h",

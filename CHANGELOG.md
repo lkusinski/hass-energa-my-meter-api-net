@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.9.3-beta.1 (2026-09-20) — kanoniczna tożsamość odczytów + RCEm depozytu (pre-release)
+
+Wydanie **pre-release** (nie stabilne) po stabilnej `v1.9.2`. Naprawia
+niespójną **tożsamość kanoniczną** odczytów godzinowych (Bug 1) oraz dodaje
+jawne nadpisanie **RCEm depozytu wygenerowanego** (Bug 2). Bez zmian API,
+schematu konfiguracji i metody rozliczeń — wszystkie regresje faktur bez zmian.
+
+- **BUG 1 — jedna kanoniczna tożsamość odczytów (`core/identity`,
+  `data_updater.py`, `services.py`).** Historyczny import 730 dni
+  (`_import_meter_history`) archiwizował `interval_reading` jako
+  `ppe_id=<meter_point_id>`, `meter_id=<serial>`, a ścieżka live
+  (`EnergaDataUpdater`) jako `ppe_id=PPE_<meter_point_id>`,
+  `meter_id=<meter_point_id>`. Ten sam fizyczny licznik miał więc **dwie
+  tożsamości** w kanonicznej bazie (np. `372197` vs `PPE_372197`); filtr po
+  starej tożsamości widział dane tylko do ostatniego backfillu, a czytelnicy
+  dopasowujący `ppe_id`/`meter_id` mogli zobaczyć **dwa wiersze na tę samą
+  godzinę** (podwójne liczenie). Nowy współdzielony helper
+  `core.identity.canonical_ppe_id`/`canonical_meter_id` jest używany zarówno
+  przez import historyczny, jak i live updater oraz `verify_period`
+  (snapshoty `settlement_lot`) — jedna tożsamość dla jednego licznika.
+  Dodatkowo `CanonicalStorage.get_readings` **deduplikuje** stare pary
+  tożsamości w obrębie tej samej godziny (preferencja: dokładnie żądana
+  tożsamość → `PPE_…` → reszta), więc istniejące bazy nie podwajają danych.
+- **BUG 1 (diagnostyka) — `get_readings_count`/`get_latest_reading_time`
+  dopasowują warianty** `PPE_<id>`/`<id>`/`<meter_id>` (jak `get_readings`),
+  więc sensor „Jakość danych” nie raportuje już `0` odczytów, gdy pyta
+  o realny PPE, a wiersze są pod tożsamością syntetyczną. `sensors/live.py`
+  przekazuje `meter_id`.
+- **BUG 2 — jawne nadpisanie RCEm depozytu (`core/verification.py`,
+  `services.py`).** Sprzedawca może wyceniać depozyt *wygenerowany* innym
+  RCEm niż energia (Bursztynowa 08.2026: faktura ≈0,1988 vs tabela PSE
+  0,29453). Nowy parametr `build_period_invoice(deposit_rcem=…)` oraz pola
+  usługi `rcem_deposit_pln` (alias `rcem_generated_pln`) pozwalają ustawić go
+  **niezależnie** od `rcem_pln`; wynik zwraca `rcem_deposit` i
+  `rcem_deposit_source` (`override`/`period`). Domyślnie zachowanie jak
+  dotychczas (`rcem` dla obu). Uzupełniono `services.yaml`.
+- **BUG 3 — porządki.** `CanonicalStorage` ma wspólny filtr tożsamości dla
+  licznika i czasu ostatniego odczytu; kod i komentarze spójne.
+- **Regresje faktur (bez zmian):** Agrestowa 08.2026 = **628,55 / 144,57 /
+  773,12 / 157,59 / 615,53**; Wiśniowa 07–08.2026 = **129,04 / 29,68 /
+  158,72**; Bursztynowa 08.2026 = **87,56 / 20,14 / 107,70 / 84,44**.
+- **Testy:** **748 passed, 1 skipped**; `ruff` czysty. Nowe:
+  `tests/test_canonical_identity.py` (tożsamość, dedup, diagnostyka),
+  `TestDepositRcemOverride` w `test_verification.py` i
+  `test_deposit_rcem_override_flows_through_service`
+  w `test_period_canonical_and_partial.py`.
+- **Wydanie:** `1.9.3-beta.1`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.2 (2026-09-20) — stabilna: presety produktów, fix onboardingu, poprawna prognoza i reconcile
 
 Wydanie **stabilne** konsolidujące całą linię `v1.9.2-beta.1`–`v1.9.2-beta.5`:

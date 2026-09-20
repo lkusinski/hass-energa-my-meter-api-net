@@ -308,6 +308,42 @@ class TestCanonicalNetBilling:
         assert second["deposit_open"] == 17.03
         assert second["coverage_unknown"] is False
 
+    @pytest.mark.asyncio
+    async def test_deposit_rcem_override_flows_through_service(self):
+        """Bug 2: explicit deposit RCEm override, independent of the energy RCEm."""
+        hass, _, coordinator, _ = _storage_hass(
+            _net_billing_meter(), {CONF_PROSUMER_COEFFICIENT: 0.0}
+        )
+        hourly = {
+            "import_1": {0: 10.0},
+            "export_1": {0: 60.0},
+            "import_2": {},
+            "export_2": {},
+        }
+        base_payload = {
+            "start": "2026-08-01",
+            "end": "2026-08-31",
+            "meter_id": "10000001",
+            "rcem_pln": 0.29453,
+        }
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value={})):
+            base = await async_verify_period_data(hass, base_payload)
+
+        coordinator._verify_cache = {}
+        override_payload = dict(base_payload, rcem_deposit_pln=0.1988)
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value={})):
+            override = await async_verify_period_data(hass, override_payload)
+
+        assert override["rcem"] == 0.29453
+        assert override["rcem_deposit"] == 0.1988
+        assert override["rcem_deposit_source"] == "override"
+        assert base["rcem_deposit_source"] == "period"
+        assert override["deposit_generated"] < base["deposit_generated"]
+
 
 class TestOpeningSourceOnSensor:
     def test_sensor_exposes_opening_source(self):

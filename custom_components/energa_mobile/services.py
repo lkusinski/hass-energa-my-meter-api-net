@@ -58,6 +58,7 @@ from .core.completeness import (
     registers_for_meter,
     unknown_result,
 )
+from .core.identity import canonical_meter_id, canonical_ppe_id
 from .core.identity.models import PPE, SettlementType
 from .core.settlement.models import SettlementLot
 from .core.verification import (
@@ -474,6 +475,8 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 vol.Optional("bank_open_1"): vol.Coerce(float),
                 vol.Optional("bank_open_2"): vol.Coerce(float),
                 vol.Optional("deposit_open_pln"): vol.Coerce(float),
+                vol.Optional("rcem_deposit_pln"): vol.Coerce(float),
+                vol.Optional("rcem_generated_pln"): vol.Coerce(float),
             }
         ),
         supports_response=SupportsResponse.ONLY,
@@ -1293,13 +1296,7 @@ def _canonical_storage(hass: HomeAssistant, entry) -> object | None:
 
 def _canonical_ppe_id(entry, meter: dict) -> str:
     """PPE id used for canonical settlement lots (mirrors the data updater)."""
-    data = getattr(entry, "data", None)
-    if isinstance(data, dict):
-        value = data.get("ppe_id")
-        if isinstance(value, str) and value:
-            return value
-    mid = str(meter.get("meter_point_id", ""))
-    return f"PPE_{mid}" if mid else ""
+    return canonical_ppe_id(getattr(entry, "data", None), meter)
 
 
 def _kwh_zones(has_zones: bool) -> list[str]:
@@ -1691,6 +1688,12 @@ async def async_verify_period_data(
     override_bank_1 = _optional_float("bank_open_1")
     override_bank_2 = _optional_float("bank_open_2")
     override_deposit = _optional_float("deposit_open_pln")
+    # Deposit-generated RCEm override: the seller may credit the deposit with
+    # the market price of a different month than the energy. Accept both an
+    # explicit ``rcem_deposit_pln`` and the legacy alias ``rcem_generated_pln``.
+    override_deposit_rcem = _optional_float("rcem_deposit_pln")
+    if override_deposit_rcem is None:
+        override_deposit_rcem = _optional_float("rcem_generated_pln")
 
     from .settlement import is_export_prosumer
 
@@ -1711,6 +1714,7 @@ async def async_verify_period_data(
             override_bank_1,
             override_bank_2,
             override_deposit,
+            override_deposit_rcem,
         )
         cached = _verify_cache_get(coordinator, cache_key)
         if cached is not None:
@@ -1965,6 +1969,7 @@ async def async_verify_period_data(
             months=months,
             old_system=old_system,
             deposit_open_pln=deposit_open,
+            deposit_rcem=override_deposit_rcem,
             cover_day=0.0,
             cover_night=0.0,
             bank_open_1=bank_open_1,
@@ -2008,6 +2013,9 @@ async def async_verify_period_data(
             "opening_source": opening_source,
             "deposit_open_source": deposit_open_source,
             "deposit_history": deposit_detail,
+            "rcem_deposit_source": (
+                "override" if override_deposit_rcem is not None else "period"
+            ),
         }
         # Do not memoise an "unknown opening balance" result: once the recorder
         # backfill completes, the next press must recompute instead of serving
@@ -2763,10 +2771,18 @@ async def _import_meter_history(
                     from .core.readings.models import IntervalReading
 
                     is_export = entity_suffix.startswith("export")
+                    # Same canonical identity as the live data updater and the
+                    # verify_period opening snapshots — never the raw
+                    # meter_point_id/serial pair (that used to create a second
+                    # series for the same physical meter).
+                    c_ppe_id = canonical_ppe_id(
+                        getattr(entry, "data", None), meter
+                    )
+                    c_meter_id = canonical_meter_id(meter, fallback=meter_point_id)
                     c_readings = [
                         IntervalReading(
-                            ppe_id=meter_point_id,
-                            meter_id=str(meter_id),
+                            ppe_id=c_ppe_id,
+                            meter_id=c_meter_id,
                             register=entity_suffix,
                             interval_start_utc=dt_util.as_utc(p["dt"]),
                             resolution="1h",

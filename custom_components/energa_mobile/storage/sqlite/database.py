@@ -476,7 +476,14 @@ class CanonicalStorage:
             conditions.append("interval_start_utc < ?")
             params.append(end_utc.isoformat())
 
-        # For multiple revisions of same event_key, pick highest revision
+        # For multiple revisions of same event_key, pick highest revision.
+        # Additionally collapse legacy duplicate identities: the historical
+        # import used to archive the same physical meter under a second
+        # ``ppe_id``/``meter_id`` pair (raw meter_point_id/serial) than the live
+        # updater (``PPE_<meter_point_id>``/meter_point_id). Without this a
+        # reader that matches across PPE-prefix and meter_id variants would
+        # return two rows for the same hour and double-count. Prefer the exact
+        # requested identity, then the canonical ``PPE_`` form, then the rest.
         where_clause = " AND ".join(conditions)
         sql = f"""
         SELECT * FROM interval_reading r
@@ -485,10 +492,27 @@ class CanonicalStorage:
               SELECT MAX(revision) FROM interval_reading sub
               WHERE sub.event_key = r.event_key
           )
+          AND r.rowid = (
+              SELECT d.rowid FROM interval_reading d
+              WHERE {where_clause}
+                AND d.interval_start_utc = r.interval_start_utc
+                AND d.revision = (
+                    SELECT MAX(revision) FROM interval_reading sub2
+                    WHERE sub2.event_key = d.event_key
+                )
+              ORDER BY
+                  CASE
+                      WHEN d.ppe_id = ? THEN 0
+                      WHEN d.ppe_id LIKE 'PPE_%' THEN 1
+                      ELSE 2
+                  END,
+                  d.rowid DESC
+              LIMIT 1
+          )
         ORDER BY interval_start_utc ASC;
         """
         with self._connection() as conn:
-            cur = conn.execute(sql, params)
+            cur = conn.execute(sql, params + params + [ppe_id])
             out = []
             for row in cur.fetchall():
                 out.append(
@@ -516,27 +540,53 @@ class CanonicalStorage:
             row = conn.execute("SELECT version FROM schema_version").fetchone()
             return int(row[0]) if row else 1
 
-    def get_readings_count(self, ppe_id: str | None = None) -> int:
-        """Return count of interval readings."""
+    @staticmethod
+    def _identity_filter(
+        ppe_id: str | None, meter_id: str | None
+    ) -> tuple[str, list[str]]:
+        """Build a WHERE clause matching PPE-prefix variants and meter_id.
+
+        Mirrors :meth:`get_readings` so a diagnostic asking for the *real* PPE
+        still sees rows archived under the synthetic ``PPE_<meter_point_id>``
+        (and vice-versa) instead of reporting zero.
+        """
+        variants: list[str] = []
+        if ppe_id:
+            clean = str(ppe_id).replace("PPE_", "")
+            variants = [str(ppe_id), clean, f"PPE_{clean}"]
+        if meter_id:
+            variants.append(str(meter_id))
+        variants = [v for v in dict.fromkeys(variants) if v]
+        if not variants:
+            return "", []
+        placeholders = ", ".join(["?"] * len(variants))
+        return (
+            f"(ppe_id IN ({placeholders}) OR meter_id IN ({placeholders}))",
+            variants + variants,
+        )
+
+    def get_readings_count(
+        self, ppe_id: str | None = None, meter_id: str | None = None
+    ) -> int:
+        """Return count of interval readings for a PPE/meter (or all)."""
+        where, params = self._identity_filter(ppe_id, meter_id)
+        sql = "SELECT count(*) FROM interval_reading"
+        if where:
+            sql = f"{sql} WHERE {where}"
         with self._connection() as conn:
-            if ppe_id:
-                row = conn.execute(
-                    "SELECT count(*) FROM interval_reading WHERE ppe_id = ?", (ppe_id,)
-                ).fetchone()
-            else:
-                row = conn.execute("SELECT count(*) FROM interval_reading").fetchone()
+            row = conn.execute(sql, params).fetchone()
             return int(row[0]) if row else 0
 
-    def get_latest_reading_time(self, ppe_id: str | None = None) -> datetime | None:
-        """Return timestamp of the newest interval reading."""
+    def get_latest_reading_time(
+        self, ppe_id: str | None = None, meter_id: str | None = None
+    ) -> datetime | None:
+        """Return timestamp of the newest interval reading for a PPE/meter (or all)."""
+        where, params = self._identity_filter(ppe_id, meter_id)
+        sql = "SELECT MAX(interval_start_utc) FROM interval_reading"
+        if where:
+            sql = f"{sql} WHERE {where}"
         with self._connection() as conn:
-            if ppe_id:
-                row = conn.execute(
-                    "SELECT MAX(interval_start_utc) FROM interval_reading WHERE ppe_id = ?",
-                    (ppe_id,),
-                ).fetchone()
-            else:
-                row = conn.execute("SELECT MAX(interval_start_utc) FROM interval_reading").fetchone()
+            row = conn.execute(sql, params).fetchone()
 
             if row and row[0]:
                 val = row[0]

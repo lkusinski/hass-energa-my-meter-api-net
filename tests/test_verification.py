@@ -396,6 +396,32 @@ class TestFullInvoiceFieldSet:
         assert res["brutto"] == 773.12
         assert res["do_zaplaty"] == 615.53
 
+    def test_deposit_rcem_override_only_revalues_generated_deposit(self):
+        """Bug 2: a seller may credit the deposit with a different RCEm.
+
+        ``deposit_rcem`` values only the generated deposit; the energy,
+        distribution and the reporting ``rcem`` stay tied to the period RCEm.
+        """
+        hourly = _hourly((398, 38, 238), (309, 23, 197))
+        base = build_period_invoice(
+            hourly, fees=G12W_DEFAULT_FEES, rcem=0.29453, months=1,
+            old_system=False, deposit_open_pln=0.0, prosumer_coefficient=0.0,
+            tariff="G12W",
+        )
+        override = build_period_invoice(
+            hourly, fees=G12W_DEFAULT_FEES, rcem=0.29453,
+            deposit_rcem=0.1988, months=1, old_system=False,
+            deposit_open_pln=0.0, prosumer_coefficient=0.0, tariff="G12W",
+        )
+        # 435 kWh x 0.1988 x 1.23 = 106.37 (vs 157.59 at 0.29453)
+        assert override["deposit_generated"] == 106.37
+        assert base["deposit_generated"] == 157.59
+        # Energy / distribution lines are untouched by the deposit RCEm.
+        assert override["netto"] == base["netto"]
+        assert override["brutto"] == base["brutto"]
+        assert override["rcem"] == 0.29453
+        assert override["rcem_deposit"] == 0.1988
+
     def test_net_billing_unknown_opening_keeps_numbers_but_flags(self):
         # No explicit opening deposit -> honest null + coverage_unknown, yet
         # the single-month amount (Agrestowa 08.2026) is still exact.

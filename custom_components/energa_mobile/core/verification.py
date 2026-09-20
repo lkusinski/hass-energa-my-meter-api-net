@@ -211,6 +211,7 @@ def build_period_invoice(
     months: int = 1,
     old_system: bool = False,
     deposit_open_pln: float | None = None,
+    deposit_rcem: float | None = None,
     cover_day: float = 0.0,
     cover_night: float = 0.0,
     bank_open_1: float | None = None,
@@ -233,6 +234,12 @@ def build_period_invoice(
         deposit_open_pln: explicit **opening** deposit balance (net-billing).
             ``None`` means it could not be reconstructed → ``deposit_open`` is
             reported as ``null`` and ``coverage_unknown`` is set.
+        deposit_rcem: optional RCEm (PLN/kWh) used **only** to value the
+            deposit *generated* in this period (``export × RCEm × 1.23``).
+            Sellers may credit the deposit with the market price of a
+            different month than the energy itself, so this can be set
+            independently of ``rcem`` (which still labels the result). ``None``
+            keeps using ``rcem`` for backward compatibility.
         cover_day/cover_night: explicit warehouse coverage (net-metering
             only). When ``bank_open_1/2`` are given the coverage is computed
             as ``min(bank_open, salda dodatnie)`` and the explicit values act
@@ -302,6 +309,7 @@ def build_period_invoice(
         out = dict(res)
         out["kwh"] = kwh
         out["rcem"] = float(rcem or 0.0)
+        out["rcem_deposit"] = float(rcem or 0.0)
         out["months"] = max(1, int(months))
         out["old_system"] = False
         out["system"] = settlement_system_name(False, False)
@@ -358,9 +366,10 @@ def build_period_invoice(
         else:
             deposit_open_calc = max(0.0, float(deposit_open_pln))
             deposit_open_out = deposit_open_calc
-        deposit_generated = _round2(
-            float(bases["export"]) * float(rcem or 0.0) * 1.23
+        deposit_price = (
+            float(deposit_rcem) if deposit_rcem is not None else float(rcem or 0.0)
         )
+        deposit_generated = _round2(float(bases["export"]) * deposit_price * 1.23)
         deposit_total = _round2(deposit_open_calc + deposit_generated)
 
     res = compute_bill(
@@ -404,6 +413,9 @@ def build_period_invoice(
     out = dict(res)
     out["kwh"] = kwh
     out["rcem"] = float(rcem or 0.0)
+    out["rcem_deposit"] = (
+        float(deposit_rcem) if deposit_rcem is not None else float(rcem or 0.0)
+    )
     out["months"] = max(1, int(months))
     out["old_system"] = bool(old_system)
     from ..settlement import settlement_system_name

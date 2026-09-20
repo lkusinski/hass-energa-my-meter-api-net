@@ -781,7 +781,9 @@ class EnergaDataQualitySensor(CoordinatorEntity, SensorEntity):
         # Fallback to storage newest reading
         if self._storage:
             try:
-                latest_dt = self._storage.get_latest_reading_time(self._ppe or self._meter_id)
+                latest_dt = self._storage.get_latest_reading_time(
+                    self._ppe or self._meter_id, meter_id=self._meter_id
+                )
                 if latest_dt:
                     return latest_dt.date()
             except Exception:
@@ -828,8 +830,12 @@ class EnergaDataQualitySensor(CoordinatorEntity, SensorEntity):
         latest_storage_dt = None
         if self._storage:
             try:
-                rec_count = self._storage.get_readings_count(self._ppe or self._meter_id)
-                latest_storage_dt = self._storage.get_latest_reading_time(self._ppe or self._meter_id)
+                rec_count = self._storage.get_readings_count(
+                    self._ppe or self._meter_id, meter_id=self._meter_id
+                )
+                latest_storage_dt = self._storage.get_latest_reading_time(
+                    self._ppe or self._meter_id, meter_id=self._meter_id
+                )
             except Exception:
                 pass
 
