@@ -10,7 +10,7 @@
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
 ![Tests](https://img.shields.io/badge/tests-350_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.2-beta.5](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2-beta.5) (pre-release)** — naprawa fresh onboardingu: wybrany produkt jest teraz zapisywany (`product_source=explicit`) i pusty `inverter_energy_entity` nie blokuje zapisu Options (bez zmian wyników rozliczeń). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2) (stabilne)** — konsolidacja linii beta: nazwane presety produktów (`G11_STANDARD`, `G11_OFERTA`, `G12W_URZEDOWA`, `G12W_OFERTA`) z głośnymi ostrzeżeniami o stawkach, naprawa fresh onboardingu (`product_source=explicit`), poprawna prognoza rachunku (`forecast_payable_pln`), `reconcile_invoice` G12W oraz porządki P2 (bez zmian wyników rozliczeń). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
@@ -261,6 +261,7 @@ Szczegółowe opracowania poszczególnych modułów systemu:
 * ⚡ **[Automatyzacje i Blueprints (docs/AUTOMATIONS.md)](docs/AUTOMATIONS.md):** Gotowe automatyzacje pod ceny dynamiczne PSE, ujemne ceny RCE, ładowanie magazynów BESS i autokonsumpcję.
 * 🛡️ **[Stabilność, Restarty HA i Integracje Chmurowe (docs/STABILITY_AND_INTEGRATIONS.md)](docs/STABILITY_AND_INTEGRATIONS.md):** Analiza stabilności, zjawisko przeciążenia chmur zewnętrznych (np. SolisCloud) podczas restartów HA oraz rekomendacje local-first (Modbus).
 * 🗺️ **[Mapa Rozwoju i Katalog Propozycji (docs/ROADMAP.md)](docs/ROADMAP.md):** Planowane funkcje (wykresy ApexCharts, sensory binarne, szablony Blueprints) oraz zaproszenie do zgłaszania Issues na GitHubie.
+* 🧾 **[Różnica na L2 vs faktura OSD (docs/ROZNICA_L2_OSD.md)](docs/ROZNICA_L2_OSD.md):** Dlaczego kalkulator może dać ~0,66 zł brutto mniej niż faktura (±1 kWh w strefie nocnej: sumy godzinowych sald dodatnich po stronie OSD w całych kWh vs nasza godzinowa seria z API). Metoda i pozostałe pozycje zgadzają się co do grosza.
 
 ---
 

@@ -1,5 +1,97 @@
 # Changelog
 
+## v1.9.2 (2026-09-20) — stabilna: presety produktów, fix onboardingu, poprawna prognoza i reconcile
+
+Wydanie **stabilne** konsolidujące całą linię `v1.9.2-beta.1`–`v1.9.2-beta.5`:
+naprawy P0/P1 z audytu `AUDYT_1.9.1.md`, porządki P2, nazwane **presety
+produktów** z głośnymi ostrzeżeniami oraz **fix fresh onboardingu**
+(`product_source=explicit`). Bez zmian API i schematu danych — aktualizacja
+z `v1.9.2-beta.5` (i wcześniejszych) jest bezpieczna. Szeregi godzinowe,
+silnik FIFO i metoda rozliczeń bez zmian względem `v1.9.1`.
+
+- **P0.1 — prognoza rachunku faktycznie liczona** (`projections/forecast.py`).
+  `HourlyProfileForecaster` wołał `compute_bill(..., export_total=...)`, a
+  parametr nazywa się `export_kwh` → `TypeError` połykany w `except`, więc
+  `forecast_payable_pln`/`bill_breakdown` były **zawsze `None`**. Poprawiono
+  nazwę argumentu, dodano log z kontekstem i test gałęzi `tariff_options`.
+- **P0.2 — `reconcile_invoice` G12W liczył od 0 kWh** (`services.py`). Schemat
+  nadawał `day_kwh`/`night_kwh` `default=0.0`, więc fallback
+  `consumption_kwh / 2` był martwy. Usunięto domyślne wartości i dodano
+  `_g12w_day_night_split` (brak stref → 50/50 z `consumption_kwh`; jedna
+  strefa → dopełnienie z sumy). Testy usługi i schematu.
+- **P1.1 — e-mail w diagnostyce maskowany** (`diagnostics.py`).
+  `username`/`user`/`login` w `TO_REDACT`, a wartości e-mail częściowo
+  maskowane (`a***@d***`) zamiast trafiać do zrzutu.
+- **P1.2 — jedna definicja `is_export_prosumer`.** Usunięto sprzeczny
+  duplikat z `dashboard_generator` (`is_prosumer or has_export`; `has_export`
+  nigdzie nie było ustawiane) i używana jest wersja z `settlement.py`.
+- **P1.3 — stawki produktu w sensorach rachunku.** Sensory rachunku i
+  forecaster przekazują `old_system` do `fees_from_options`, więc
+  `G12W_OFERTA`/`G12W_URZEDOWA` są inferowane identycznie jak w
+  `verify_period` — prognoza i „Dotychczasowy rachunek" używają tej samej
+  tabeli co kalkulator.
+- **P1.4 — pokrycie magazynu (`_warehouse_cover`) zgodne z Bankiem.** Wspólny
+  silnik `bank_kwh_snapshot` (data faktury → FIFO 12 m-cy → rolling 365d →
+  baseline) dla sensora „Bank Wirtualny kWh" i rachunku; pokrycie liczone
+  **per strefa L1/L2** (`min(bank_lx, import_lx)`, jak w
+  `core/verification.py`), z uwzględnieniem daty rozliczenia
+  (`sensors/bank.py`, `sensors/bill.py`).
+- **P1.5 — log zamiast cichego `pass`** w best-effort `except` (odświeżanie
+  godzinowe, cache RCEm, parsowanie punktów pamięciowych).
+- **P2 — porządki z audytu (bez zmian zachowania).** Usunięto martwy kod:
+  nieużywany `EnergaApiClient`/`_request_with_retry` i błędy adaptera Energa,
+  `Coordinator.get_meter_total`, `sensors/bank._nets`,
+  `RceDynamicPriceSensor.async_update_rcem`, `MeterReadingOffset`,
+  `IntervalReading.revision_key`, deprecated alias `_has_any_panel_statistics`,
+  martwe instancje `MigrationMap`/`ProsumerAlertManager` z `hass.data`, a także
+  `settlement.latest_official_rcem` i `const.DEFAULT_TARIFF_*`. Naprawiono
+  `AlertItem.created_at_utc` (`field(default_factory=...)` — wcześniej wspólny
+  znacznik z momentu importu). Uzupełniono `services.yaml` i tłumaczenia
+  (`strings.json`, `translations/{en,pl}.json`) o opisy `fetch_history`,
+  `reconcile_invoice`, `verify_period`, `clear_period`. Świadomie pozostawione
+  (z notą): równoległe silniki FIFO `core/settlement/fifo_*`,
+  `projections/statistics.py`, `ha/migration_map.MigrationMap` — scalanie to
+  osobny, zweryfikowany refaktor.
+- **Presety produktów + głośne ostrzeżenia o stawkach** (`tariff.py`,
+  `config_flow.py`). Cztery nazwane presety, każdy zweryfikowany na fakturze
+  (netto PLN): `G11_STANDARD` (energia 0,6114; handlowa 16,18; abonament 0,70;
+  sieciowa stała 11,77; zmienna 0,3485), `G11_OFERTA` (energia 0,605286;
+  handlowa 20,32; abonament 0,74), `G12W_URZEDOWA` (0,6107/0,3990; handlowa 0;
+  abonament 0,74; stała 20,17; zmienna 0,4017/0,0851), `G12W_OFERTA`
+  (0,7125/0,4622; handlowa 16,18; abonament 0,70). Selektor `tariff_product`
+  w onboardingu i Options (nagłówek „Oferta / cennik Energa (produkt)",
+  domyślnie `auto`): wybór presetu materializuje wszystkie `tariff_*` →
+  `fee_source=product`; `auto` pozostaje inferencją (net-metering →
+  `G12W_OFERTA`, net-billing → `G12W_URZEDOWA`, G11 → `G11_STANDARD`).
+  Dla `fee_source=defaults`/`partial` oraz produktu tylko wnioskowanego
+  pojawia się **głośne ostrzeżenie** w `warnings` `verify_period` i w
+  atrybutach `sensor.*_weryfikacja_rachunku` (nowe atrybuty `tariff_product`,
+  `product_source`).
+- **Fix fresh onboardingu — `product_source=explicit`** (`config_flow.py`).
+  Kroki `async_step_system`/`async_step_system_fallback` budowały `options`
+  tylko z `_pending_options`; `user_input` z `tariff_product` **nie był
+  scalany**, więc wybrany produkt po cichu przepadał (`product_source=none`/
+  `inferred`), a na G11 skutkowało to błędnym rachunkiem (Bursztynowa 08.2026:
+  79,30 zamiast 84,44). Nowy helper `_merge_onboarding_choice` scala pola
+  formularza do `options` **przed** `_apply_tariff_product`. Dodatkowo P2:
+  pusty `inverter_energy_entity` nie blokuje już zapisu Options — nowy helper
+  `_inverter_entity_field` dokłada pole bez defaultu, gdy encji nie
+  skonfigurowano (`EntitySelector` odrzucał zarówno `""`, jak i `None`).
+- **Dokument różnicy na L2:** [`docs/ROZNICA_L2_OSD.md`](docs/ROZNICA_L2_OSD.md)
+  — dlaczego kalkulator może dać ~0,53 zł netto / ~0,66 zł brutto mniej niż
+  faktura (hourly netting API vs sumy sald dodatnich OSD; ±1 kWh w strefie
+  nocnej), mimo poprawnej metody.
+- **Regresje faktur:** Agrestowa 08.2026 = netto **628,55** / VAT 144,57 /
+  brutto **773,12** / depozyt 157,59 / do zapłaty **615,53**; Wiśniowa
+  07–08.2026 = **158,72**; Bursztynowa 08.2026 = **84,44** (z presetu
+  `G11_OFERTA`, także przez świeży onboarding).
+- **Testy:** **738 passed, 1 skipped**; `ruff` czysty. Nowe regresje:
+  `TestOnboardingProductPersistence`, `TestOnboardingBillingRegression`,
+  `TestOptionsInverterEntity`, `TestProductLabels`,
+  `TestLocalizedProductLabels`. Weryfikacja na labach 123–127 (Faza A na
+  prod + Faza B fresh onboarding): `product_source=explicit`,
+  `fee_source=product`, liczby zgodne z fakturą (szczegóły: `WNIOSKI_LAB.md`).
+
 ## v1.9.2-beta.5 (2026-09-19) — naprawa fresh onboardingu (P1) + P2 encji falownika
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.2-beta.4`. Naprawia **krytyczny
@@ -156,12 +248,12 @@ dokumentacji usług/tłumaczeń.
   to zmiana ryzykowna, do decyzji w kolejnym wydaniu.
 - **Testy:** 695 passed, 1 skipped; `ruff` czysty. Regresje faktur bez zmian.
 
-## v1.9.2 (2026-09-19) — naprawa prognozy rachunku, G12W reconcile, PII i spójność stawek/magazynu
+## v1.9.2-beta.1 (2026-09-19) — naprawa prognozy rachunku, G12W reconcile, PII i spójność stawek/magazynu
 
 Wydanie naprawcze po audycie 1.9.1 (`AUDYT_1.9.1.md`): dwa błędy P0 i cztery
 ryzyka P1 (maskowanie PII, jedna definicja prosumera, stawki produktu w
 sensorach, spójność pokrycia magazynu z Bankiem). Bez zmian w API i schemacie
-danych. **Pre-release** (`v1.9.2`).
+danych. **Pre-release** (`v1.9.2-beta.1`).
 
 - **P0.1 — prognoza rachunku faktycznie liczona.** `HourlyProfileForecaster`
   wołał `compute_bill(..., export_total=...)`, podczas gdy parametr nazywa się
