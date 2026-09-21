@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.9.3-beta.5 (2026-09-21) — fix setup timeout na dużej bazie kanonicznej (pre-release)
+
+Wydanie **pre-release** naprawiające blokadę z **issue #4**: linia `1.9.3-beta.x`
+nie dochodziła do `loaded` przy dużej kanonicznej bazie, bo pierwszy refresh
+przekraczał sztywny sufit 90 s. Naprawa dwutorowa, **bez zmiany wyników
+rozliczeń** (golden FIFO + testy storage bez zmian).
+
+- **Wydajność `CanonicalStorage.get_readings` (`storage/sqlite/database.py`).**
+  Deduplikacja tożsamości z `beta.1` używała korelowanego podzapytania
+  wykonywanego per wiersz (O(n²)). Przepisana na **jedno przejście z funkcją
+  okna** (`ROW_NUMBER() OVER (PARTITION BY interval_start_utc ...)`). Wynikowy
+  zbiór bez zmian — pilnują go `tests/test_storage_sqlite.py` i
+  `tests/test_canonical_identity.py`.
+- **Migracja schematu v3.** Nowe indeksy wspierające odczyt:
+  `idx_reading_identity (ppe_id, resolution, interval_start_utc)`,
+  `idx_reading_meter_identity (meter_id, resolution, interval_start_utc)`,
+  `idx_reading_event_start (event_key, interval_start_utc)`. Migracja
+  automatyczna przy starcie (`CURRENT_SCHEMA_VERSION = 3`).
+- **Profil nie blokuje setupu (`coordinator.py`).** Pierwszy refresh
+  (`self.data is None`) **harmonogramuje** ciężkie liczenie profilu jako
+  zadanie w tle (śledzone, anulowane przy unload/reload) zamiast go
+  awaitować; po zakończeniu odświeża listenery. Kolejne refreshe nadal czekają
+  na profil. Dzięki temu setup nie przekroczy sufitu 90 s nawet na wolnej bazie.
+- **Weryfikacja labowa:** VM123 (Wiśniowa, upgrade z `1.9.2-beta.5`) — przed
+  poprawką `setup_retry`/`ConfigEntryNotReady`, po poprawce **`loaded`**;
+  kalkulator działa (09.2026: 61,37 / 14,12 / **75,49**, `opening_source=recorder`).
+  Szczegóły: `lab_v193b4/RUNLOG_FIX.md`, issue #4.
+- **Testy:** 788 passed, 1 skipped; `ruff` (`E,F,I`) czysty. Nowy test:
+  `_schedule_profile_refresh` nie blokuje wywołującego.
+- **Wydanie:** `1.9.3-beta.5`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.4 (2026-09-21) — sprint P2: scalenie silnika FIFO + usunięcie martwego kodu (pre-release)
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.3`. Zamyka **sprint

@@ -245,6 +245,30 @@ class TestProfileForecastTaskCancellation:
         await coordinator.async_shutdown()
 
 
+    @pytest.mark.asyncio
+    async def test_schedule_profile_refresh_returns_immediately(self):
+        """Background profile scheduling must not block the caller (issue #4)."""
+        from custom_components.energa_mobile.coordinator import EnergaCoordinator
+
+        coordinator = EnergaCoordinator.__new__(EnergaCoordinator)
+        started = asyncio.Event()
+
+        async def _slow_profile(active_meters):
+            started.set()
+            await asyncio.sleep(3600)
+
+        coordinator._async_update_profile_forecasts = _slow_profile
+        coordinator._profile_forecast_task = None
+
+        # Returns at once even though the profile task hangs.
+        coordinator._schedule_profile_refresh([])
+        assert coordinator._profile_forecast_task is not None
+
+        await started.wait()
+        await coordinator.async_shutdown()
+        assert coordinator._profile_forecast_task is None
+
+
 class TestServicePublishesResultToSensor:
     def test_publish_sets_store_under_point_id_and_serial(self):
         from custom_components.energa_mobile.services import (

@@ -26,7 +26,7 @@ from ...core.tariffs.models import InvoiceReconciliation
 
 _LOGGER = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 SCHEMA_V1_SQL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -187,6 +187,18 @@ CREATE TABLE IF NOT EXISTS invoice_reconciliation_line (
 CREATE INDEX IF NOT EXISTS idx_recon_lines ON invoice_reconciliation_line (invoice_number);
 """
 
+SCHEMA_V3_SQL = """
+-- issue #4: index support for the identity-deduplicating read. The window
+-- function in get_readings filters by (ppe_id|meter_id, resolution) within a
+-- time range, so these composite indexes let SQLite avoid a full scan.
+CREATE INDEX IF NOT EXISTS idx_reading_identity
+    ON interval_reading (ppe_id, resolution, interval_start_utc);
+CREATE INDEX IF NOT EXISTS idx_reading_meter_identity
+    ON interval_reading (meter_id, resolution, interval_start_utc);
+CREATE INDEX IF NOT EXISTS idx_reading_event_start
+    ON interval_reading (event_key, interval_start_utc);
+"""
+
 
 class CanonicalStorage:
     """SQLite-backed canonical storage for energy readings and settlements."""
@@ -262,6 +274,14 @@ class CanonicalStorage:
                     (2, datetime.now(timezone.utc).isoformat()),
                 )
                 current_v = 2
+
+            if current_v < 3:
+                conn.executescript(SCHEMA_V3_SQL)
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (?, ?);",
+                    (3, datetime.now(timezone.utc).isoformat()),
+                )
+                current_v = 3
 
     # -------------------------------------------------------------------------
     # Identity: PPE & Meter Lifecycle
@@ -476,43 +496,38 @@ class CanonicalStorage:
             conditions.append("interval_start_utc < ?")
             params.append(end_utc.isoformat())
 
-        # For multiple revisions of same event_key, pick highest revision.
-        # Additionally collapse legacy duplicate identities: the historical
-        # import used to archive the same physical meter under a second
-        # ``ppe_id``/``meter_id`` pair (raw meter_point_id/serial) than the live
-        # updater (``PPE_<meter_point_id>``/meter_point_id). Without this a
-        # reader that matches across PPE-prefix and meter_id variants would
-        # return two rows for the same hour and double-count. Prefer the exact
-        # requested identity, then the canonical ``PPE_`` form, then the rest.
+        # Keep the highest revision per event_key, then collapse legacy
+        # duplicate identities within one hour, preferring the exact requested
+        # identity, then the canonical ``PPE_`` form, then the rest. Done with a
+        # single window pass: the previous correlated subquery scanned the table
+        # once per row (O(n^2)) and blew the 90 s first-refresh ceiling on large
+        # canonical bases (issue #4). Result set is unchanged.
         where_clause = " AND ".join(conditions)
         sql = f"""
-        SELECT * FROM interval_reading r
-        WHERE {where_clause}
-          AND r.revision = (
-              SELECT MAX(revision) FROM interval_reading sub
-              WHERE sub.event_key = r.event_key
-          )
-          AND r.rowid = (
-              SELECT d.rowid FROM interval_reading d
-              WHERE {where_clause}
-                AND d.interval_start_utc = r.interval_start_utc
-                AND d.revision = (
-                    SELECT MAX(revision) FROM interval_reading sub2
-                    WHERE sub2.event_key = d.event_key
-                )
-              ORDER BY
-                  CASE
-                      WHEN d.ppe_id = ? THEN 0
-                      WHEN d.ppe_id LIKE 'PPE_%' THEN 1
-                      ELSE 2
-                  END,
-                  d.rowid DESC
-              LIMIT 1
-          )
+        SELECT * FROM (
+            SELECT r.*,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY r.interval_start_utc
+                       ORDER BY
+                           CASE
+                               WHEN r.ppe_id = ? THEN 0
+                               WHEN r.ppe_id LIKE 'PPE_%' THEN 1
+                               ELSE 2
+                           END,
+                           r.rowid DESC
+                   ) AS _identity_rank
+            FROM interval_reading r
+            WHERE {where_clause}
+              AND r.revision = (
+                  SELECT MAX(revision) FROM interval_reading sub
+                  WHERE sub.event_key = r.event_key
+              )
+        ) ranked
+        WHERE _identity_rank = 1
         ORDER BY interval_start_utc ASC;
         """
         with self._connection() as conn:
-            cur = conn.execute(sql, params + params + [ppe_id])
+            cur = conn.execute(sql, [ppe_id] + params)
             out = []
             for row in cur.fetchall():
                 out.append(

@@ -25,7 +25,10 @@ from custom_components.energa_mobile.core.readings.models import (
     IntervalReading,
     SourceObservation,
 )
-from custom_components.energa_mobile.storage.sqlite.database import CanonicalStorage
+from custom_components.energa_mobile.storage.sqlite.database import (
+    CURRENT_SCHEMA_VERSION,
+    CanonicalStorage,
+)
 
 
 @pytest.fixture
@@ -302,14 +305,25 @@ def test_schema_v1_to_v2_migration(tmp_path):
     assert ppe is not None
     assert ppe.ppe_id == "PL_MIGRATE_TEST"
 
-    # Verify Schema version is now 2
+    # Verify schema is migrated to the current version (V1 -> V2 -> V3)
     with storage._connection() as c:
         cur = c.execute("SELECT MAX(version) FROM schema_version;")
-        assert cur.fetchone()[0] == 2
+        assert cur.fetchone()[0] == CURRENT_SCHEMA_VERSION
 
         # Verify V2 tables exist
         cur2 = c.execute("SELECT count(*) FROM market_price;")
         assert cur2.fetchone()[0] == 0
+
+        # Verify V3 identity indexes exist (issue #4 performance fix)
+        idx = {
+            r[0]
+            for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='interval_reading';"
+            ).fetchall()
+        }
+        assert "idx_reading_identity" in idx
+        assert "idx_reading_meter_identity" in idx
 
 
 def test_market_prices_crud_and_effective_lookup(storage: CanonicalStorage):

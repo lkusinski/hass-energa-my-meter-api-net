@@ -255,8 +255,16 @@ class EnergaCoordinator(DataUpdateCoordinator):
             # === Hourly Profile WAL Forecasting in worker thread (v1.6.9) ===
             # Runs as a tracked task so an unload/reload can cancel it cleanly
             # (previously a bare ``await`` made ``async_unload_entry`` cancel
-            # the coordinator task and log an ERROR + traceback).
-            await self._async_refresh_profile_forecasts(active_meters)
+            # the coordinator task and log an ERROR + traceback). The FIRST
+            # refresh is special: profile computation reads the whole canonical
+            # history and must not gate config-entry setup, or a large base can
+            # blow the 90 s ceiling in ``async_setup_entry`` (issue #4). So on
+            # startup it is scheduled in the background; later refreshes keep
+            # awaiting it so listeners see fresh profiles.
+            if self.data is None:
+                self._schedule_profile_refresh(active_meters)
+            else:
+                await self._async_refresh_profile_forecasts(active_meters)
 
             return active_meters
 
@@ -693,6 +701,37 @@ class EnergaCoordinator(DataUpdateCoordinator):
                     summary.autoconsumption_ratio_mtd,
                     summary.savings_mtd_pln,
                 )
+
+    def _schedule_profile_refresh(self, active_meters: list[dict]) -> None:
+        """Run the profile refresh in the background (first setup only).
+
+        The profile computation reads the entire canonical history; on a large
+        base it can outlast the 90 s ``wait_for`` ceiling that guards the first
+        config-entry refresh (issue #4). Scheduling it as a tracked background
+        task lets setup complete while the profile fills in. Listeners are
+        notified when it finishes so forecast sensors pick up the new cache.
+        """
+        previous = self._profile_forecast_task
+        if previous is not None and not previous.done():
+            previous.cancel()
+
+        async def _runner() -> None:
+            try:
+                await self._async_update_profile_forecasts(active_meters)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - profile is best effort
+                _LOGGER.debug("Energa: background profile refresh failed: %s", err)
+            else:
+                try:
+                    self.async_update_listeners()
+                except Exception as err:  # noqa: BLE001 - listener update best effort
+                    _LOGGER.debug("Energa: profile listener update failed: %s", err)
+            finally:
+                if self._profile_forecast_task is asyncio.current_task():
+                    self._profile_forecast_task = None
+
+        self._profile_forecast_task = asyncio.get_running_loop().create_task(_runner())
 
     async def _async_refresh_profile_forecasts(self, active_meters: list[dict]) -> None:
         """Run the profile refresh as a cancellable, tracked task.
