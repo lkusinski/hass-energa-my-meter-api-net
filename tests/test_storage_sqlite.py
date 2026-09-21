@@ -209,6 +209,42 @@ def test_get_readings_ppe_prefix_and_meter_id_fallback(storage: CanonicalStorage
     assert len(res_meter) == 2
 
 
+def test_get_readings_keeps_distinct_registers_same_hour(storage: CanonicalStorage):
+    """Identity dedup must not collapse different registers in the same hour.
+
+    ``import`` and ``export`` are archived as separate rows sharing an
+    ``interval_start_utc``; an unfiltered read (used by the profile forecast)
+    must return both, otherwise half the flow is silently lost.
+    """
+    t = datetime(2026, 9, 15, 10, 0, 0)
+    storage.insert_readings_idempotent(
+        [
+            IntervalReading(
+                ppe_id="PPE_372197",
+                meter_id="372197",
+                register="import_1",
+                interval_start_utc=t,
+                resolution="1h",
+                import_kwh=Decimal("1.000"),
+                source="energa",
+            ),
+            IntervalReading(
+                ppe_id="PPE_372197",
+                meter_id="372197",
+                register="export_1",
+                interval_start_utc=t,
+                resolution="1h",
+                export_kwh=Decimal("0.500"),
+                source="energa",
+            ),
+        ]
+    )
+
+    rows = storage.get_readings(ppe_id="PPE_372197", resolution="1h")
+    registers = sorted(r.register for r in rows)
+    assert registers == ["export_1", "import_1"]
+
+
 def test_reading_revisions(storage: CanonicalStorage):
     """Test that higher revisions supersede earlier ones without deleting history."""
     ppe_id = "PL_REV_001"

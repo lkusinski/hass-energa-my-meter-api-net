@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.9.3-beta.6 (2026-09-21) — dedup nie gubi rejestru import/export (pre-release)
+
+Wydanie **pre-release** naprawiające błąd danych wykryty przy okazji issue #4:
+`get_readings` bez filtra `register` zwracał **jeden wiersz na godzinę**, gubiąc
+jeden z rejestrów (`import`/`export`), bo dedup tożsamości grupował tylko po
+`interval_start_utc`. Dotyczyło to profilu dobowego i autokonsumpcji
+(`coordinator`, `sensors/bill`). Ścieżka faktur filtruje po `register`, więc
+**wyniki rozliczeń się nie zmieniają**.
+
+- **`get_readings`**: `PARTITION BY interval_start_utc, register` — dwie
+  tożsamości tego samego rejestru nadal się scalają, ale różne rejestry w tej
+  samej godzinie są zachowane. Nowy test regresyjny
+  `test_get_readings_keeps_distinct_registers_same_hour`.
+- **Wpływ:** prognoza profilu i autokonsumpcja widzą teraz pełny import i eksport.
+  Faktury bez zmian (ścieżka `_read_canonical_hourly` filtruje per `register`).
+- **Weryfikacja labowa:** faktury Wiśniowa/Agrestowa/Bursztynowa bez zmian po
+  fixie (kanoniczna baza).
+- **Testy:** 789 passed, 1 skipped; `ruff` (`E,F,I`) czysty.
+- **Wydanie:** `1.9.3-beta.6`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.5 (2026-09-21) — fix setup timeout na dużej bazie kanonicznej (pre-release)
 
 Wydanie **pre-release** naprawiające blokadę z **issue #4**: linia `1.9.3-beta.x`

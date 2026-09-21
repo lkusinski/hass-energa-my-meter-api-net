@@ -497,17 +497,20 @@ class CanonicalStorage:
             params.append(end_utc.isoformat())
 
         # Keep the highest revision per event_key, then collapse legacy
-        # duplicate identities within one hour, preferring the exact requested
-        # identity, then the canonical ``PPE_`` form, then the rest. Done with a
-        # single window pass: the previous correlated subquery scanned the table
-        # once per row (O(n^2)) and blew the 90 s first-refresh ceiling on large
-        # canonical bases (issue #4). Result set is unchanged.
+        # duplicate identities within one hour AND register, preferring the
+        # exact requested identity, then the canonical ``PPE_`` form, then the
+        # rest. The register is part of the grouping key on purpose: ``import``
+        # and ``export`` are separate rows sharing ``interval_start_utc``, and
+        # an unfiltered read (profile forecast, autoconsumption) must keep both.
+        # Done with a single window pass: the previous correlated subquery
+        # scanned the table once per row (O(n^2)) and blew the 90 s
+        # first-refresh ceiling on large canonical bases (issue #4).
         where_clause = " AND ".join(conditions)
         sql = f"""
         SELECT * FROM (
             SELECT r.*,
                    ROW_NUMBER() OVER (
-                       PARTITION BY r.interval_start_utc
+                       PARTITION BY r.interval_start_utc, r.register
                        ORDER BY
                            CASE
                                WHEN r.ppe_id = ? THEN 0
