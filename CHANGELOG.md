@@ -1,28 +1,13 @@
 # Changelog
 
-## Unreleased — P2.2: usunięcie martwego kodu (scaffold test-only)
+## v1.9.3-beta.4 (2026-09-21) — sprint P2: scalenie silnika FIFO + usunięcie martwego kodu (pre-release)
 
-Sprzątanie z audytu P2.2. Usunięte moduły nie były używane na **żadnej** ścieżce
-produkcyjnej (zweryfikowane `grep`-em po `custom_components/`) — istniały wyłącznie
-na potrzeby testów. **Zero zmian w wynikach rozliczeń i API integracji.**
+Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.3`. Zamyka **sprint
+porządkowy P2** z audytu z 2026-09-20 (P2.1–P2.4). **Zero zmian w wynikach
+rozliczeń, API i schemacie konfiguracji** — faktury nadal co do grosza (golden
+testy), a usunięte moduły były wyłącznie test-only.
 
-- **Usunięte moduły test-only:**
-  `adapters/energa/client.py` (+ pakiet `adapters/energa/`,
-  `normalize_chart_payload`), `ha/migration_map.py` (`MigrationMap`) oraz
-  `projections/statistics.py` (`build_statistic_id`,
-  `build_cumulative_statistic_data`, `build_virtual_bank_flow_data`).
-- **Aktualizowane eksporty:** `ha/__init__.py` (bez `MigrationMap`) i
-  `projections/__init__.py` (bez trzech funkcji `statistics`). Pozostałe
-  moduły (arbitrage, forecast) bez zmian.
-- **Usunięte/uszczuplone testy:** `tests/test_adapters_energa.py`,
-  `tests/test_migration_map.py`, `tests/test_projections.py` (całe pliki);
-  `tests/test_idempotent_reimport.py` zawężony do sedna — idempotencji
-  `CanonicalStorage.insert_readings_idempotent` (projekcje statystyk pokryte
-  przez `tests/test_recorder_adapter.py`).
-- **Testy:** 787 passed, 1 skipped; brak nowych uwag `ruff` (usunięte linie
-  miały te same, wcześniej istniejące uwagi).
-
-## Unreleased — P2.1: scalenie silnika FIFO (bez zmian wyników)
+### P2.1 — scalenie silnika FIFO (bez zmian wyników)
 
 Refaktor porządkowy z audytu P2.1. Produkcja i warstwa czysta korzystają teraz
 z **jednego** algorytmu FIFO 12 m-cy — koniec ryzyka, że testy walidują inny
@@ -45,8 +30,30 @@ algorytm niż produkcja. **Zero zmian w wynikach:** faktury nadal co do grosza
   czysta zgadzała się z produkcją. Fixture wygenerowano **przed** refaktorem.
 - **Świadomie poza zakresem:** `core/settlement/fifo_net_billing.py` (osobny,
   analogiczny refaktor; produkcja depozytu w `core/verification.py`).
-- **Testy:** 797 passed, 1 skipped; brak nowych uwag ruff (`fifo_engine.py`
-  i nowe testy czyste).
+
+### P2.2 — usunięcie martwego kodu (scaffold test-only)
+
+Sprzątanie z audytu P2.2. Usunięte moduły nie były używane na **żadnej** ścieżce
+produkcyjnej (zweryfikowane `grep`-em po `custom_components/`) — istniały wyłącznie
+na potrzeby testów. **Zero zmian w wynikach rozliczeń i API integracji.**
+
+- **Usunięte moduły test-only:**
+  `adapters/energa/client.py` (+ pakiet `adapters/energa/`,
+  `normalize_chart_payload`), `ha/migration_map.py` (`MigrationMap`) oraz
+  `projections/statistics.py` (`build_statistic_id`,
+  `build_cumulative_statistic_data`, `build_virtual_bank_flow_data`).
+- **Aktualizowane eksporty:** `ha/__init__.py` (bez `MigrationMap`) i
+  `projections/__init__.py` (bez trzech funkcji `statistics`). Pozostałe
+  moduły (arbitrage, forecast) bez zmian.
+- **Usunięte/uszczuplone testy:** `tests/test_adapters_energa.py`,
+  `tests/test_migration_map.py`, `tests/test_projections.py` (całe pliki);
+  `tests/test_idempotent_reimport.py` zawężony do sedna — idempotencji
+  `CanonicalStorage.insert_readings_idempotent` (projekcje statystyk pokryte
+  przez `tests/test_recorder_adapter.py`).
+
+- **Testy (całość po P2.1+P2.2):** **787 passed, 1 skipped**; `ruff`
+  (`E,F,I`) czysty, brak nowych uwag. (P2.1 w chwili scalenia: 797 passed.)
+- **Wydanie:** `1.9.3-beta.4`, **pre-release** (tag zawiera `-beta`).
 
 ## v1.9.3-beta.3 (2026-09-21) — przycisk Panelu Energia nie kasuje źródeł innych liczników (pre-release)
 
