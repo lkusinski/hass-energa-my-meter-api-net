@@ -208,3 +208,49 @@ def test_autoconsumption_sensor_entity():
     assert attrs["synced_hours_count"] == 24
     assert attrs["inverter_entity"] == "sensor.solis_energy_total"
 
+
+def test_autoconsumption_merges_separate_register_rows():
+    """Separate import/export rows for one hour must be summed, not overwritten.
+
+    Canonical storage archives import_1/export_1 as distinct rows sharing the
+    hour; before the merge fix only one register survived and the export was
+    silently dropped (autoconsumption looked like the whole PV production).
+    """
+    now_ref = datetime(2026, 9, 9, 15, 0, tzinfo=timezone.utc)
+    h10 = datetime(2026, 9, 9, 10, 0, tzinfo=timezone.utc)
+    pv_hourly = {h10: 3.5}
+
+    readings = [
+        IntervalReading(
+            ppe_id="PPE1",
+            meter_id="M1",
+            register="import_1",
+            interval_start_utc=h10,
+            resolution="1h",
+            import_kwh=Decimal("0.1"),
+            export_kwh=Decimal("0.0"),
+        ),
+        IntervalReading(
+            ppe_id="PPE1",
+            meter_id="M1",
+            register="export_1",
+            interval_start_utc=h10,
+            resolution="1h",
+            import_kwh=Decimal("0.0"),
+            export_kwh=Decimal("2.0"),
+        ),
+    ]
+
+    summary = compute_autoconsumption_summary(
+        pv_hourly_map=pv_hourly,
+        energa_readings=readings,
+        tariff="G12W",
+        now_dt=now_ref,
+    )
+
+    assert len(summary.buckets) == 1
+    bucket = summary.buckets[0]
+    assert bucket.import_kwh == 0.1
+    assert bucket.export_kwh == 2.0
+    assert bucket.autoconsumption_kwh == 1.5  # 3.5 PV - 2.0 exported
+

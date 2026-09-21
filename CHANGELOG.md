@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.3-beta.7 (2026-09-21) — autokonsumpcja scala rejestry import/export (pre-release)
+
+Wydanie **pre-release** po `v1.9.3-beta.6`. Naprawia błąd w autokonsumpcji PV:
+`compute_autoconsumption_summary` indeksował odczyty po godzinie i **nadpisywał**
+wpis, więc dla kanonicznej bazy (osobne wiersze `import_*`/`export_*` w tej samej
+godzinie) przeżywał tylko jeden rejestr — eksport bywał gubiony, a autokonsumpcja
+zawyżona. Teraz wiersze tej samej godziny są **sumowane**. Bez wpływu na faktury
+(ścieżka rozliczeń filtruje po `register`).
+
+- **`autoconsumption.py`**: `energa_by_hour` sumuje import/eksport per godzina
+  zamiast nadpisywać. Pojedynczy wiersz „combined" (ścieżka fallback) działa bez zmian.
+- **Testy:** 791 passed, 1 skipped; `ruff` (`E,F,I`) czysty. Nowy test
+  `test_autoconsumption_merges_separate_register_rows`.
+- **Wydanie:** `1.9.3-beta.7`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.6 (2026-09-21) — dedup nie gubi rejestru import/export (pre-release)
 
 Wydanie **pre-release** naprawiające błąd danych wykryty przy okazji issue #4:

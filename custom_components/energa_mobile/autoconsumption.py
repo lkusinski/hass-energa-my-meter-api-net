@@ -158,16 +158,21 @@ def compute_autoconsumption_summary(
             # If multiple points land in the same hour, take max or sum
             normalized_pv[h_utc] = max(normalized_pv.get(h_utc, 0.0), float(kwh))
 
-    # Index Energa readings by hour UTC
-    energa_by_hour: dict[datetime, tuple[float, float]] = {}
+    # Index Energa readings by hour UTC. Import/export are archived as
+    # SEPARATE canonical rows sharing the hour (import_1/import_2/export_1/...),
+    # so rows for the same hour must be MERGED (summed), not overwritten —
+    # otherwise only one register survives and the autoconsumption ratio is
+    # wrong. A combined single row (fallback path) still works unchanged.
+    energa_by_hour: dict[datetime, list[float]] = {}
     for r in energa_readings:
         if r.resolution != "1h":
             continue
         h_utc = normalize_hour_dt(r.interval_start_utc)
         imp_val = float(r.import_kwh) if r.import_kwh is not None else 0.0
         exp_val = float(r.export_kwh) if r.export_kwh is not None else 0.0
-        # If reading already seen, pick highest or latest
-        energa_by_hour[h_utc] = (imp_val, exp_val)
+        bucket = energa_by_hour.setdefault(h_utc, [0.0, 0.0])
+        bucket[0] += imp_val
+        bucket[1] += exp_val
 
     # Find intersection of hours where BOTH Energa and PV data are present
     common_hours = sorted(set(normalized_pv.keys()).intersection(energa_by_hour.keys()))
