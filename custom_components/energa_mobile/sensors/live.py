@@ -282,6 +282,10 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
     Supports zone-specific data (import_1, import_2 for G12w).
     """
 
+    # Technical entity feeding the recorder/Energy Dashboard: keep it working
+    # but hidden from device cards to avoid a confusing "unknown" state.
+    _attr_entity_registry_visible_default = False
+
     def __init__(
         self,
         coordinator: EnergaCoordinator,
@@ -551,6 +555,9 @@ class EnergaCostStatisticsSensor(CoordinatorEntity, SensorEntity):
     This sensor does NOT import statistics itself — all cost import
     logic lives in EnergaStatisticsSensor._handle_coordinator_update.
     """
+
+    # Technical placeholder for the recorder statistic_id: hidden by default.
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,
