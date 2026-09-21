@@ -53,6 +53,14 @@ na potrzeby testów. **Zero zmian w wynikach rozliczeń i API integracji.**
 
 - **Testy (całość po P2.1+P2.2):** **787 passed, 1 skipped**; `ruff`
   (`E,F,I`) czysty, brak nowych uwag. (P2.1 w chwili scalenia: 797 passed.)
+- **⚠️ Znany problem (do naprawy przed `1.9.3` stabilną):** na labach (VM123
+  Wiśniowa, upgrade z `1.9.2-beta.5`) linia `1.9.3-beta.x` **nie dochodzi do
+  `loaded`** przy dużej kanonicznej bazie — pierwszy refresh przekracza sztywny
+  sufit 90 s (`TimeoutError` → `ConfigEntryNotReady`) w ścieżce
+  `_async_update_data` → profil → `get_readings` (dedup z `beta.1`).
+  `1.9.2-beta.5` wstaje; `beta.3` i `beta.4` nie. **P2.1/P2.2 nie są przyczyną.**
+  Weryfikacja faktur labowych nie została wykonana (encje się nie tworzą).
+  Szczegóły i traceback: GitHub issue #4.
 - **Wydanie:** `1.9.3-beta.4`, **pre-release** (tag zawiera `-beta`).
 
 ## v1.9.3-beta.3 (2026-09-21) — przycisk Panelu Energia nie kasuje źródeł innych liczników (pre-release)
