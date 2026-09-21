@@ -37,6 +37,20 @@ from .settlement import is_export_prosumer
 _LOGGER = logging.getLogger(__name__)
 
 
+def _belongs_to_meter(source: dict[str, Any], prefixes: tuple[str, ...]) -> bool:
+    """Return True if any entity reference in ``source`` belongs to ``prefixes``.
+
+    Energy Dashboard sources are dicts with several entity-id/name string
+    values (``stat_energy_from``, ``stat_energy_to``, price entities, ...). A
+    source belongs to a meter when any of those strings contains one of the
+    meter's entity prefixes (``energa_<serial>_`` / ``energa_<point_id>_``).
+    """
+    return any(
+        isinstance(value, str) and any(prefix in value for prefix in prefixes)
+        for value in source.values()
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -174,6 +188,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         ppe = meter.get("ppe", meter_id)
 
         self._serial = serial
+        self._meter_point_id = str(meter_id)
         self._attr_unique_id = f"energa_{serial}_configure_energy_dashboard"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
@@ -382,9 +397,19 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
             battery_sources = []
 
         existing_sources = list(new_prefs.get("energy_sources", []))
+        # Only replace grid/battery sources that belong to THIS meter; leave
+        # other meters' sources (and any hand-made ones) untouched. The matcher
+        # accepts both the serial and the point id, because entities may linger
+        # under either identifier after an identification change.
+        prefixes = (
+            f"energa_{str(serial).lower()}_",
+            f"energa_{self._meter_point_id.lower()}_",
+        )
         kept_sources = [
-            s for s in existing_sources
+            s
+            for s in existing_sources
             if s.get("type") not in ("grid", "battery")
+            or not _belongs_to_meter(s, prefixes)
         ]
         kept_sources.extend(grid_sources)
         for b in battery_sources:

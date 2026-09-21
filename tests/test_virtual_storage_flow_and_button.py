@@ -181,6 +181,187 @@ class TestConfigureEnergyDashboardButton:
         assert grid_sources[0]["stat_energy_from"] == "sensor.energa_10000003_panel_energia_zuzycie"
         assert grid_sources[0]["stat_energy_to"] == "sensor.energa_10000003_panel_energia_produkcja"
 
+    @pytest.mark.asyncio
+    async def test_button_press_does_not_touch_other_meter_sources(self):
+        """Pressing for meter A must leave meter B's grid/battery sources intact."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {
+            "energy_sources": [
+                {
+                    "type": "grid",
+                    "stat_energy_from": "sensor.energa_11685328_panel_energia_zuzycie",
+                    "stat_energy_to": None,
+                },
+                {
+                    "type": "battery",
+                    "stat_energy_from": "sensor.energa_11685328_syntetyczny_magazyn_rozladowanie",
+                    "stat_energy_to": "sensor.energa_11685328_syntetyczny_magazyn_ladowanie",
+                },
+                {
+                    "type": "solar",
+                    "stat_energy_from": "sensor.other_meter_pv",
+                    "config_entry_solar_forecast": None,
+                },
+            ]
+        }
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {CONF_ENABLE_SYNTHETIC_STORAGE: False}
+        meter = {
+            "meter_point_id": "360074",
+            "meter_serial": "00069839",
+            "ppe": "PPE360074",
+            "zone_count": 1,
+            "tariff": "G11",
+        }
+
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch("homeassistant.components.energy.data.async_get_manager", AsyncMock(return_value=mock_manager)):
+            await button.async_press()
+
+        sources = mock_manager.async_update.call_args[0][0]["energy_sources"]
+
+        # Meter B's grid and battery survive untouched.
+        b_grid = [s for s in sources if s.get("stat_energy_from") == "sensor.energa_11685328_panel_energia_zuzycie"]
+        assert len(b_grid) == 1
+        b_batt = [s for s in sources if s.get("stat_energy_from") == "sensor.energa_11685328_syntetyczny_magazyn_rozladowanie"]
+        assert len(b_batt) == 1
+
+        # Meter A's own source is present.
+        a_grid = [s for s in sources if s.get("stat_energy_from") == "sensor.energa_00069839_panel_energia_zuzycie"]
+        assert len(a_grid) == 1
+
+        # Unrelated solar is untouched.
+        assert any(s.get("stat_energy_from") == "sensor.other_meter_pv" for s in sources)
+
+    @pytest.mark.asyncio
+    async def test_button_press_idempotent_for_same_meter(self):
+        """Pressing twice for the same meter must not duplicate its sources."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {"energy_sources": []}
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {CONF_ENABLE_SYNTHETIC_STORAGE: False}
+        meter = {
+            "meter_point_id": "360074",
+            "meter_serial": "00069839",
+            "ppe": "PPE360074",
+            "zone_count": 2,
+            "tariff": "G12",
+        }
+
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch("homeassistant.components.energy.data.async_get_manager", AsyncMock(return_value=mock_manager)):
+            await button.async_press()
+            await button.async_press()
+
+        sources = mock_manager.async_update.call_args[0][0]["energy_sources"]
+        grid = [s for s in sources if s.get("type") == "grid"]
+        assert len(grid) == 2
+        assert len({s.get("stat_energy_from") for s in grid}) == 2
+
+    @pytest.mark.asyncio
+    async def test_button_press_replaces_old_and_new_identifier_sources(self):
+        """Sources under both the old point id and the new serial are replaced."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {
+            "energy_sources": [
+                {
+                    "type": "grid",
+                    "stat_energy_from": "sensor.energa_360074_panel_energia_zuzycie",
+                    "stat_energy_to": None,
+                },
+                {
+                    "type": "grid",
+                    "stat_energy_from": "sensor.energa_00069839_panel_energia_zuzycie",
+                    "stat_energy_to": None,
+                },
+                {
+                    "type": "grid",
+                    "stat_energy_from": "sensor.energa_11685328_panel_energia_zuzycie",
+                    "stat_energy_to": None,
+                },
+            ]
+        }
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {CONF_ENABLE_SYNTHETIC_STORAGE: False}
+        meter = {
+            "meter_point_id": "360074",
+            "meter_serial": "00069839",
+            "ppe": "PPE360074",
+            "zone_count": 1,
+            "tariff": "G11",
+        }
+
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch("homeassistant.components.energy.data.async_get_manager", AsyncMock(return_value=mock_manager)):
+            await button.async_press()
+
+        sources = mock_manager.async_update.call_args[0][0]["energy_sources"]
+
+        # Stale old-id source is gone; only the current serial source remains.
+        assert not any(
+            s.get("stat_energy_from") == "sensor.energa_360074_panel_energia_zuzycie"
+            for s in sources
+        )
+        a_grid = [s for s in sources if s.get("stat_energy_from") == "sensor.energa_00069839_panel_energia_zuzycie"]
+        assert len(a_grid) == 1
+        # Other meter untouched.
+        assert any(
+            s.get("stat_energy_from") == "sensor.energa_11685328_panel_energia_zuzycie"
+            for s in sources
+        )
+
+    @pytest.mark.asyncio
+    async def test_button_press_keeps_and_does_not_duplicate_other_meter_solar(self):
+        """A solar source of another meter is neither removed nor duplicated."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {
+            "energy_sources": [
+                {
+                    "type": "solar",
+                    "stat_energy_from": "sensor.other_meter_pv",
+                    "config_entry_solar_forecast": None,
+                },
+            ]
+        }
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {
+            CONF_ENABLE_SYNTHETIC_STORAGE: False,
+            CONF_INVERTER_ENERGY_ENTITY: "sensor.meter_a_pv",
+        }
+        meter = {
+            "meter_point_id": "360074",
+            "meter_serial": "00069839",
+            "ppe": "PPE360074",
+            "zone_count": 1,
+            "tariff": "G11",
+        }
+
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch("homeassistant.components.energy.data.async_get_manager", AsyncMock(return_value=mock_manager)):
+            await button.async_press()
+
+        sources = mock_manager.async_update.call_args[0][0]["energy_sources"]
+        solar = [s for s in sources if s.get("type") == "solar"]
+        stat_ids = [s.get("stat_energy_from") for s in solar]
+        assert stat_ids.count("sensor.other_meter_pv") == 1
+        assert stat_ids.count("sensor.meter_a_pv") == 1
+
 
 class TestSyntheticSensor:
     """Tests for EnergaSyntheticStatisticsSensor attributes."""

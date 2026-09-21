@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.9.3-beta.3 (2026-09-21) — przycisk Panelu Energia nie kasuje źródeł innych liczników (pre-release)
+
+Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.2`. Naprawia **poważny
+błąd danych** przycisku „Skonfiguruj Panel Energia”: kliknięcie dla jednego
+licznika usuwało źródła `grid` i `battery` **wszystkich pozostałych liczników**
+ze wspólnego Panelu Energia. Bez zmian API, schematu konfiguracji i rozliczeń.
+
+- **BUG — globalny filtr po `type` kasował źródła innych liczników
+  (`button.py`, `EnergaConfigureEnergyDashboardButton.async_press`).** Stary
+  kod budował `kept_sources` odrzucając **wszystkie** wpisy `grid`/`battery`
+  (filtr wyłącznie po `type`), po czym dokładał źródła bieżącego licznika. Przy
+  dwóch lub więcej licznikach w jednej instancji klik na liczniku A bezpowrotnie
+  rozwalał panel licznika B (LTS zostawały, ale panel i przepływ energii się
+  rozjeżdżały). Przy jednym liczniku błąd był niewidoczny — dlatego przeszedł.
+- **Fix — filtr per licznik po obu identyfikatorach.** Nowy helper
+  `_belongs_to_meter()` uznaje źródło za należące do licznika, gdy dowolny jego
+  string zawiera prefiks `energa_<serial>_` **lub** `energa_<meter_point_id>_`
+  (serial i point id bywają różne, np. `11685328` vs `372197`; po zmianie
+  identyfikacji zostają encje pod starym id). Zastępowane są **wyłącznie**
+  źródła `grid`/`battery` tego licznika — inne liczniki, wpisy ręczne i `solar`
+  pozostają nietknięte. Jednocześnie sprzątane są martwe źródła pod starym
+  identyfikatorem (koniec `entity_unavailable` w `/energy`). Operacja jest
+  **idempotentna per licznik** — ponowny klik nie tworzy duplikatów.
+- **`__init__` przycisku** przechowuje teraz `self._meter_point_id` obok
+  `self._serial`.
+- **Testy:** **769 passed, 1 skipped**; brak nowych uwag `ruff` w zmienionych
+  plikach. Nowe przypadki w `tests/test_virtual_storage_flow_and_button.py`:
+  nietknięte źródła innego licznika po kliknięciu, idempotencja (brak
+  duplikatów), podmiana źródeł pod starym i nowym identyfikatorem, brak
+  ruszania i duplikowania `solar` innego licznika.
+- **Wydanie:** `1.9.3-beta.3`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.2 (2026-09-20) — kanoniczna baza jako źródło godzinowe + reguła RCEm depozytu (pre-release)
 
 Wydanie **pre-release** (nie stabilne) po `v1.9.3-beta.1`. Domyka follow-up
