@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — P2.2: usunięcie martwego kodu (scaffold test-only)
+
+Sprzątanie z audytu P2.2. Usunięte moduły nie były używane na **żadnej** ścieżce
+produkcyjnej (zweryfikowane `grep`-em po `custom_components/`) — istniały wyłącznie
+na potrzeby testów. **Zero zmian w wynikach rozliczeń i API integracji.**
+
+- **Usunięte moduły test-only:**
+  `adapters/energa/client.py` (+ pakiet `adapters/energa/`,
+  `normalize_chart_payload`), `ha/migration_map.py` (`MigrationMap`) oraz
+  `projections/statistics.py` (`build_statistic_id`,
+  `build_cumulative_statistic_data`, `build_virtual_bank_flow_data`).
+- **Aktualizowane eksporty:** `ha/__init__.py` (bez `MigrationMap`) i
+  `projections/__init__.py` (bez trzech funkcji `statistics`). Pozostałe
+  moduły (arbitrage, forecast) bez zmian.
+- **Usunięte/uszczuplone testy:** `tests/test_adapters_energa.py`,
+  `tests/test_migration_map.py`, `tests/test_projections.py` (całe pliki);
+  `tests/test_idempotent_reimport.py` zawężony do sedna — idempotencji
+  `CanonicalStorage.insert_readings_idempotent` (projekcje statystyk pokryte
+  przez `tests/test_recorder_adapter.py`).
+- **Testy:** 787 passed, 1 skipped; brak nowych uwag `ruff` (usunięte linie
+  miały te same, wcześniej istniejące uwagi).
+
 ## Unreleased — P2.1: scalenie silnika FIFO (bez zmian wyników)
 
 Refaktor porządkowy z audytu P2.1. Produkcja i warstwa czysta korzystają teraz

@@ -10,17 +10,11 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from custom_components.energa_mobile.core.readings.models import IntervalReading
-from custom_components.energa_mobile.ha.recorder_adapter import (
-    validate_and_clean_statistics,
-)
-from custom_components.energa_mobile.projections.statistics import (
-    build_cumulative_statistic_data,
-)
 from custom_components.energa_mobile.storage.sqlite.database import CanonicalStorage
 
 
 def test_idempotent_30_day_reimport(tmp_path):
-    """Simulate 30-day live reimport: verify zero duplicate rows in SQLite and zero sum jumps."""
+    """Simulate 30-day live reimport: verify zero duplicate rows in SQLite."""
     db_path = str(tmp_path / "test_reimport.db")
     storage = CanonicalStorage(db_path)
 
@@ -51,27 +45,7 @@ def test_idempotent_30_day_reimport(tmp_path):
     assert inserted_first == 720
     assert storage.get_readings_count() == 720
 
-    # Project to cumulative statistics
-    stats_run1 = build_cumulative_statistic_data(points, initial_sum=Decimal("100.0"))
-    assert len(stats_run1) == 720
-    final_sum_run1 = stats_run1[-1]["sum"]
-    # Expected final sum: 100.0 + (720 * 1.25) = 100.0 + 900.0 = 1000.0
-    assert final_sum_run1 == 1000.0
-
     # 2. Re-import the exact same 30 days during active operation
     inserted_second = storage.insert_readings_idempotent(points)
     assert inserted_second == 0  # Zero duplicate inserts!
     assert storage.get_readings_count() == 720  # DB count did not double
-
-    # Re-project to cumulative statistics
-    stats_run2 = build_cumulative_statistic_data(points, initial_sum=Decimal("100.0"))
-    assert len(stats_run2) == 720
-    final_sum_run2 = stats_run2[-1]["sum"]
-
-    # Final sum must be 100% identical: no jumps, no doubling
-    assert final_sum_run2 == final_sum_run1 == 1000.0
-
-    # Clean validation run
-    cleaned = validate_and_clean_statistics(stats_run2, last_known_sum=100.0)
-    assert len(cleaned) == 720
-    assert cleaned[-1]["sum"] == 1000.0
