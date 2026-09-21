@@ -116,6 +116,49 @@ def test_hourly_profile_forecaster_insufficient_history():
     assert res.forecast_import_total_kwh == Decimal("720.000")
 
 
+def test_profile_counts_one_observation_per_hour_with_separate_registers():
+    """Separate import/export rows must not halve the hourly profile average.
+
+    Canonical storage archives import_1/export_1 as distinct rows sharing the
+    hour; each hour must count as ONE observation, otherwise the average is
+    divided by two register rows.
+    """
+    readings = []
+    base = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)  # Monday
+    for day in range(7):
+        dt = base + timedelta(days=day)
+        readings.append(
+            IntervalReading(
+                ppe_id="P",
+                meter_id="M",
+                register="import_1",
+                interval_start_utc=dt,
+                resolution="1h",
+                import_kwh=Decimal("2.0"),
+                export_kwh=Decimal("0.0"),
+            )
+        )
+        readings.append(
+            IntervalReading(
+                ppe_id="P",
+                meter_id="M",
+                register="export_1",
+                interval_start_utc=dt,
+                resolution="1h",
+                import_kwh=Decimal("0.0"),
+                export_kwh=Decimal("0.5"),
+            )
+        )
+
+    forecaster = HourlyProfileForecaster(
+        readings=readings, tariff_code="G12w", tz_offset_hours=0
+    )
+    # Every observation at local hour 10 is import 2.0 / export 0.5; with the
+    # double-count bug these would be 1.0 / 0.25.
+    assert forecaster.weekday_import_profile[10] == Decimal("2.0")
+    assert forecaster.weekday_export_profile[10] == Decimal("0.5")
+
+
 def test_hourly_profile_forecaster_wal_projection():
     """Verify full 24h profile decomposition and projection with >=14 days of history."""
     readings = []

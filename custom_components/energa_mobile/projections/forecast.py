@@ -188,16 +188,21 @@ class HourlyProfileForecaster:
 
         observed_days: set[date] = set()
 
+        # Aggregate per (local date, hour) FIRST: canonical storage keeps import
+        # and export as separate rows sharing the hour, so they must be summed
+        # and each hour must count as ONE observation (otherwise the profile
+        # averages are halved by the second register row).
+        per_hour: dict[tuple[date, int], list[Decimal]] = {}
         for r in readings:
-            # Convert UTC start to local Polish time
             local_dt = r.interval_start_utc.astimezone(self.tz)
-            d = local_dt.date()
-            observed_days.add(d)
-            h = local_dt.hour
-            day_t = get_day_type(d)
+            key = (local_dt.date(), local_dt.hour)
+            bucket = per_hour.setdefault(key, [Decimal("0.0"), Decimal("0.0")])
+            bucket[0] += max(Decimal("0.0"), r.import_kwh)
+            bucket[1] += max(Decimal("0.0"), r.export_kwh)
 
-            imp = max(Decimal("0.0"), r.import_kwh)
-            exp = max(Decimal("0.0"), r.export_kwh)
+        for (d, h), (imp, exp) in per_hour.items():
+            observed_days.add(d)
+            day_t = get_day_type(d)
 
             if day_t == DayType.WEEKDAY:
                 self.weekday_import_sums[h] += imp

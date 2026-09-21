@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.3-beta.8 (2026-09-21) — profil dobowy nie zaniża średnich (pre-release)
+
+Wydanie **pre-release** po `v1.9.3-beta.7`. Domyka konsekwencje fixu `register`
+(`beta.6`): `HourlyProfileForecaster._build_profiles` liczył `count` na każdy
+wiersz, więc przy osobnych wierszach `import_*`/`export_*` w tej samej godzinie
+średnie profilu były **dzielone przez 2** (zaniżona prognoza). Teraz odczyty są
+najpierw agregowane per (dzień, godzina), a godzina liczy się jako **jedna**
+obserwacja. Bez wpływu na faktury.
+
+- **`projections/forecast.py`**: agregacja `per_hour[(date, hour)] = [imp, exp]`
+  przed budową profili; `history_days_count` z unikalnych dni.
+- **Testy:** 792 passed, 1 skipped; `ruff` (`E,F,I`) czysty. Nowy test
+  `test_profile_counts_one_observation_per_hour_with_separate_registers`.
+- **Wydanie:** `1.9.3-beta.8`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.7 (2026-09-21) — autokonsumpcja scala rejestry import/export (pre-release)
 
 Wydanie **pre-release** po `v1.9.3-beta.6`. Naprawia błąd w autokonsumpcji PV:
