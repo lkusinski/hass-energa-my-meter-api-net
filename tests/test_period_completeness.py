@@ -465,7 +465,7 @@ class TestButtonGateIntegration:
         meter = {"meter_point_id": "1", "meter_serial": "S1", "zone_count": 1}
         return EnergaVerifyPeriodButton(hass=hass, entry=entry, meter=meter)
 
-    def test_button_available_only_when_complete(self):
+    def test_button_available_when_both_dates_set(self):
         options = {
             CONF_VERIFY_PERIOD_START: "2026-08-03",
             CONF_VERIFY_PERIOD_END: "2026-08-04",
@@ -481,15 +481,63 @@ class TestButtonGateIntegration:
             async_update_listeners=MagicMock(),
         )
         assert self._button(options, coordinator).available is True
+        # Completeness no longer greys the button out (issue #5) — the refusal
+        # is posted from async_press where the user can actually read it.
         coordinator._period_completeness["1"]["state"] = STATE_INCOMPLETE
-        assert self._button(options, coordinator).available is False
-        # A verdict for a different window must count as stale -> unavailable.
+        assert self._button(options, coordinator).available is True
+        # A verdict for a different window stays clickable too.
         coordinator._period_completeness["1"] = {
             "state": STATE_COMPLETE,
             "period_start": "2026-07-01",
             "period_end": "2026-07-31",
         }
-        assert self._button(options, coordinator).available is False
+        assert self._button(options, coordinator).available is True
+        # Both dates are required: missing end (or both) -> unavailable.
+        assert (
+            self._button(
+                {CONF_VERIFY_PERIOD_START: "2026-08-03"}, coordinator
+            ).available
+            is False
+        )
+        assert self._button({}, coordinator).available is False
+
+    @pytest.mark.asyncio
+    async def test_button_press_refuses_incomplete_or_stale_period(self):
+        options = {
+            CONF_VERIFY_PERIOD_START: "2026-08-03",
+            CONF_VERIFY_PERIOD_END: "2026-08-04",
+        }
+        coordinator = SimpleNamespace(
+            _period_completeness={
+                "1": {
+                    "state": STATE_INCOMPLETE,
+                    "period_start": "2026-08-03",
+                    "period_end": "2026-08-04",
+                }
+            },
+            _verify_result={},
+            async_update_listeners=MagicMock(),
+        )
+        button = self._button(options, coordinator)
+        messages: list[str] = []
+        button._post_notification = messages.append
+        await button.async_press()
+        button._entry.async_create_background_task.assert_not_called()
+        assert messages and "nie są kompletne" in messages[0]
+        assert "2026-08-03" in messages[0] and "2026-08-04" in messages[0]
+
+        # A stale verdict (different window) counts as unknown -> other text.
+        coordinator._period_completeness["1"] = {
+            "state": STATE_COMPLETE,
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-31",
+        }
+        button2 = self._button(options, coordinator)
+        messages2: list[str] = []
+        button2._post_notification = messages2.append
+        await button2.async_press()
+        button2._entry.async_create_background_task.assert_not_called()
+        assert messages2 and "nie został jeszcze ustalony" in messages2[0]
 
     @pytest.mark.asyncio
     async def test_button_worker_thread_state_write_hops_to_loop(self):

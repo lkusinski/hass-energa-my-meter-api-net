@@ -590,10 +590,13 @@ class TestVerifyPeriodButton:
         button = EnergaVerifyPeriodButton(hass=hass, entry=entry, meter=meter)
         return entry, button
 
-    def test_availability_requires_dates_and_complete_period(self):
+    def test_availability_requires_both_dates(self):
         _, button = self._button({CONF_VERIFY_PERIOD_START: "2026-08-01"})
         assert button.available is False
-        # Both dates but completeness unknown -> gated off.
+        _, button_none = self._button({})
+        assert button_none.available is False
+        # Both dates are enough to stay clickable whatever the completeness
+        # verdict is (issue #5) — the refusal is posted from async_press.
         _, button_unknown = self._button(
             {
                 CONF_VERIFY_PERIOD_START: "2026-08-01",
@@ -601,8 +604,7 @@ class TestVerifyPeriodButton:
             },
             completeness="unknown",
         )
-        assert button_unknown.available is False
-        # Both dates but incomplete -> gated off.
+        assert button_unknown.available is True
         _, button_incomplete = self._button(
             {
                 CONF_VERIFY_PERIOD_START: "2026-08-01",
@@ -610,8 +612,7 @@ class TestVerifyPeriodButton:
             },
             completeness="incomplete",
         )
-        assert button_incomplete.available is False
-        # Both dates and complete -> available.
+        assert button_incomplete.available is True
         _, button_complete = self._button(
             {
                 CONF_VERIFY_PERIOD_START: "2026-08-01",

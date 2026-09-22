@@ -134,7 +134,7 @@ class EnergaCreateDashboardButton(ButtonEntity):
         self._attr_unique_id = f"energa_{serial}_create_dashboard"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
-            name=f"Energa {serial}",
+            name=f"Energa {meter.get('name', serial)}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -192,7 +192,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         self._attr_unique_id = f"energa_{serial}_configure_energy_dashboard"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
-            name=f"Energa {serial}",
+            name=f"Energa {meter.get('name', serial)}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -554,7 +554,7 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         self.entity_id = f"button.energa_{self._serial}_przelicz_okres".lower()
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._serial)},
-            name=f"Energa {self._serial}",
+            name=f"Energa {meter.get('name', self._serial)}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -638,11 +638,15 @@ class EnergaVerifyPeriodButton(ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """Both dates set AND the period readings are complete."""
+        """Button is available when both period dates are set.
+
+        The completeness check is deliberately left in ``async_press`` where it
+        can post a readable notification. Gating the button on completeness
+        made it permanently ``unavailable`` before the user could ever click it,
+        so the incomplete-message code was unreachable dead code (issue #5).
+        """
         start, end = self._period_bounds()
-        if not (start and end):
-            return False
-        return self._completeness_status() == "complete"
+        return bool(start and end)
 
     def _incomplete_message(self, status: str, start, end) -> str:
         """Readable refusal for a button press on an incomplete period."""

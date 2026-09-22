@@ -82,6 +82,109 @@ class TestFetchAllMeters:
         assert m["obis_minus"] == "1-0:2.8.0*255"
 
 
+class TestAgreementPointMatching:
+    """Regression tests for issue #5 — per-meter agreement point matching."""
+
+    def _payload(self):
+        return {
+            "success": True,
+            "response": {
+                "meterPoints": [
+                    {
+                        "id": 101,
+                        "dev": "30132815",
+                        "tariff": "G11",
+                        "name": "Wiśniowa",
+                        "lastMeasurements": [{"zone": "A+", "value": 1.0, "unit": ""}],
+                        "meterObjects": [{"obis": "1-0:1.8.0*255", "name": None}],
+                        "agreementPoints": [{"code": "590243800000000001"}],
+                    },
+                    {
+                        "id": 102,
+                        "dev": "30910672",
+                        "tariff": "G11",
+                        "name": "Bursztynowa",
+                        "lastMeasurements": [{"zone": "A+", "value": 2.0, "unit": ""}],
+                        "meterObjects": [{"obis": "1-0:1.8.0*255", "name": None}],
+                        "agreementPoints": [{"code": "590243800000000002"}],
+                    },
+                ],
+                "agreementPoints": [
+                    {
+                        "code": "590243800000000001",
+                        "address": "00-001 Warszawa, Wiśniowa 1",
+                        "dealer": {"start": 1700000000000},
+                    },
+                    {
+                        "code": "590243800000000002",
+                        "address": "00-002 Warszawa, Bursztynowa 2",
+                        "dealer": {"start": 1750000000000},
+                    },
+                ],
+                "activationDate": "2025-06-11",
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_each_meter_gets_its_own_agreement_point(self, api, mock_session):
+        """Two meters must not share the first agreement point (issue #5)."""
+        resp = make_mock_response(200, self._payload())
+        mock_session.get = MagicMock(return_value=resp)
+
+        meters = await api._fetch_all_meters()
+
+        assert [m["ppe"] for m in meters] == [
+            "590243800000000001",
+            "590243800000000002",
+        ]
+        assert [m["address"] for m in meters] == [
+            "00-001 Warszawa, Wiśniowa 1",
+            "00-002 Warszawa, Bursztynowa 2",
+        ]
+        assert meters[0]["contract_date"] is not None
+        assert meters[1]["contract_date"] is not None
+        assert meters[0]["contract_date"] != meters[1]["contract_date"]
+        assert meters[0]["name"] == "Wiśniowa"
+        assert meters[1]["name"] == "Bursztynowa"
+
+    @pytest.mark.asyncio
+    async def test_no_code_match_does_not_leak_first_agreement_point(
+        self, api, mock_session
+    ):
+        """With several top-level points and no code match nothing is borrowed."""
+        payload = self._payload()
+        for mp in payload["response"]["meterPoints"]:
+            mp["agreementPoints"] = [{"code": "OTHER"}]
+            # Name == serial keeps the address fallback from kicking in.
+            mp["name"] = mp["dev"]
+        resp = make_mock_response(200, payload)
+        mock_session.get = MagicMock(return_value=resp)
+
+        meters = await api._fetch_all_meters()
+
+        assert meters[0]["address"] is None
+        assert meters[1]["address"] is None
+
+    @pytest.mark.asyncio
+    async def test_single_agreement_point_is_unambiguous_fallback(
+        self, api, mock_session
+    ):
+        """A lone top-level point still fills a meter with no code match."""
+        payload = self._payload()
+        payload["response"]["agreementPoints"] = payload["response"]["agreementPoints"][
+            :1
+        ]
+        payload["response"]["meterPoints"][1]["agreementPoints"] = [{"code": "OTHER2"}]
+        resp = make_mock_response(200, payload)
+        mock_session.get = MagicMock(return_value=resp)
+
+        meters = await api._fetch_all_meters()
+
+        assert meters[0]["address"] == "00-001 Warszawa, Wiśniowa 1"
+        assert meters[1]["address"] == "00-001 Warszawa, Wiśniowa 1"
+        assert meters[1]["ppe"] == "OTHER2"
+
+
 class TestHasMultiZoneMeters:
     """Tests for has_multi_zone_meters() convenience check."""
 
