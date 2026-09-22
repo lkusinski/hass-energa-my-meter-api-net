@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.9.3-beta.9 (2026-09-23) — multi-meter agreementPoints i klikalny przycisk okresu (pre-release)
+
+Wydanie **pre-release** po `v1.9.3-beta.8`, zamykające **issue #5** (zgłoszenie
+ergo5 z labu G11 + G12W). Trzy fixy API/UI, **bez wpływu na wyniki rozliczeń**.
+
+- **`api.py` — `agreementPoints` dopasowane po `code` (bug multi-meter).** Stary
+  kod szukał matcha po `id`, którego odpowiedź API nie zwraca, więc bezwyjątkowo
+  brał `agreementPoints[0]` — przy 2+ licznikach na jednym loginie każdy
+  dostawał adres i datę umowy pierwszego. Teraz match po PPE (`code`) z nested
+  `agreementPoints`; fallback tylko przy jednym punkcie top-level. `meter_obj`
+  zwraca dodatkowo `name` z `meterPoint`.
+- **`button.py` — przycisk „Przelicz okres" klikalny.** `available` zależy już
+  tylko od obu dat; blokowanie po kompletności czyniło przycisk na stałe
+  niedostępnym, a `_incomplete_message` był martwym kodem. Odmowa dla okresu
+  `incomplete`/`unknown` zostaje w `async_press` z czytelnym powiadomieniem;
+  werdykt policzony dla innego okresu liczy się jako `unknown` (stale cache po
+  edycji dat nie odblokuje przeliczenia na złe okno).
+- **`DeviceInfo` — nazwa z portalu we wszystkich encjach.** Sensor,
+  binary_sensor, date, price i button budują
+  `name=f"Energa {meter.get('name') or serial}"` — wcześniej tylko trzy
+  przyciski, pozostałe walczyły o nazwę urządzenia z samym numerem seryjnym.
+  Fallback przez `or` ogarnia też `name=None` („Energa None" nie powstaje).
+- **Testy:** 800 passed, 1 skipped; `ruff` (`E,F,I`) czysty. Nowe: 3×
+  `test_api_zones.py::TestAgreementPointMatching`, 4×
+  `test_canonical_entities.py::TestDeviceNaming`, bramka odmowy w `async_press`;
+  dwa testy `available` przepięte pod nową semantykę (daty zamiast kompletności).
+- **Wydanie:** `1.9.3-beta.9`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.8 (2026-09-21) — profil dobowy nie zaniża średnich (pre-release)
 
 Wydanie **pre-release** po `v1.9.3-beta.7`. Domyka konsekwencje fixu `register`

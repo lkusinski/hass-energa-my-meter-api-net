@@ -10,7 +10,7 @@
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
 ![Tests](https://img.shields.io/badge/tests-800_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.3-beta.8](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.3-beta.8) (pre-release)** — kanoniczna tożsamość odczytów, wirtualny magazyn w Panelu Energia, przycisk konfiguracji Energy Dashboard (multi-meter), fix setup timeout na dużej bazie, fix dedup rejestru import/export, fix profili godzinowych i autokonsumpcji, usunięcie martwego kodu (P2). Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.3-beta.9](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.3-beta.9) (pre-release)** — fix multi-meter `agreementPoints` (własny adres i data umowy per licznik, issue #5), klikalny przycisk „Przelicz okres" z czytelnym komunikatem przy niekompletnym okresie, nazwy z portalu w DeviceInfo; wcześniej: kanoniczna tożsamość odczytów, wirtualny magazyn w Panelu Energia, przycisk konfiguracji Energy Dashboard (multi-meter), fix setup timeout na dużej bazie, fix dedup rejestru import/export, fix profili godzinowych i autokonsumpcji, usunięcie martwego kodu (P2). Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
