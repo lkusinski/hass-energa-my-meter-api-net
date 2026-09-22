@@ -206,11 +206,13 @@ class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
         entry: ConfigEntry,
         meter_point_id: str,
         meter_serial: str,
+        meter_name: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._attr_unique_id = f"energa_{meter_point_id}_rce_dynamic_price"
         self._attr_name = "Dynamiczna cena energii RCE"
         self._attr_icon = "mdi:chart-line"
@@ -219,7 +221,7 @@ class PseRceDynamicPriceSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -264,11 +266,13 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
         entry: ConfigEntry,
         meter_point_id: str,
         meter_serial: str,
+        meter_name: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._attr_unique_id = f"energa_{meter_point_id}_bess_arbitrage_spread"
         self._attr_name = "Spread arbitrażowy BESS (RCE)"
         self._attr_icon = "mdi:swap-vertical-bold"
@@ -277,7 +281,7 @@ class PseRceArbitrageSpreadSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",

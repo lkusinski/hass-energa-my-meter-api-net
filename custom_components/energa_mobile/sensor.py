@@ -173,12 +173,13 @@ async def async_setup_entry(
     for meter in meters_to_process:
         meter_id = meter["meter_point_id"]
         serial = meter.get("meter_serial", meter_id)
+        meter_name = meter.get("name") or ""
         ppe = meter.get("ppe", meter_id)
         has_zones = meter.get("zone_count", 1) > 1
 
         device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
-            name=f"Energa {serial}",
+            name=f"Energa {meter.get('name') or serial}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -813,6 +814,7 @@ async def async_setup_entry(
                     entry=entry,
                     meter_point_id=meter_id,
                     meter_serial=serial,
+                    meter_name=meter_name,
                 )
             )
             sensors.append(
@@ -821,6 +823,7 @@ async def async_setup_entry(
                     entry=entry,
                     meter_point_id=meter_id,
                     meter_serial=serial,
+                    meter_name=meter_name,
                 )
             )
 

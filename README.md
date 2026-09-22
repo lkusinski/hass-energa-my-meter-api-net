@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-796_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-800_passed-brightgreen)
 
 **Najnowsze wydanie: [v1.9.3-beta.8](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.3-beta.8) (pre-release)** — kanoniczna tożsamość odczytów, wirtualny magazyn w Panelu Energia, przycisk konfiguracji Energy Dashboard (multi-meter), fix setup timeout na dużej bazie, fix dedup rejestru import/export, fix profili godzinowych i autokonsumpcji, usunięcie martwego kodu (P2). Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 

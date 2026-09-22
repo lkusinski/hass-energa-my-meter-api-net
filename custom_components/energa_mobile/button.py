@@ -134,7 +134,7 @@ class EnergaCreateDashboardButton(ButtonEntity):
         self._attr_unique_id = f"energa_{serial}_create_dashboard"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
-            name=f"Energa {meter.get('name', serial)}",
+            name=f"Energa {meter.get('name') or serial}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -192,7 +192,7 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         self._attr_unique_id = f"energa_{serial}_configure_energy_dashboard"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, str(serial))},
-            name=f"Energa {meter.get('name', serial)}",
+            name=f"Energa {meter.get('name') or serial}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -554,7 +554,7 @@ class EnergaVerifyPeriodButton(ButtonEntity):
         self.entity_id = f"button.energa_{self._serial}_przelicz_okres".lower()
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._serial)},
-            name=f"Energa {meter.get('name', self._serial)}",
+            name=f"Energa {meter.get('name') or self._serial}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",

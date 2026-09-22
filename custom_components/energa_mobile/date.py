@@ -66,7 +66,7 @@ async def async_setup_entry(
         ppe = meter.get("ppe", meter["meter_point_id"])
         device_info = DeviceInfo(
             identifiers={(DOMAIN, serial)},
-            name=f"Energa {serial}",
+            name=f"Energa {meter.get('name') or serial}",
             manufacturer="Energa-Operator",
             model=f"PPE: {ppe}",
             configuration_url="https://mojlicznik.energa-operator.pl",

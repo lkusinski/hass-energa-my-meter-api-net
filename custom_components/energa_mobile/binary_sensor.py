@@ -70,12 +70,21 @@ async def async_setup_entry(
         mid = str(meter.get("meter_point_id"))
         serial = str(meter.get("meter_serial") or mid)
         tariff = str(meter.get("tariff") or "G11")
+        meter_name = str(meter.get("name") or "")
 
         entities.extend([
-            EnergaTaniaStrefaBinarySensor(coordinator, entry, mid, serial, tariff),
-            EnergaBessChargeWindowBinarySensor(coordinator, entry, mid, serial),
-            EnergaBessDischargeWindowBinarySensor(coordinator, entry, mid, serial),
-            EnergaRceNegativePriceBinarySensor(coordinator, entry, mid, serial),
+            EnergaTaniaStrefaBinarySensor(
+                coordinator, entry, mid, serial, tariff, meter_name
+            ),
+            EnergaBessChargeWindowBinarySensor(
+                coordinator, entry, mid, serial, meter_name
+            ),
+            EnergaBessDischargeWindowBinarySensor(
+                coordinator, entry, mid, serial, meter_name
+            ),
+            EnergaRceNegativePriceBinarySensor(
+                coordinator, entry, mid, serial, meter_name
+            ),
         ])
 
     _LOGGER.info("Energa binary_sensor: created %d entities for %d active meters", len(entities), len(active_meters))
@@ -89,11 +98,19 @@ class EnergaBessChargeWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry, meter_point_id: str, meter_serial: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+        meter_name: str = "",
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._attr_unique_id = f"energa_{meter_point_id}_bess_charge_window"
         self._attr_name = "Okno ładowania BESS (Arbitraż RCE)"
         self._attr_icon = "mdi:battery-charging"
@@ -102,7 +119,7 @@ class EnergaBessChargeWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -149,11 +166,19 @@ class EnergaBessDischargeWindowBinarySensor(CoordinatorEntity, BinarySensorEntit
 
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry: ConfigEntry, meter_point_id: str, meter_serial: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+        meter_name: str = "",
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._attr_unique_id = f"energa_{meter_point_id}_bess_discharge_window"
         self._attr_name = "Okno rozładowania BESS (Szczyt RCE)"
         self._attr_icon = "mdi:battery-arrow-down"
@@ -162,7 +187,7 @@ class EnergaBessDischargeWindowBinarySensor(CoordinatorEntity, BinarySensorEntit
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -209,11 +234,19 @@ class EnergaRceNegativePriceBinarySensor(CoordinatorEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
-    def __init__(self, coordinator, entry: ConfigEntry, meter_point_id: str, meter_serial: str) -> None:
+    def __init__(
+        self,
+        coordinator,
+        entry: ConfigEntry,
+        meter_point_id: str,
+        meter_serial: str,
+        meter_name: str = "",
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._attr_unique_id = f"energa_{meter_point_id}_rce_negative_price"
         self._attr_name = "Cena ujemna RCE (Zagrożenie eksportu)"
         self._attr_icon = "mdi:alert-decagram"
@@ -222,7 +255,7 @@ class EnergaRceNegativePriceBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",
@@ -273,11 +306,13 @@ class EnergaTaniaStrefaBinarySensor(CoordinatorEntity, BinarySensorEntity):
         meter_point_id: str,
         meter_serial: str,
         tariff: str,
+        meter_name: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._meter_point_id = meter_point_id
         self._meter_serial = meter_serial
+        self._meter_name = meter_name or ""
         self._tariff = (tariff or "G11").upper()
         self._attr_unique_id = f"energa_{meter_point_id}_tania_strefa"
         self._attr_name = "Tania strefa"
@@ -307,7 +342,7 @@ class EnergaTaniaStrefaBinarySensor(CoordinatorEntity, BinarySensorEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, str(self._meter_serial))},
-            name=f"Energa {self._meter_serial}",
+            name=f"Energa {self._meter_name or self._meter_serial}",
             manufacturer="Energa-Operator",
             model="Licznik zdalnego odczytu",
             configuration_url="https://mojlicznik.energa-operator.pl",

@@ -1,9 +1,13 @@
 """Tests for canonical entity names, has_entity_name=True, device_info, and EntityRegistry migration."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from custom_components.energa_mobile.binary_sensor import (
+    EnergaBessChargeWindowBinarySensor,
+)
+from custom_components.energa_mobile.button import EnergaVerifyPeriodButton
 from custom_components.energa_mobile.sensor import (
     EnergaBankFlowSensor,
     EnergaBankKwhSensor,
@@ -16,6 +20,7 @@ from custom_components.energa_mobile.sensor import (
     EnergaProsumerBalanceSensor,
     EnergaRceSensor,
 )
+from custom_components.energa_mobile.sensors.price import PseRceDynamicPriceSensor
 
 
 @pytest.fixture
@@ -229,3 +234,68 @@ class TestCanonicalMigrationMapping:
             assert eid.startswith(f"sensor.energa_{serial}_")
             # Must not contain duplicated serial (e.g. _10000002_..._10000002)
             assert eid.count(serial) == 1
+
+
+class TestDeviceNaming:
+    """Issue #5.3 — nazwa urządzenia to nazwa z portalu, fallback na serial."""
+
+    def test_binary_sensor_uses_meter_name(self, mock_coordinator, mock_entry):
+        sensor = EnergaBessChargeWindowBinarySensor(
+            coordinator=mock_coordinator,
+            entry=mock_entry,
+            meter_point_id="1340026",
+            meter_serial="10000002",
+            meter_name="Wiśniowa",
+        )
+        with patch(
+            "custom_components.energa_mobile.binary_sensor.DeviceInfo"
+        ) as mock_di:
+            _ = sensor.device_info
+        assert mock_di.call_args.kwargs["name"] == "Energa Wiśniowa"
+
+    def test_binary_sensor_falls_back_to_serial(self, mock_coordinator, mock_entry):
+        sensor = EnergaBessChargeWindowBinarySensor(
+            coordinator=mock_coordinator,
+            entry=mock_entry,
+            meter_point_id="1340026",
+            meter_serial="10000002",
+        )
+        with patch(
+            "custom_components.energa_mobile.binary_sensor.DeviceInfo"
+        ) as mock_di:
+            _ = sensor.device_info
+        assert mock_di.call_args.kwargs["name"] == "Energa 10000002"
+
+    def test_dynamic_rce_sensor_uses_meter_name(self, mock_coordinator, mock_entry):
+        sensor = PseRceDynamicPriceSensor(
+            coordinator=mock_coordinator,
+            entry=mock_entry,
+            meter_point_id="1340026",
+            meter_serial="10000002",
+            meter_name="Garaż",
+        )
+        with patch("custom_components.energa_mobile.sensors.price.DeviceInfo") as mock_di:
+            _ = sensor.device_info
+        assert mock_di.call_args.kwargs["name"] == "Energa Garaż"
+
+    def test_button_device_name_handles_missing_name(self):
+        hass = MagicMock()
+        hass.data = {}
+        entry = MagicMock()
+        entry.entry_id = "entry_1"
+        entry.options = {}
+        with patch("custom_components.energa_mobile.button.DeviceInfo") as mock_di:
+            EnergaVerifyPeriodButton(
+                hass=hass,
+                entry=entry,
+                meter={"meter_point_id": "1", "meter_serial": "S1", "name": None},
+            )
+        assert mock_di.call_args.kwargs["name"] == "Energa S1"
+
+        with patch("custom_components.energa_mobile.button.DeviceInfo") as mock_di2:
+            EnergaVerifyPeriodButton(
+                hass=hass,
+                entry=entry,
+                meter={"meter_point_id": "1", "meter_serial": "S1", "name": "Garaż"},
+            )
+        assert mock_di2.call_args.kwargs["name"] == "Energa Garaż"
