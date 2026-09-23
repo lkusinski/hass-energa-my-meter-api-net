@@ -238,6 +238,77 @@ class TestCanonicalNetMetering:
         assert second["kwh"]["bank_open_2"] == 60.0
 
     @pytest.mark.asyncio
+    async def test_single_zone_writes_only_total_lots(self):
+        """G11/single-zone meters persist exactly one ``total`` kWh lot.
+
+        Regression for the ``zip(zones, amounts)`` length fix: the old code
+        passed ``[bank_open_1, bank_open_2]`` against ``["total"]`` and relied
+        on zip truncation (bank_open_2 silently dropped).
+        """
+        meter = {
+            "meter_point_id": "10000003",
+            "meter_serial": "10000003",
+            "zone_count": 1,
+            "total_plus": 100.0,
+            "total_minus": 50.0,
+            "is_prosumer": True,
+            "tariff": "G11",
+        }
+        hass, _, _, storage = _storage_hass(
+            meter, {CONF_PROSUMER_COEFFICIENT: 0.8}
+        )
+        monthly = {(2026, 7): {"import": 50.0, "export": 200.0}}
+        hourly = {"import": {0: 100.0}, "export": {0: 0.0}}
+        payload = {
+            "start": "2026-08-01",
+            "end": "2026-08-31",
+            "meter_id": "10000003",
+        }
+
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value=monthly)):
+            first = await async_verify_period_data(hass, payload)
+
+        assert first["opening_source"] == OPENING_SOURCE_RECORDER
+        assert first["kwh"]["bank_open_1"] == 110.0  # 200 * 0.8 - 50
+        lots = storage.get_settlement_lots("PPE_TEST", unit="kWh")
+        assert {lot.zone for lot in lots} == {"total"}
+        assert len(lots) == 1
+        assert lots[0].remaining_amount == Decimal("110.0")
+
+        coordinator = hass.data[DOMAIN]["entry_1"]["coordinator"]
+        coordinator._verify_cache = {}
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value=monthly)) as monthly_mock:
+            second = await async_verify_period_data(hass, payload)
+
+        monthly_mock.assert_not_awaited()
+        assert second["opening_source"] == OPENING_SOURCE_CANONICAL
+        assert second["kwh"]["bank_open_1"] == 110.0
+        assert second["kwh"]["bank_open_2"] == 0.0
+
+    def test_write_canonical_opening_rejects_length_mismatch(self):
+        """``zip(strict=True)`` surfaces zone/amount misalignment as debug log."""
+        from custom_components.energa_mobile.services import (
+            _write_canonical_opening,
+        )
+
+        storage = CanonicalStorage(":memory:")
+        # Must not raise: mismatch is logged and skipped (best-effort write).
+        _write_canonical_opening(
+            storage,
+            "PPE_X",
+            "kWh",
+            ["day", "night"],
+            date(2026, 8, 1),
+            [Decimal("1.0")],  # length mismatch
+            {"opening_source": "recorder"},
+        )
+        assert storage.get_settlement_lots("PPE_X", unit="kWh") == []
+
+    @pytest.mark.asyncio
     async def test_override_beats_canonical_and_recorder(self):
         hass, _, coordinator, _ = _storage_hass(
             _net_metering_meter(), {CONF_PROSUMER_COEFFICIENT: 0.8}
@@ -452,7 +523,7 @@ class TestBankConsistency:
         months = trailing_months(date.today(), 13)[-4:-1]  # 3 months before now
         vals = [(10.0, 100.0, 0.0, 50.0), (20.0, 120.0, 5.0, 60.0), (30.0, 80.0, 10.0, 40.0)]
         monthly = {}
-        for (y, m), (i1, e1, i2, e2) in zip(months, vals):
+        for (y, m), (i1, e1, i2, e2) in zip(months, vals, strict=True):
             monthly[(y, m)] = {
                 "import_1": i1,
                 "export_1": e1,

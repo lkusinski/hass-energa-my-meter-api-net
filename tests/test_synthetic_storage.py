@@ -248,7 +248,7 @@ async def test_async_synthesize_storage_incremental_gap_filling(monkeypatch):
     assert res is True
     # Should only synthesize and import the 1 gap hour (ts_gap)
     assert len(imported_stats) == 4
-    for eid, stats in imported_stats:
+    for _eid, stats in imported_stats:
         assert len(stats) == 1
         assert stats[0]["start"] == datetime.fromtimestamp(ts_gap, timezone.utc)
 

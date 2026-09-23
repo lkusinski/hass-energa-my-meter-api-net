@@ -435,7 +435,7 @@ def reset_aware_delta(sums) -> float:
     if len(vals) < 2:
         return 0.0
     total = 0.0
-    for prev, cur in zip(vals, vals[1:]):
+    for prev, cur in zip(vals, vals[1:], strict=False):
         total += max(0.0, cur - prev)
     return round(total, 3)
 

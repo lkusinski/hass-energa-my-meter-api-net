@@ -268,9 +268,9 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
             return active_meters
 
-        except EnergaTokenExpiredError:
+        except EnergaTokenExpiredError as err:
             if getattr(self, "_retrying", False):
-                raise UpdateFailed("Token expired again after re-login")
+                raise UpdateFailed("Token expired again after re-login") from err
             _LOGGER.debug("Token expired, attempting re-login")
             try:
                 await self.api.async_login()
@@ -777,22 +777,35 @@ class EnergaCoordinator(DataUpdateCoordinator):
                 self._profile_forecast_task = None
 
     async def async_shutdown(self) -> None:
-        """Cancel the in-flight profile-forecast task (unload/reload/shutdown).
+        """Cancel in-flight background tasks (unload/reload/shutdown).
 
-        Idempotent and never raises: a missing/done task or a cancellation
-        during teardown are both fine.
+        Covers the profile-forecast refresh and the deferred synthetic-storage
+        tasks (``async_request_synthetic_storage``), so teardown never leaves a
+        pending task running against a torn-down entry. Idempotent and never
+        raises: a missing/done task or a cancellation during teardown are both
+        fine.
         """
-        task = self._profile_forecast_task
+        pending: list[asyncio.Task] = []
+        synth = getattr(self, "_synth_tasks", None)
+        if synth:
+            for meter_id in list(synth):
+                synth_task = synth.pop(meter_id, None)
+                if synth_task is not None and not synth_task.done():
+                    pending.append(synth_task)
+        profile = getattr(self, "_profile_forecast_task", None)
         self._profile_forecast_task = None
-        if task is None or task.done():
+        if profile is not None and not profile.done():
+            pending.append(profile)
+        if not pending:
             return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception as err:  # noqa: BLE001 - teardown is best effort
-            _LOGGER.debug("Energa: profile task shutdown failed: %s", err)
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as err:  # noqa: BLE001 - teardown is best effort
+                _LOGGER.debug("Energa: task shutdown failed: %s", err)
 
     async def _async_update_profile_forecasts(self, active_meters: list[dict]) -> None:
         """Compute HourlyProfileForecaster projections in executor worker thread to keep MainThread unblocked."""

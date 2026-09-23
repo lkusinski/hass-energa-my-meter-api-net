@@ -351,7 +351,7 @@ async def async_synthesize_storage_from_recorder(
     base_sums: dict[str, float] = {}
 
     if existing_check:
-        for k, eid in zip(metric_keys, synth_eids):
+        for k, eid in zip(metric_keys, synth_eids, strict=True):
             rows = existing_check.get(eid)
             if rows:
                 last_row = rows[-1]

@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.9.3-beta.10 (2026-09-23) — leak zadań syntetycznych przy unload + higiena zip/except (pre-release)
+
+Wydanie **pre-release** po `v1.9.3-beta.9`. Bughunting po lab-smoke beta.9
+(VM123 wiśniowa: faktura **129,04 / 29,68 / 158,72**, `opening_source=canonical` —
+PASS). Bez wpływu na wyniki rozliczeń.
+
+- **`coordinator.async_shutdown` kasuje też `_synth_tasks`.** Odłożone zadania
+  magazynu syntetycznego (`async_request_synthetic_storage`, debounce 2 s)
+  przeżywały unload/reload wpisu — HA logowała wtedy pending task przy
+  `Setup ... cancelled`. Teraz shutdown zbiera profile-forecast **i** wszystkie
+  synth-taski (best effort, nigdy nie rzuca); brak atrybutu `_synth_tasks`
+  (instancja po `__new__`) jest bezpieczny.
+- **`zip(..., strict=)` (B905).** `_write_canonical_opening` pary strefa/kwota
+  weryfikuje `strict=True` (niedopasowanie → debug log, bez raise — tryb
+  best-effort); call-site kWh przekazuje listę kwot zgodną z liczbą stref
+  (przy G11 `[bank_open_1]` zamiast pary, którą zip cicho ucinał). Backfill
+  statystyk i `synthetic_storage` → `strict=True`; `trailing_months` overlap →
+  `strict=False` (celowe).
+- **`raise ... from` (B904).** Login `Invalid JSON` i `UpdateFailed` przy
+  powtórnym wygasłym tokenie łańcuchują oryginalny wyjątek (`__cause__`).
+- **Testy:** 805 passed, 1 skipped; `ruff` (`E,F,I,B`) czysty. Nowe m.in.:
+  `test_shutdown_cancels_pending_synth_tasks`,
+  `test_shutdown_without_synth_attr_does_not_raise`,
+  `test_single_zone_writes_only_total_lots`,
+  `test_write_canonical_opening_rejects_length_mismatch`,
+  `test_login_invalid_json_chains_cause`.
+- **Lab:** smoke beta.9 na VM123 (IP DHCP **192.168.1.121** — zmiana z `.120`,
+  `CREDENTIALS.md` zaktualizowane) PASS; telemetria produkcji `WERDYKT=READY`
+  (beta.8, 96/96).
+- **Wydanie:** `1.9.3-beta.10`, **pre-release** (tag zawiera `-beta`).
+
 ## v1.9.3-beta.9 (2026-09-23) — multi-meter agreementPoints i klikalny przycisk okresu (pre-release)
 
 Wydanie **pre-release** po `v1.9.3-beta.8`, zamykające **issue #5** (zgłoszenie

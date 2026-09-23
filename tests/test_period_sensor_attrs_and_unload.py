@@ -244,6 +244,44 @@ class TestProfileForecastTaskCancellation:
         # Already finished -> no cancellation, no raise.
         await coordinator.async_shutdown()
 
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_pending_synth_tasks(self):
+        """Deferred synthetic-storage tasks must not leak past unload."""
+        from custom_components.energa_mobile.const import (
+            CONF_ENABLE_SYNTHETIC_STORAGE,
+        )
+        from custom_components.energa_mobile.coordinator import EnergaCoordinator
+
+        coordinator = EnergaCoordinator.__new__(EnergaCoordinator)
+        coordinator.entry = SimpleNamespace(
+            options={CONF_ENABLE_SYNTHETIC_STORAGE: True}
+        )
+        coordinator.data = []
+        coordinator._profile_forecast_task = None
+
+        def _create_task(coro):
+            return asyncio.get_running_loop().create_task(coro)
+
+        coordinator.hass = SimpleNamespace(async_create_task=_create_task)
+        coordinator.async_request_synthetic_storage("10000002")
+
+        task = coordinator._synth_tasks["10000002"]
+        assert not task.done()
+
+        await coordinator.async_shutdown()
+
+        assert coordinator._synth_tasks == {}
+        assert task.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_without_synth_attr_does_not_raise(self):
+        from custom_components.energa_mobile.coordinator import EnergaCoordinator
+
+        coordinator = EnergaCoordinator.__new__(EnergaCoordinator)
+        coordinator._profile_forecast_task = None
+        # No ``_synth_tasks`` attribute (pre-init / torn-down instance).
+        await coordinator.async_shutdown()
+
 
     @pytest.mark.asyncio
     async def test_schedule_profile_refresh_returns_immediately(self):

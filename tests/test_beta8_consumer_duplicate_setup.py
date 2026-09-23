@@ -140,7 +140,7 @@ class TestBillSensorConsumerLabel:
         }
         sensor = self._sensor(meter)
         assert sensor._is_consumer() is True
-        sensor.native_value  # evaluate attributes
+        _ = sensor.native_value  # evaluate attributes
         attrs = sensor._attr_extra_state_attributes
         assert attrs["system"] == "konsument (jednokierunkowy)"
         assert attrs["settlement_type"] == "consumer"
@@ -157,7 +157,7 @@ class TestBillSensorConsumerLabel:
         }
         sensor = self._sensor(meter)
         assert sensor._is_consumer() is False
-        sensor.native_value
+        _ = sensor.native_value
         attrs = sensor._attr_extra_state_attributes
         assert attrs["system"] == "nowe net-billing (depozyt PLN)"
         assert attrs["settlement_type"] == "net_billing_rcem"

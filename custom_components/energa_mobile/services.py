@@ -1478,7 +1478,12 @@ def _write_canonical_opening(
         _LOGGER.debug("verify_period canonical PPE upsert failed: %s", err)
     now = datetime.now(timezone.utc)
     lots: list[SettlementLot] = []
-    for zone, amount in zip(zones, amounts):
+    try:
+        pairs = list(zip(zones, amounts, strict=True))
+    except ValueError as err:
+        _LOGGER.debug("verify_period canonical opening zone/amount mismatch: %s", err)
+        return
+    for zone, amount in pairs:
         if amount is None:
             continue
         try:
@@ -1989,7 +1994,9 @@ async def async_verify_period_data(
                         "kWh",
                         _kwh_zones(has_zones),
                         reference_date,
-                        [bank_open_1, bank_open_2],
+                        [bank_open_1, bank_open_2]
+                        if has_zones
+                        else [bank_open_1],
                         {
                             "opening_source": opening_source,
                             "has_zones": has_zones,
@@ -3203,7 +3210,7 @@ async def _import_meter_history(
                     continue
                 _stats = [
                     {"start": _dt, "sum": _cum, "state": _st}
-                    for (_dt, (_cum, _st)) in zip(_dts, _anchored)
+                    for (_dt, (_cum, _st)) in zip(_dts, _anchored, strict=True)
                 ]
                 if not _stats:
                     continue

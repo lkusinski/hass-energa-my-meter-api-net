@@ -99,8 +99,8 @@ class EnergaAPI:
                     raise EnergaConnectionError(f"Login HTTP {resp.status}")
                 try:
                     data = await resp.json()
-                except (ValueError, TypeError, aiohttp.ContentTypeError):
-                    raise EnergaConnectionError("Invalid JSON")
+                except (ValueError, TypeError, aiohttp.ContentTypeError) as err:
+                    raise EnergaConnectionError("Invalid JSON") from err
                 if not data.get("success"):
                     error_msg = str(data.get("error") or data.get("message") or "")
                     if error_msg and any(

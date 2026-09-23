@@ -81,6 +81,22 @@ class TestAsyncLogin:
             await api.async_login()
 
     @pytest.mark.asyncio
+    async def test_login_invalid_json_chains_cause(self, api, mock_session):
+        """Invalid JSON body keeps the original error as ``__cause__`` (B904)."""
+        session_resp = make_mock_response(200, {})
+        login_resp = make_mock_response(200, {})
+        login_resp.__aenter__.return_value.json = AsyncMock(
+            side_effect=ValueError("not json")
+        )
+
+        mock_session.get = MagicMock(side_effect=[session_resp, login_resp])
+
+        with pytest.raises(EnergaConnectionError) as excinfo:
+            await api.async_login()
+
+        assert isinstance(excinfo.value.__cause__, ValueError)
+
+    @pytest.mark.asyncio
     async def test_login_clears_cookies(self, api, mock_session):
         """Login clears cookies and token before re-login."""
         api._token = "old_token"

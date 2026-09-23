@@ -568,7 +568,7 @@ def test_bill_warehouse_cover_matches_bank_engine_fifo():
         (30.0, 80.0, 10.0, 40.0),
     ]
     monthly = {}
-    for (y, m), (i1, e1, i2, e2) in zip(months, vals):
+    for (y, m), (i1, e1, i2, e2) in zip(months, vals, strict=True):
         monthly[(y, m)] = {
             "import_1": i1,
             "export_1": e1,

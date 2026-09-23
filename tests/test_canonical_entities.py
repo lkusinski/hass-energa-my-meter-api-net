@@ -230,7 +230,7 @@ class TestCanonicalMigrationMapping:
         }
 
         # Every canonical entity_id starts with sensor.energa_{serial}_
-        for uid, eid in expected.items():
+        for _uid, eid in expected.items():
             assert eid.startswith(f"sensor.energa_{serial}_")
             # Must not contain duplicated serial (e.g. _10000002_..._10000002)
             assert eid.count(serial) == 1
