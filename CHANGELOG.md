@@ -1,5 +1,81 @@
 # Changelog
 
+## v1.9.3 (2026-09-25) — stabilna: kanoniczna tożsamość i baza godzinowa, fixy issue #4/#5, porządki FIFO
+
+Wydanie **stabilne** konsolidujące całą linię `v1.9.3-beta.1`–`v1.9.3-beta.10`.
+Bez zmian API i schematu danych — aktualizacja z dowolnej `1.9.3-beta.x`
+(i ze stabilnej `v1.9.2`) jest bezpieczna. Wyniki rozliczeń bez zmian
+(wzorce: Wiśniowa 07–08.2026 **129,04 / 29,68 / 158,72**; Agrestowa 08.2026
+**628,02 / 144,44 / 772,46**, do zapłaty 614,87; Bursztynowa 08.2026
+**87,56 / 20,14 / 107,70**, do zapłaty 84,44).
+
+- **Kanoniczna tożsamość odczytów** (`core/identity`, `data_updater.py`,
+  `services.py`). Import historyczny i ścieżka live zapisywały ten sam
+  licznik pod dwiema tożsamościami (`372197` vs `PPE_372197`), co groziło
+  podwójnym liczeniem i głodzeniem filtrów. Wspólne
+  `canonical_ppe_id`/`canonical_meter_id` + dedup `get_readings`
+  (preferencja dokładnej tożsamości) — jedna tożsamość na licznik, istniejące
+  bazy nie podwajają danych. `get_readings_count`/`get_latest_reading_time`
+  dopasowują warianty, więc „Jakość danych" nie raportuje już `0`.
+- **Kanoniczna baza jako preferowane źródło godzinowe + `kwh_source`
+  (`core/verification.py`, `services.py`).** Precedencja
+  `override → canonical → recorder → api`; okres zwraca `kwh_source`
+  ∈ `{canonical, recorder, api}`, a brak pokrycia kanonicznego daje fallback
+  z `warning`. Normalizacja granic okresu do UTC (strefa Europe/Warsaw).
+- **RCEm depozytu wygenerowanego: zbadany, świadomie nie wdrożony regułą
+  automatyczną** (`core/verification.py`, `services.py`). Dowody z faktur
+  (Bursztynowa 06.2026 ≈0,19248; 08.2026 ≈0,19880 vs tabela PSE) pokazują,
+  że stawka depozytu jest **kontraktowa**, nie PSE — hipoteza „M-1" nie
+  odtwarza faktur i zepsułaby Agrestową/Wiśniową. Pozostaje jawne nadpisanie
+  `rcem_deposit_pln` (alias `rcem_generated_pln`), domyślnie bez zmian;
+  helpery badawcze zachowane jako czyste i przetestowane.
+- **Przycisk „Skonfiguruj Panel Energia" działa per licznik**
+  (`button.py`). Stary filtr po samym `type` kasował źródła `grid`/`battery`
+  **wszystkich** pozostałych liczników; teraz `_belongs_to_meter()` (prefiks
+  `energa_<serial>_` **lub** `energa_<meter_point_id>_`) podmienia wyłącznie
+  źródła bieżącego licznika, sprząta martwe pod starym id i jest idempotentny.
+- **P2 — scalenie silnika FIFO i usunięcie martwego kodu** (`core/settlement/`,
+  `ha`, `projections`, `adapters`). Jeden wspólny
+  `core/settlement/fifo_engine.py` dla produkcji i warstwy czystej (golden
+  testy byte-for-byte); usunięto moduły wyłącznie test-only
+  (`adapters/energa/client.py`, `ha/migration_map.py`,
+  `projections/statistics.py`). Zero zmian zachowania i API.
+- **Fix setup timeout na dużej bazie kanonicznej (issue #4)** —
+  `CanonicalStorage.get_readings` przepisany z korelowanego podzapytania
+  O(n²) na `ROW_NUMBER() OVER (PARTITION BY ...)`; migracja schematu v3
+  dodaje indeksy `idx_reading_identity`, `idx_reading_meter_identity`,
+  `idx_reading_event_start`; pierwszy refresh **harmonogramuje** ciężki
+  profil w tle zamiast awaitować, więc `ConfigEntryNotReady`/90 s już nie
+  występuje.
+- **Poprawność danych godzinowych.** `get_readings` deduplikuje po
+  `interval_start_utc, register` (beta.6) — różne rejestry w tej samej
+  godzinie nie znikają; `compute_autoconsumption_summary` scala rejestry
+  import/export zamiast nadpisywać (beta.7); `_build_profiles` liczy jedną
+  obserwację na godzinę, więc średnie profilu nie są dzielone przez 2 (beta.8).
+  Faktury pozostają bez zmian (ścieżka faktur filtruje po `register`).
+- **Issue #5 (multi-meter, G11 + G12W).** `api.py`: `agreementPoints`
+  dopasowane po PPE (`code`, nie `id`, którego API nie zwraca) + `name`
+  z `meterPoint`; przycisk „Przelicz okres" klikalny (blokada przeniesiona do
+  `async_press` z czytelnym powiadomieniem, werdykt dla innego okresu =
+  `unknown`); `DeviceInfo` ze nazwą z portalu we **wszystkich** encjach
+  (`Energa {name or serial}`, bezpieczne dla `name=None`).
+- **Stabilność przy unload/reload.** `coordinator.async_shutdown` kasuje
+  też `_synth_tasks` (odłożone zadania magazynu syntetycznego) obok
+  profile-forecast; `raise ... from` (B904) łańcuchuje oryginalny wyjątek;
+  `zip(..., strict=)` (B905) w `_write_canonical_opening` i pokrewnych
+  ścieżkach (niedopasowanie → debug log w trybie best-effort).
+- **Jakość.** **805 passed, 1 skipped**; `ruff` (`E,F,I,B`) czysty.
+  Regresje faktur bez zmian (golden FIFO, `test_verification`, `test_tariff`,
+  `test_period_*`).
+- **Weryfikacja labowa i produkcyjna.** Lab-smoke 2/2: Wiśniowa (VM123,
+  `192.168.1.121`) i Agrestowa (VM124, `192.168.1.213`) — faktury wzorcowe,
+  `opening_source=canonical`. Produkcja (HA Core 2026.9.3): `beta.10` bez
+  błędów przez >24 h (`96/96 OK`, `WERDYKT=READY`), `verify_period` Wiśniowa
+  07–08.2026 = 158,72 `canonical`, Agrestowa 09.2026 = 345,13 `canonical`;
+  `no_data` dla Agrestowej 08.2026 to retencja recordera (znane, nie regresja).
+- **Wydanie:** `1.9.3`, **stabilne**. Rollback produkcji: katalogi
+  `/config/energa_backup/energa_mobile.pre_beta*` + `ha core restart`.
+
 ## v1.9.3-beta.10 (2026-09-23) — leak zadań syntetycznych przy unload + higiena zip/except (pre-release)
 
 Wydanie **pre-release** po `v1.9.3-beta.9`. Bughunting po lab-smoke beta.9
