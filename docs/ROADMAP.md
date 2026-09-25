@@ -5,7 +5,7 @@
 ---
 
 ## 📑 Spis Treści
-1. [Status Obecny (Wersja v1.6.9 / v1.7.1)](#1-status-obecny)
+1. [Status Obecny (Wersja v1.9.3)](#1-status-obecny)
 2. [Obszar 1: Wizualizacja i Nowoczesny UX Lovelace](#2-obszar-1-wizualizacja-i-nowoczesny-ux-lovelace)
 3. [Obszar 2: Sensory Decyzyjne i Gotowe Automatyzacje (Blueprints)](#3-obszar-2-sensory-decyzyjne-i-gotowe-automatyzacje-blueprints)
 4. [Obszar 3: Dynamiczne Ceny PSE, BESS i Arbitraż Energetyczny](#4-obszar-3-dynamiczne-ceny-pse-bess-i-arbitraż-energetyczny)
@@ -21,7 +21,8 @@ Integracja posiada w pełni przetestowany i zweryfikowany na 5 środowiskach pro
 * ✅ Precyzyjne bilansowanie wirtualnego magazynu FIFO (Net-metering 0.8 / 0.7 z izolacją stref L1/L2).
 * ✅ Obsługa depozytu prosumenckiego Net-billing z oficjalnymi cenami rynkowymi RCEm PSE.
 * ✅ Autonomiczny pulpit `/energa-rachunek` z adaptacją do profilu instalacji (G11, G12, Net-billing).
-* ✅ 378 zautomatyzowanych testów jednostkowych (`pytest tests`).
+* ✅ 805 zautomatyzowanych testów jednostkowych (`pytest tests`; 1 skipped).
+* ✅ Kanoniczna tożsamość odczytów i baza jako źródło godzinowe z `kwh_source` (v1.9.3).
 
 ### 📌 Zadania do wdrożenia przy okazji najbliższego wydania (Backlog UX & Sensors):
 * [x] **Kompatybilność testów jednostkowych na platformie Windows (Issue #3):**
@@ -32,6 +33,7 @@ Integracja posiada w pełni przetestowany i zweryfikowany na 5 środowiskach pro
 * [ ] **Domyślne ukrycie technicznych sensorów statystyk (`_attr_entity_registry_visible_default = False`):**
   * Dla sensorów `EnergaStatisticsSensor` i `EnergaCostStatisticsSensor` (`Panel Energia...`).
   * Zapobiegnie to wyświetlaniu mylącego statusu `nieznany` na kartach urządzeń w interfejsie HA, zachowując pełne działanie w tle dla bazy LTS i oficjalnego Panelu Energia.
+  * **Gotowe na gałęzi `feature/hide-technical-stats-sensors`** (commit `2a4c34a`, poza `main` celowo) — do scalenia jako początek kolejnego wydania (1.9.4 / 1.10).
 
 ---
 
