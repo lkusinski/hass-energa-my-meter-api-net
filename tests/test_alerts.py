@@ -90,6 +90,12 @@ def test_alert_expiring_lots():
 
     alerts = mgr.check_expiring_lots("PL_001", reference_time=now)
     assert len(alerts) == 2
+    # Regression: the real CanonicalStorage signature is ``active_only``; the
+    # old ``include_exhausted`` kwarg raised a TypeError that was swallowed,
+    # leaving expiring-lot alerts dead.
+    storage_mock.get_settlement_lots.assert_called_once_with(
+        "PL_001", active_only=True
+    )
 
     # Check first alert (5 days)
     assert alerts[0].severity == "critical"
@@ -105,11 +111,9 @@ def test_alert_expiring_lots():
 def test_alert_pending_invoice_variances():
     """Verify alert when an unapproved invoice has status DISCREPANCY."""
     storage_mock = MagicMock()
-    storage_mock._connection = MagicMock()
-    cur_mock = MagicMock()
-    storage_mock._connection.cursor.return_value = cur_mock
-
-    cur_mock.execute.return_value.fetchall.return_value = [
+    conn_mock = MagicMock()
+    storage_mock._connection.return_value.__enter__.return_value = conn_mock
+    conn_mock.execute.return_value.fetchall.return_value = [
         ("FAK/2026/01", 1250.00, 1315.50, 65.50, 5.24, "DISCREPANCY")
     ]
 

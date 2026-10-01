@@ -275,9 +275,16 @@ async def async_register_services(hass: HomeAssistant) -> None:
         )
 
         for meter in active_meters:
-            hass.async_create_task(
-                _import_meter_history(hass, api, meter, start_date, days, entry)
-            )
+            coro = _import_meter_history(hass, api, meter, start_date, days, entry)
+            if hasattr(entry, "async_create_background_task"):
+                # Tracked on the config entry so an unload/reload cancels it,
+                # and a failure never surfaces as "Task exception was never
+                # retrieved" (previously a bare hass.async_create_task).
+                entry.async_create_background_task(
+                    hass, coro, name="energa_fetch_history"
+                )
+            else:
+                hass.async_create_task(coro)
 
     hass.services.async_register(
         DOMAIN,
@@ -1817,21 +1824,6 @@ async def async_verify_period_data(
         meter_point_id = str(meter.get("meter_point_id", ""))
         serial = str(meter.get("meter_serial", meter_point_id))
 
-        cache_key = (
-            meter_point_id,
-            start_dt.isoformat(),
-            end_dt.isoformat(),
-            rcem_cache_sig,
-            override_bank_1,
-            override_bank_2,
-            override_deposit,
-            override_deposit_rcem,
-        )
-        cached = _verify_cache_get(coordinator, cache_key)
-        if cached is not None:
-            results.append({**cached, "cached": True})
-            continue
-
         # --- Hourly kWh source selection (Bug A) ------------------------
         # Precedence: override (service-call hourly, not exposed today) ->
         # canonical SQLite interval_reading (preferred once it covers the
@@ -1853,9 +1845,32 @@ async def async_verify_period_data(
             start_dt,
             end_dt,
         )
-        if canonical_hourly and canonical_series_covers_period(
+        canonical_ok = bool(canonical_hourly) and canonical_series_covers_period(
             canonical_hourly, canonical_registers, start=start_dt, end=end_dt, tz=TIMEZONE
-        ):
+        )
+
+        # The cache key includes whether the canonical series covers the period.
+        # The auto-backfill populates the canonical store in the background while
+        # a user may already press verify; without this a first press before the
+        # backfill finished stayed cached for the whole session and never got
+        # recomputed from the now-authoritative canonical data (fresh installs).
+        cache_key = (
+            meter_point_id,
+            start_dt.isoformat(),
+            end_dt.isoformat(),
+            rcem_cache_sig,
+            override_bank_1,
+            override_bank_2,
+            override_deposit,
+            override_deposit_rcem,
+            canonical_ok,
+        )
+        cached = _verify_cache_get(coordinator, cache_key)
+        if cached is not None:
+            results.append({**cached, "cached": True})
+            continue
+
+        if canonical_ok:
             hourly = _promote_canonical_hourly(canonical_hourly, has_zones, prosumer)
             # The legacy Faza-2 ``source`` keeps its historical vocabulary; the
             # precise hourly origin is reported via ``kwh_source``.

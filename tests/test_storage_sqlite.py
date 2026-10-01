@@ -362,6 +362,14 @@ def test_schema_v1_to_v2_migration(tmp_path):
         assert "idx_reading_meter_identity" in idx
 
 
+def test_get_schema_version_returns_highest(storage: CanonicalStorage):
+    """Regression: multiple schema_version rows must not report the oldest."""
+    with storage._connection() as conn:
+        rows = conn.execute("SELECT count(*) FROM schema_version").fetchone()[0]
+    assert rows >= 1
+    assert storage.get_schema_version() == CURRENT_SCHEMA_VERSION
+
+
 def test_market_prices_crud_and_effective_lookup(storage: CanonicalStorage):
     from custom_components.energa_mobile.adapters.pse.models import MarketPriceRecord
 

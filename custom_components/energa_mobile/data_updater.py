@@ -50,6 +50,7 @@ class EnergaDataUpdater:
         hourly_data: list[dict],
         entity_id: str,
         last_known_sum: float | None = None,
+        serial: str | None = None,
     ) -> tuple[list, list]:
         """Build statistics for import into recorder.
 
@@ -64,8 +65,12 @@ class EnergaDataUpdater:
         if self.storage:
             self._persist_canonical_readings(meter_id, data_key, hourly_data)
 
-        # Get price for cost calculation
-        price = get_price_for_key(dict(self.entry.options), data_key, meter_id=meter_id)
+        # Get price for cost calculation. Per-meter overrides are stored under
+        # ``meter_<serial>_...``; the serial must be passed explicitly because
+        # ``meter_id`` is the point id and the two can differ (issue #5).
+        price = get_price_for_key(
+            dict(self.entry.options), data_key, meter_id=meter_id, serial=serial
+        )
 
         # Forward calculation - from last known sum or 0
         pre_fetched = self._pre_fetched_stats.get(entity_id)

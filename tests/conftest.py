@@ -132,6 +132,9 @@ coord_mod.CoordinatorEntity = _CoordinatorEntity
 class _DataUpdateCoordinator:
     def __init__(self, *args, **kwargs):
         pass
+
+    async def async_shutdown(self):
+        """No-op base shutdown for tests."""
 coord_mod.DataUpdateCoordinator = _DataUpdateCoordinator
 coord_mod.UpdateFailed = Exception
 

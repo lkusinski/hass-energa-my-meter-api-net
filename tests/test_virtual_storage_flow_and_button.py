@@ -182,6 +182,77 @@ class TestConfigureEnergyDashboardButton:
         assert grid_sources[0]["stat_energy_to"] == "sensor.energa_10000003_panel_energia_produkcja"
 
     @pytest.mark.asyncio
+    async def test_grid_price_entity_resolved_via_registry(self):
+        """v1.9.3 device names (portal label) change price entity ids; the button
+        must find them by stable unique_id instead of assuming the serial form."""
+        hass = MagicMock()
+        mock_manager = MagicMock()
+        mock_manager.data = {"energy_sources": []}
+        mock_manager.async_update = AsyncMock()
+
+        entry = MagicMock()
+        entry.options = {
+            CONF_ENABLE_SYNTHETIC_STORAGE: False,
+            CONF_PROSUMER_COEFFICIENT: 0.0,
+        }
+        meter = {
+            "meter_point_id": "360074",
+            "meter_serial": "30132815",
+            "name": "Wiśniowa",
+            "ppe": "PPE360074",
+            "zone_count": 1,
+            "tariff": "G11",
+            "obis_minus": "1.8.0",
+        }
+        button = EnergaConfigureEnergyDashboardButton(hass=hass, entry=entry, meter=meter)
+
+        with patch(
+            "homeassistant.components.energy.data.async_get_manager",
+            AsyncMock(return_value=mock_manager),
+        ), patch(
+            "custom_components.energa_mobile.button._resolve_sensor_entity_id",
+            side_effect=lambda hass, uid, fallback: (
+                "sensor.energa_wisniowa_cena_poboru"
+                if uid == "energa_30132815_import_price"
+                else "sensor.energa_wisniowa_cena_oddania"
+            ),
+        ):
+            await button.async_press()
+
+        saved = mock_manager.async_update.call_args[0][0]["energy_sources"]
+        grid = next(s for s in saved if s.get("type") == "grid")
+        assert grid["entity_energy_price"] == "sensor.energa_wisniowa_cena_poboru"
+        assert grid["entity_energy_price_export"] == "sensor.energa_wisniowa_cena_oddania"
+
+    def test_resolve_sensor_entity_id_uses_registry_then_fallback(self):
+        import sys
+
+        from custom_components.energa_mobile.button import _resolve_sensor_entity_id
+
+        hass = MagicMock()
+        registry = MagicMock()
+        registry.async_get.return_value.async_get_entity_id.return_value = (
+            "sensor.energa_wisniowa_cena_poboru"
+        )
+        helpers = sys.modules["homeassistant.helpers"]
+        with patch.object(helpers, "entity_registry", registry):
+            resolved = _resolve_sensor_entity_id(
+                hass,
+                "energa_30132815_import_price",
+                "sensor.energa_30132815_cena_poboru",
+            )
+        assert resolved == "sensor.energa_wisniowa_cena_poboru"
+
+        registry.async_get.return_value.async_get_entity_id.return_value = None
+        with patch.object(helpers, "entity_registry", registry):
+            fallback = _resolve_sensor_entity_id(
+                hass,
+                "energa_30132815_import_price",
+                "sensor.energa_30132815_cena_poboru",
+            )
+        assert fallback == "sensor.energa_30132815_cena_poboru"
+
+    @pytest.mark.asyncio
     async def test_button_press_does_not_touch_other_meter_sources(self):
         """Pressing for meter A must leave meter B's grid/battery sources intact."""
         hass = MagicMock()

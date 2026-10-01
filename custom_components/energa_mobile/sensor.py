@@ -304,6 +304,7 @@ async def async_setup_entry(
                     name="Panel Energia Strefa 1",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
             sensors.append(
@@ -327,6 +328,7 @@ async def async_setup_entry(
                     name="Panel Energia Strefa 2",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
             sensors.append(
@@ -350,6 +352,7 @@ async def async_setup_entry(
                     name="Panel Energia Zużycie",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
             sensors.append(
@@ -379,6 +382,7 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja Strefa 1",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
             sensors.append(
@@ -389,6 +393,7 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja Strefa 2",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
         elif is_export_prosumer(meter):
@@ -400,6 +405,7 @@ async def async_setup_entry(
                     name="Panel Energia Produkcja",
                     device_info=device_info,
                     entry=entry,
+                    serial=serial,
                 )
             )
 
@@ -982,9 +988,11 @@ async def async_setup_entry(
 
         _ent_reg = er.async_get(hass)
         _canon_map = {}
+        _legacy_prefixes: set[str] = set()
         for _m in meters_to_process:
             _mid = str(_m["meter_point_id"])
             _serial = str(_m.get("meter_serial", _mid))
+            _legacy_prefixes.add(f"energa_{_mid}_")
 
             _canon_map.update({
                 f"energa_{_mid}_prosumer_balance": f"sensor.energa_{_serial}_bilans_prosumencki",
@@ -1024,6 +1032,14 @@ async def async_setup_entry(
         for _ent in list(_ent_reg.entities.values()):
             if _ent.platform == DOMAIN and _ent.config_entry_id == entry.entry_id:
                 if _ent.unique_id in _canon_map:
+                    # Only rewrite genuinely legacy ids (which embed the
+                    # meter_point_id). Since v1.9.3 fresh installs may register
+                    # portal-label based ids (device name "Energa <name>"); those
+                    # must stay untouched, otherwise every restart would rename
+                    # them once and break user automations/dashboards built in
+                    # between.
+                    if not any(p in str(_ent.entity_id) for p in _legacy_prefixes):
+                        continue
                     _target = _canon_map[_ent.unique_id]
                     if _ent.entity_id != _target:
                         _existing_target = _ent_reg.async_get(_target)

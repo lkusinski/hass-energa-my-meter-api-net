@@ -309,6 +309,68 @@ class TestCanonicalNetMetering:
         assert storage.get_settlement_lots("PPE_X", unit="kWh") == []
 
     @pytest.mark.asyncio
+    async def test_cache_key_reacts_to_canonical_coverage(self):
+        """A first press cached before the backfill must recompute once
+        canonical readings cover the period (fresh-install race)."""
+        from custom_components.energa_mobile.core.readings.models import (
+            IntervalReading,
+        )
+
+        meter = {
+            "meter_point_id": "10000009",
+            "meter_serial": "10000009",
+            "zone_count": 1,
+            "total_plus": 100.0,
+            "total_minus": 0.0,
+            "is_prosumer": False,
+            "tariff": "G11",
+        }
+        hass, _, _, storage = _storage_hass(
+            meter, {CONF_PROSUMER_COEFFICIENT: 0.0}
+        )
+        payload = {
+            "start": "2026-08-01",
+            "end": "2026-08-31",
+            "meter_id": "10000009",
+        }
+        hourly = {"import": {0: 100.0}}
+
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value={})):
+            first = await async_verify_period_data(hass, payload)
+            second = await async_verify_period_data(hass, payload)
+
+        assert first.get("kwh_source") != "canonical"
+        assert second.get("cached") is True
+
+        # Backfill fills the canonical store for every day of the period.
+        storage.insert_readings_idempotent(
+            [
+                IntervalReading(
+                    ppe_id="PPE_TEST",
+                    meter_id="10000009",
+                    register="import",
+                    interval_start_utc=datetime(2026, 8, day, 12, tzinfo=timezone.utc),
+                    resolution="1h",
+                    import_kwh=Decimal("1.0"),
+                    export_kwh=Decimal("0.0"),
+                    quality="ok",
+                    source="energa",
+                )
+                for day in range(1, 32)
+            ]
+        )
+
+        with patch(
+            _PATCH_HOURLY, new=AsyncMock(return_value=hourly)
+        ), patch(_PATCH_MONTHLY, new=AsyncMock(return_value={})):
+            third = await async_verify_period_data(hass, payload)
+
+        assert third.get("kwh_source") == "canonical"
+        assert third.get("cached") is not True
+
+    @pytest.mark.asyncio
     async def test_override_beats_canonical_and_recorder(self):
         hass, _, coordinator, _ = _storage_hass(
             _net_metering_meter(), {CONF_PROSUMER_COEFFICIENT: 0.8}

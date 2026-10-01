@@ -85,10 +85,9 @@ async def test_async_get_config_entry_diagnostics():
     storage_mock.get_latest_reading_time.return_value = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
     storage_mock.get_settlement_lots.return_value = []
     storage_mock.db_path = "/tmp/test.db"
-    storage_mock._connection = MagicMock()
-    cur_mock = MagicMock()
-    storage_mock._connection.cursor.return_value = cur_mock
-    cur_mock.execute.return_value.fetchone.side_effect = [
+    conn_mock = MagicMock()
+    storage_mock._connection.return_value.__enter__.return_value = conn_mock
+    conn_mock.execute.return_value.fetchone.side_effect = [
         ("2026-08-01 00:00:00", "2026-09-07 12:00:00"),  # bounds
         (10,),  # market_prices
         (5,),   # settlement_lots

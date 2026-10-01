@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.9.4-beta.1 (2026-10-01) — prerelease: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
+
+Wydanie **prerelease**. Bez zmian schematu danych i API usług; aktualizacja z
+`v1.9.3` jest bezpieczna. Szczegóły audytu i świadomie odłożone punkty:
+[`docs/BUGHUNT_2026-10-01.md`](docs/BUGHUNT_2026-10-01.md).
+
+- **Powiadomienie „Pulpit Rozliczeń gotowy” już nie wraca po restarcie**
+  (`__init__.py`, `dashboard_generator.py`). Provisioning pulpitu jest
+  idempotentny i uruchamiany przy każdym starcie, więc powiadomienie leci
+  teraz tylko przy pierwszym utworzeniu (nowy `async_dashboard_exists()`:
+  trwały magazyn `lovelace_dashboards` + fallback na panel).
+- **Panel Energia: ceny per licznik odnajdywane po `unique_id`** (`button.py`,
+  `sensors/price.py`, `data_updater.py`, `sensors/live.py`). Od v1.9.3 nazwa
+  urządzenia to etykieta portalu, więc `sensor.energa_<serial>_cena_*` nie
+  istnieje na świeżej instalacji; przycisk rozwiązuje encje przez rejestr, a
+  nadpisania `meter_<serial>_*` są znów stosowane, gdy serial ≠ PPE.
+- **Statystyki energii: jedno `statistic_id` dla live i backfillu**
+  (`sensors/live.py`, `sensor.py`). `EnergaStatisticsSensor` ma jawny,
+  serialowy `entity_id` (`sensor.energa_<serial>_panel_energia_*`), więc live,
+  backfill, koszty, magazyn syntetyczny i przycisk Panelu Energia używają
+  tego samego id (naprawa rozjazdu serii na świeżych instalacjach).
+- **Alerty prosumenckie znów działają** (`ha/alerts.py`): `active_only=True`
+  zamiast nieistniejącego `include_exhausted` (wygasające depozyty) oraz
+  poprawne `with storage._connection() as conn:` (nierozliczone faktury).
+- **Diagnostyka poprawna** (`diagnostics.py`): poprawne połączenie do SQLite,
+  tabela `job_checkpoint` (było `import_checkpoint`), a PPE zbierane także z
+  listy liczników koordynatora — alerty w diagnostyce nie są już puste.
+- **`get_schema_version()` zwraca najwyższą wersję** (`MAX(version)`),
+  nie pierwszą (`storage/sqlite/database.py`).
+- **Coordinator woła `super().async_shutdown()`** (`coordinator.py`) — po
+  unload/reload nie zostaje aktywny timer poll co 15 min ani debouncer.
+- **`verify_period`: klucz cache zawiera pokrycie canonical** (`services.py`).
+  Pierwsze kliknięcie przed backfillem nie zamraża już wyniku recorder/API na
+  całą sesję — po uzupełnieniu canonical nacisk przelicza ponownie.
+- **Migracja encji nie przemianowuje id z etykiety portalu** (`sensor.py`) —
+  koniec jednorazowej zmiany `entity_id` po drugim restarcie na świeżej
+  instalacji; migracja dotyczy wyłącznie starych id z `meter_point_id`.
+- **API: fallback do zagnieżdżonego `agreementPoints`** (`api.py`) — przy braku
+  dopasowania `code` (multi-meter) nie ginie `type`/`dealer` (prosument,
+  data umowy).
+- **`fetch_history` używa trackowanego taska** (`services.py`) — anulowanie przy
+  unload i brak „Task exception was never retrieved”.
+- **Profil dobowy czyta kanoniczną tożsamość PPE** (`coordinator.py`).
+- **Jakość:** **817 passed, 1 skipped**; `ruff` (`E,F,I,B`) czysty; nowe testy
+  regresyjne dla wszystkich powyższych punktów.
+
 ## v1.9.3 (2026-09-25) — stabilna: kanoniczna tożsamość i baza godzinowa, fixy issue #4/#5, porządki FIFO
 
 Wydanie **stabilne** konsolidujące całą linię `v1.9.3-beta.1`–`v1.9.3-beta.10`.

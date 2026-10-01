@@ -100,7 +100,11 @@ class ProsumerAlertManager:
         alerts: list[AlertItem] = []
 
         try:
-            active_lots = self.storage.get_settlement_lots(ppe_id, include_exhausted=False)
+            # ``active_only`` limits to lots with a remaining amount; the old
+            # ``include_exhausted`` kwarg does not exist on CanonicalStorage,
+            # so the TypeError was swallowed and expiring-lot alerts never
+            # fired.
+            active_lots = self.storage.get_settlement_lots(ppe_id, active_only=True)
         except Exception as err:
             _LOGGER.debug("Could not query settlement lots: %s", err)
             return []
@@ -146,14 +150,14 @@ class ProsumerAlertManager:
         alerts: list[AlertItem] = []
         try:
             # Query reconciliations with status DISCREPANCY and approved = False
-            cur = self.storage._connection.cursor()
-            rows = cur.execute(
-                """SELECT invoice_number, computed_gross, invoiced_gross, variance_gross, variance_percent, status
-                   FROM invoice_reconciliation
-                   WHERE ppe_id = ? AND approved = 0 AND status = 'DISCREPANCY'
-                """,
-                (ppe_id,),
-            ).fetchall()
+            with self.storage._connection() as conn:
+                rows = conn.execute(
+                    """SELECT invoice_number, computed_gross, invoiced_gross, variance_gross, variance_percent, status
+                       FROM invoice_reconciliation
+                       WHERE ppe_id = ? AND approved = 0 AND status = 'DISCREPANCY'
+                    """,
+                    (ppe_id,),
+                ).fetchall()
 
             for row in rows:
                 inv_num, comp, invoiced, var, pct, status = row

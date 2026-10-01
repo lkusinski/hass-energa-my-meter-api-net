@@ -254,6 +254,62 @@ async def test_async_provision_dashboard_storage(mock_meter_net_metering):
         mock_reg_panel.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_async_dashboard_exists_reads_persistent_store():
+    """The probe sees a dashboard already registered in lovelace_dashboards."""
+    from custom_components.energa_mobile.dashboard_generator import (
+        async_dashboard_exists,
+    )
+
+    hass = MagicMock()
+    hass.config.components = []
+    store_inst = MagicMock()
+    store_inst.async_load = AsyncMock(
+        return_value={"items": [{"url_path": DEFAULT_URL_PATH}]}
+    )
+    with patch(
+        "custom_components.energa_mobile.dashboard_generator.storage.Store",
+        return_value=store_inst,
+    ):
+        assert await async_dashboard_exists(hass, DEFAULT_URL_PATH) is True
+
+
+@pytest.mark.asyncio
+async def test_async_dashboard_exists_false_when_absent():
+    from custom_components.energa_mobile.dashboard_generator import (
+        async_dashboard_exists,
+    )
+
+    hass = MagicMock()
+    hass.config.components = []
+    store_inst = MagicMock()
+    store_inst.async_load = AsyncMock(return_value={"items": []})
+    with patch(
+        "custom_components.energa_mobile.dashboard_generator.storage.Store",
+        return_value=store_inst,
+    ):
+        assert await async_dashboard_exists(hass, DEFAULT_URL_PATH) is False
+
+
+@pytest.mark.asyncio
+async def test_async_dashboard_exists_falls_back_to_frontend_panel():
+    from custom_components.energa_mobile.dashboard_generator import (
+        async_dashboard_exists,
+    )
+
+    hass = MagicMock()
+    hass.config.components = ["frontend"]
+    store_inst = MagicMock()
+    store_inst.async_load = AsyncMock(side_effect=RuntimeError("store unavailable"))
+    with patch(
+        "custom_components.energa_mobile.dashboard_generator.storage.Store",
+        return_value=store_inst,
+    ), patch(
+        "homeassistant.components.frontend.async_panel_exists", return_value=True
+    ):
+        assert await async_dashboard_exists(hass, DEFAULT_URL_PATH) is True
+
+
 def test_agrestowa_style_dashboard_structure(mock_meter_net_billing):
     mock_meter_net_billing["customer_label"] = "Agrestowa 4"
     view = build_meter_view(mock_meter_net_billing, coeff=0.0)
@@ -714,6 +770,49 @@ class TestSettlementDashboardSetupProvisioning:
         ) as mock_prov:
             await _async_ensure_settlement_dashboard(hass, entry, api)
         mock_prov.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_notification_when_dashboard_newly_created(self):
+        """First provisioning announces the dashboard exactly once."""
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({})
+        with patch(
+            "custom_components.energa_mobile.async_dashboard_exists",
+            AsyncMock(return_value=False),
+        ), patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ), patch(
+            "custom_components.energa_mobile.persistent_notification.async_create"
+        ) as mock_notify:
+            await _async_ensure_settlement_dashboard(hass, entry, self._api())
+        mock_notify.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_notification_when_dashboard_already_exists(self):
+        """A restart (idempotent refresh) must not re-announce the dashboard."""
+        from custom_components.energa_mobile import (
+            _async_ensure_settlement_dashboard,
+        )
+
+        hass = MagicMock()
+        entry = self._entry({})
+        with patch(
+            "custom_components.energa_mobile.async_dashboard_exists",
+            AsyncMock(return_value=True),
+        ), patch(
+            "custom_components.energa_mobile.async_provision_dashboard",
+            AsyncMock(return_value=True),
+        ) as mock_prov, patch(
+            "custom_components.energa_mobile.persistent_notification.async_create"
+        ) as mock_notify:
+            await _async_ensure_settlement_dashboard(hass, entry, self._api())
+        mock_prov.assert_awaited_once()
+        mock_notify.assert_not_called()
 
 
 

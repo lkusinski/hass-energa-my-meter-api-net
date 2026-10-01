@@ -784,7 +784,19 @@ class EnergaCoordinator(DataUpdateCoordinator):
         pending task running against a torn-down entry. Idempotent and never
         raises: a missing/done task or a cancellation during teardown are both
         fine.
+
+        Also delegates to the base ``DataUpdateCoordinator.async_shutdown`` so
+        HA's own refresh timer/debouncer are cancelled; without it the old
+        coordinator kept its 15-minute poll alive after unload/reload.
         """
+        try:
+            await super().async_shutdown()
+        except AttributeError:
+            # Base stub without the hook (tests / very old HA): nothing to do.
+            pass
+        except Exception as err:  # noqa: BLE001 - teardown must never raise
+            _LOGGER.debug("Energa: base coordinator shutdown skipped: %s", err)
+
         pending: list[asyncio.Task] = []
         synth = getattr(self, "_synth_tasks", None)
         if synth:
@@ -841,9 +853,18 @@ class EnergaCoordinator(DataUpdateCoordinator):
                         wh_cover = 0.0
 
             try:
+                from .core.identity import canonical_ppe_id
                 from .projections.forecast import HourlyProfileForecaster
+
+                # Use the same canonical PPE identity as the live data updater
+                # so the identity-preferring read ranks the canonical rows
+                # (PPE_<mid>) above legacy raw-mid rows.
+                profile_ppe = (
+                    canonical_ppe_id(getattr(self.entry, "data", None), meter_dict)
+                    or f"PPE_{mid_str}"
+                )
                 canonical_readings = self.storage.get_readings(
-                    ppe_id=mid_str,
+                    ppe_id=profile_ppe,
                     meter_id=serial_str,
                     resolution="1h",
                 )

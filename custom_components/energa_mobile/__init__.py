@@ -39,7 +39,11 @@ from .const import (
     DOMAIN,
     SIGNAL_PERIOD_OPTIONS_UPDATED,
 )
-from .dashboard_generator import DEFAULT_URL_PATH, async_provision_dashboard
+from .dashboard_generator import (
+    DEFAULT_URL_PATH,
+    async_dashboard_exists,
+    async_provision_dashboard,
+)
 from .services import (
     AUTO_HISTORY_DAYS,
     TIMEZONE,
@@ -281,8 +285,13 @@ async def _async_ensure_settlement_dashboard(
             )
         except (ValueError, TypeError):
             coeff = DEFAULT_PROSUMER_COEFFICIENT
+        # Idempotent provisioning runs on every setup (each HA start/reload),
+        # but the "dashboard ready" notification must fire only when the
+        # dashboard is created for the first time — otherwise it reappeared
+        # after every restart (reported 2026-09-30 after a Core update).
+        already_provisioned = await async_dashboard_exists(hass, DEFAULT_URL_PATH)
         success = await async_provision_dashboard(hass, active, coeff=coeff)
-        if success:
+        if success and not already_provisioned:
             persistent_notification.async_create(
                 hass,
                 "Dedykowany pulpit Energa został utworzony w menu bocznym: "

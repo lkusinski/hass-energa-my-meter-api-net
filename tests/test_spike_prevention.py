@@ -221,3 +221,57 @@ def test_recorder_adapter_prevents_sum_drops():
         assert imported_stats[0]["sum"] >= 13847.7
 
 
+def test_statistics_sensor_pins_serial_entity_id():
+    """v1.9.3 device names are portal labels, so the statistic_id must be pinned.
+
+    The live statistics and the historical backfill must share one
+    ``sensor.energa_<serial>_panel_energia_*`` id on fresh installs.
+    """
+    coordinator = MagicMock()
+    coordinator.data = []
+
+    sensor = EnergaStatisticsSensor(
+        coordinator=coordinator,
+        meter_id="360074",
+        data_key="import",
+        name="Panel Energia Zużycie",
+        device_info=MagicMock(),
+        entry=MagicMock(),
+        serial="30132815",
+    )
+    assert sensor.entity_id == "sensor.energa_30132815_panel_energia_zuzycie"
+
+    zone_sensor = EnergaStatisticsSensor(
+        coordinator=coordinator,
+        meter_id="360074",
+        data_key="import_1",
+        name="Panel Energia Strefa 1",
+        device_info=MagicMock(),
+        entry=MagicMock(),
+        serial="30132815",
+    )
+    assert zone_sensor.entity_id == "sensor.energa_30132815_panel_energia_strefa_1"
+
+
+def test_data_updater_passes_serial_for_per_meter_price():
+    """Per-meter price overrides are stored under ``meter_<serial>_...``."""
+    from custom_components.energa_mobile import data_updater as du
+
+    updater = du.EnergaDataUpdater.__new__(du.EnergaDataUpdater)
+    updater.hass = MagicMock()
+    updater.entry = MagicMock()
+    updater.entry.options = {"meter_30132815_import_price": 0.99}
+    updater._pre_fetched_stats = {}
+    updater.storage = None
+
+    with patch.object(du, "get_price_for_key", wraps=du.get_price_for_key) as mock_price:
+        updater.gather_stats_for_sensor(
+            meter_id="360074",
+            data_key="import",
+            hourly_data=[{"dt": datetime(2026, 9, 1, tzinfo=timezone.utc), "value": 1.0}],
+            entity_id="sensor.energa_30132815_panel_energia_zuzycie",
+            serial="30132815",
+        )
+    assert mock_price.call_args.kwargs.get("serial") == "30132815"
+
+

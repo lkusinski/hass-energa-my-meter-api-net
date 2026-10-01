@@ -553,10 +553,15 @@ class CanonicalStorage:
             return out
 
     def get_schema_version(self) -> int:
-        """Return current database schema version."""
+        """Return the highest applied schema version.
+
+        ``schema_version`` accumulates one row per migration, so ``SELECT
+        version`` would return the *oldest* row (1) on a migrated database and
+        diagnostics would report the wrong version. Take the maximum instead.
+        """
         with self._connection() as conn:
-            row = conn.execute("SELECT version FROM schema_version").fetchone()
-            return int(row[0]) if row else 1
+            row = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            return int(row[0]) if row and row[0] is not None else 1
 
     @staticmethod
     def _identity_filter(

@@ -166,6 +166,29 @@ class TestAgreementPointMatching:
         assert meters[1]["address"] is None
 
     @pytest.mark.asyncio
+    async def test_nested_agreement_preserves_prosumer_when_no_top_level_match(
+        self, api, mock_session
+    ):
+        """Multi-meter: nested agreement supplies type/dealer when code misses."""
+        payload = self._payload()
+        for mp in payload["response"]["meterPoints"]:
+            mp["agreementPoints"] = [
+                {
+                    "code": "OTHER",
+                    "type": "Wytwórca",
+                    "dealer": {"start": 1700000000000},
+                }
+            ]
+        resp = make_mock_response(200, payload)
+        mock_session.get = MagicMock(return_value=resp)
+
+        meters = await api._fetch_all_meters()
+
+        assert meters[0]["is_prosumer"] is True
+        assert meters[1]["is_prosumer"] is True
+        assert meters[0]["contract_date"] is not None
+
+    @pytest.mark.asyncio
     async def test_single_agreement_point_is_unambiguous_fallback(
         self, api, mock_session
     ):

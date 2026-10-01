@@ -108,19 +108,21 @@ async def async_get_config_entry_diagnostics(
                 "db_size_bytes": os.path.getsize(storage.db_path) if os.path.exists(storage.db_path) else 0,
             }
             try:
-                cur = storage._connection.cursor()
-                # Reading date bounds
-                bounds = cur.execute(
-                    "SELECT MIN(interval_start_utc), MAX(interval_start_utc) FROM interval_reading"
-                ).fetchone()
-                stats["earliest_reading_utc"] = bounds[0] if bounds else None
-                stats["latest_reading_utc"] = bounds[1] if bounds else None
+                with storage._connection() as conn:
+                    # Reading date bounds
+                    bounds = conn.execute(
+                        "SELECT MIN(interval_start_utc), MAX(interval_start_utc) FROM interval_reading"
+                    ).fetchone()
+                    stats["earliest_reading_utc"] = bounds[0] if bounds else None
+                    stats["latest_reading_utc"] = bounds[1] if bounds else None
 
-                # Table counts
-                stats["market_prices_count"] = cur.execute("SELECT count(*) FROM market_price").fetchone()[0]
-                stats["settlement_lots_count"] = cur.execute("SELECT count(*) FROM settlement_lot").fetchone()[0]
-                stats["reconciliations_count"] = cur.execute("SELECT count(*) FROM invoice_reconciliation").fetchone()[0]
-                stats["checkpoints_count"] = cur.execute("SELECT count(*) FROM import_checkpoint").fetchone()[0]
+                    # Table counts
+                    stats["market_prices_count"] = conn.execute("SELECT count(*) FROM market_price").fetchone()[0]
+                    stats["settlement_lots_count"] = conn.execute("SELECT count(*) FROM settlement_lot").fetchone()[0]
+                    stats["reconciliations_count"] = conn.execute("SELECT count(*) FROM invoice_reconciliation").fetchone()[0]
+                    # Checkpoint table is ``job_checkpoint`` (``import_checkpoint``
+                    # never existed, so this count always raised before).
+                    stats["checkpoints_count"] = conn.execute("SELECT count(*) FROM job_checkpoint").fetchone()[0]
             except Exception as err:
                 stats["error"] = str(err)
 
@@ -128,20 +130,31 @@ async def async_get_config_entry_diagnostics(
 
         diag["storage"] = await hass.async_add_executor_job(_get_storage_stats)
 
-        # Collect active alerts
-        ppe_id = entry.data.get("ppe_id")
-        if ppe_id:
+        # Collect active alerts. ``entry.data`` never stores ``ppe_id`` (the PPE
+        # is discovered per meter from the API), so gather it from the
+        # coordinator's meter list as well as the legacy entry key; without
+        # this the alerts list was always empty.
+        ppe_ids: list[str] = []
+        if entry.data.get("ppe_id"):
+            ppe_ids.append(str(entry.data["ppe_id"]))
+        meters_for_alerts = coordinator.data if coordinator and coordinator.data else []
+        for meter in meters_for_alerts:
+            ppe = meter.get("ppe") if isinstance(meter, dict) else None
+            if ppe and str(ppe) not in ppe_ids:
+                ppe_ids.append(str(ppe))
+        if ppe_ids:
             alert_mgr = ProsumerAlertManager(storage)
-            raw_alerts = alert_mgr.get_all_alerts(ppe_id)
             diag["alerts"] = [
                 {
+                    "ppe_id": ppe_id,
                     "alert_type": a.alert_type,
                     "severity": a.severity,
                     "title": a.title,
                     "message": a.message,
                     "details": a.details,
                 }
-                for a in raw_alerts
+                for ppe_id in ppe_ids
+                for a in alert_mgr.get_all_alerts(ppe_id)
             ]
 
     return diag

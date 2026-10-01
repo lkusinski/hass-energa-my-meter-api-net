@@ -894,6 +894,12 @@ class EnergaAPI:
             # Unambiguous fallback: a single agreement point belongs to this meter.
             if not ag and len(agreement_points) == 1:
                 ag = agreement_points[0]
+            # Per-meter nested agreement is authoritative when the top-level
+            # list has several points and none matches by code; without this the
+            # seller flag (type/dealer) and contract date were silently lost for
+            # multi-meter accounts.
+            if not ag and nested_ag and isinstance(nested_ag[0], dict):
+                ag = nested_ag[0]
 
             # Resolve PPE from the matched agreement point if still unknown.
             if not ppe:

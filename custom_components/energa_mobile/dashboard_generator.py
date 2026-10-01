@@ -632,6 +632,43 @@ def build_energa_dashboard(
     }
 
 
+async def async_dashboard_exists(
+    hass: HomeAssistant, url_path: str = DEFAULT_URL_PATH
+) -> bool:
+    """Return whether the Energa dashboard is already provisioned.
+
+    ``async_provision_dashboard`` is idempotent and runs on every config-entry
+    setup (i.e. on each HA start/reload), so it returns ``True`` both for a
+    fresh creation and for an update of an existing dashboard. Callers that
+    only want to announce a *new* dashboard (the one-shot "Pulpit Rozliczeń
+    gotowy" notification) use this probe to tell the two apart.
+
+    Reads the persistent ``lovelace_dashboards`` store (authoritative, survives
+    restarts) and falls back to the live frontend panel. Never raises — a
+    ``False`` result only means "notify again", it can never break setup.
+    """
+    clean_url = url_path.strip("/ ")
+    try:
+        store_dashboards = storage.Store(hass, 1, "lovelace_dashboards")
+        dash_data = await store_dashboards.async_load() or {}
+        items = dash_data.get("items", []) if isinstance(dash_data, dict) else []
+        if any(it.get("url_path") == clean_url for it in items):
+            return True
+    except Exception as err:  # noqa: BLE001 - probe must never break setup
+        _LOGGER.debug("Dashboard existence probe (storage) failed: %s", err)
+
+    try:
+        if "frontend" in hass.config.components:
+            from homeassistant.components import frontend
+
+            if frontend.async_panel_exists(hass, clean_url):
+                return True
+    except Exception as err:  # noqa: BLE001 - probe must never break setup
+        _LOGGER.debug("Dashboard existence probe (panel) failed: %s", err)
+
+    return False
+
+
 async def async_provision_dashboard(
     hass: HomeAssistant,
     meters: list[dict[str, Any]],

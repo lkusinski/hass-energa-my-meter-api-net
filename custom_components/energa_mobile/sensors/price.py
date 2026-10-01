@@ -125,7 +125,7 @@ class EnergaPriceSensor(CoordinatorEntity, SensorEntity):
             return round(rce * 1.23, 5)
 
         price_val = get_price_for_key(
-            opts, self._data_key, meter_id=self._meter_id
+            opts, self._data_key, meter_id=self._meter_id, serial=self._serial
         )
         if self._data_key.startswith("import"):
             zone_desc = (

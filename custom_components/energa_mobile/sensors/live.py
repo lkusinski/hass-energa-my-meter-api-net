@@ -290,6 +290,7 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         name: str,
         device_info: DeviceInfo,
         entry: ConfigEntry,
+        serial: str = "",
     ) -> None:
         """Initialize statistics sensor."""
         super().__init__(coordinator)
@@ -297,6 +298,7 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         self._meter_id = meter_id
         self._data_key = data_key
         self._entry = entry
+        self._serial = str(serial or meter_id)
 
         self._last_sum: float | None = None
 
@@ -304,6 +306,23 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = name
         self._attr_unique_id = f"energa_{meter_id}_{data_key}_stats"
         self._attr_has_entity_name = True
+
+        # Pin the entity_id to the serial-based canonical form. The statistic_id
+        # equals the entity_id, and the historical backfill + cost placeholders
+        # + Energy Dashboard button all use ``sensor.energa_<serial>_...``. Since
+        # v1.9.3 the device name is the portal label, so without this pin the
+        # live statistics would land under ``sensor.energa_<portal>_...`` and
+        # split the series from the backfill (fresh installs only).
+        suffix_to_name = {
+            "import": "panel_energia_zuzycie",
+            "import_1": "panel_energia_strefa_1",
+            "import_2": "panel_energia_strefa_2",
+            "export": "panel_energia_produkcja",
+            "export_1": "panel_energia_produkcja_strefa_1",
+            "export_2": "panel_energia_produkcja_strefa_2",
+        }
+        energy_slug = suffix_to_name.get(data_key, f"panel_{data_key}")
+        self.entity_id = f"sensor.energa_{self._serial}_{energy_slug}".lower()
 
         # Sensor class attributes — state_class is required for Energy
         # Dashboard to list this entity in its configuration dropdown.
@@ -363,7 +382,12 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
 
     def _get_price(self) -> float:
         """Get price for this sensor's zone/type."""
-        return get_price_for_key(dict(self._entry.options), self._data_key, meter_id=self._meter_id)
+        return get_price_for_key(
+            dict(self._entry.options),
+            self._data_key,
+            meter_id=self._meter_id,
+            serial=self._serial,
+        )
 
     @override
     @callback
@@ -418,6 +442,7 @@ class EnergaStatisticsSensor(CoordinatorEntity, SensorEntity):
             hourly_data=hourly_data,
             entity_id=self.entity_id,
             last_known_sum=float(self._last_sum or 0.0),
+            serial=self._serial,
         )
 
         if not energy_stats:

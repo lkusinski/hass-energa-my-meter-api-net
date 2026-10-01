@@ -51,6 +51,32 @@ def _belongs_to_meter(source: dict[str, Any], prefixes: tuple[str, ...]) -> bool
     )
 
 
+def _resolve_sensor_entity_id(
+    hass: HomeAssistant, unique_id: str, fallback: str
+) -> str:
+    """Resolve a sensor entity_id by its stable unique_id, else ``fallback``.
+
+    ``has_entity_name`` entity ids are derived from the *device* name. Since
+    v1.9.3 the device name is the portal label (e.g. "Energa Wiśniowa"), so a
+    hard-coded ``sensor.energa_<serial>_...`` no longer exists on fresh
+    installs. The Energy Dashboard grid sources referenced the price entities
+    that way and would point at a missing entity. A registry lookup by
+    unique_id keeps the wiring correct for both old and new installs; the
+    lookup is fully guarded so it can never break the button.
+    """
+    try:
+        from homeassistant.helpers import entity_registry as er
+
+        entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, unique_id
+        )
+        if isinstance(entity_id, str) and entity_id:
+            return entity_id
+    except Exception as err:  # noqa: BLE001 - lookup must never break the button
+        _LOGGER.debug("Energa: price entity lookup failed for %s: %s", unique_id, err)
+    return fallback
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -221,6 +247,11 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
         serial = self._serial
         s_slug = str(serial).lower()
 
+        def _price_entity(data_key: str, fallback: str) -> str:
+            return _resolve_sensor_entity_id(
+                self.hass, f"energa_{serial}_{data_key}_price", fallback
+            )
+
         inverter_entity = self._entry.options.get(
             CONF_INVERTER_ENERGY_ENTITY,
             self._entry.options.get(f"meter_{serial}_{CONF_INVERTER_ENERGY_ENTITY}", "")
@@ -245,7 +276,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie_strefa_1",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
+                        "entity_energy_price": _price_entity(
+                            "import_1", f"sensor.energa_{s_slug}_cena_poboru_strefa_1"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -258,7 +291,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie_strefa_2",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
+                        "entity_energy_price": _price_entity(
+                            "import_2", f"sensor.energa_{s_slug}_cena_poboru_strefa_2"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -286,7 +321,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_syntetyczna_siec_oddanie",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
+                        "entity_energy_price": _price_entity(
+                            "import", f"sensor.energa_{s_slug}_cena_poboru"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": 0.0,
@@ -310,9 +347,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_1",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
+                        "entity_energy_price": _price_entity(
+                            "import_1", f"sensor.energa_{s_slug}_cena_poboru_strefa_1"
+                        ),
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
+                        "entity_energy_price_export": _price_entity(
+                            "export", f"sensor.energa_{s_slug}_cena_oddania"
+                        ),
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial} - Strefa 1",
@@ -323,9 +364,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_2",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
+                        "entity_energy_price": _price_entity(
+                            "import_2", f"sensor.energa_{s_slug}_cena_poboru_strefa_2"
+                        ),
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
+                        "entity_energy_price_export": _price_entity(
+                            "export", f"sensor.energa_{s_slug}_cena_oddania"
+                        ),
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial} - Strefa 2",
@@ -339,9 +384,13 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": f"sensor.energa_{s_slug}_panel_energia_produkcja",
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
+                        "entity_energy_price": _price_entity(
+                            "import", f"sensor.energa_{s_slug}_cena_poboru"
+                        ),
                         "number_energy_price": None,
-                        "entity_energy_price_export": f"sensor.energa_{s_slug}_cena_oddania",
+                        "entity_energy_price_export": _price_entity(
+                            "export", f"sensor.energa_{s_slug}_cena_oddania"
+                        ),
                         "number_energy_price_export": None,
                         "cost_adjustment_day": 0.0,
                         "name": f"Sieć Energa {serial}",
@@ -357,7 +406,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_1" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_1",
+                        "entity_energy_price": _price_entity(
+                            "import_1", f"sensor.energa_{s_slug}_cena_poboru_strefa_1"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),
@@ -370,7 +421,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja_strefa_2" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru_strefa_2",
+                        "entity_energy_price": _price_entity(
+                            "import_2", f"sensor.energa_{s_slug}_cena_poboru_strefa_2"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),
@@ -386,7 +439,9 @@ class EnergaConfigureEnergyDashboardButton(ButtonEntity):
                         "stat_energy_to": (f"sensor.energa_{s_slug}_panel_energia_produkcja" if is_producer else None),
                         "stat_cost": None,
                         "stat_compensation": None,
-                        "entity_energy_price": f"sensor.energa_{s_slug}_cena_poboru",
+                        "entity_energy_price": _price_entity(
+                            "import", f"sensor.energa_{s_slug}_cena_poboru"
+                        ),
                         "number_energy_price": None,
                         "entity_energy_price_export": None,
                         "number_energy_price_export": (0.0 if is_producer else None),
