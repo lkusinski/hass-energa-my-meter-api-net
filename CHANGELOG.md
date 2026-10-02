@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.9.4 (2026-10-01) — stabilne: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
+## v1.9.4 (2026-10-01) — stabilna: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
 
 Wydanie **stabilne** (poprzedzone buildem weryfikacyjnym `v1.9.4-beta.1`).
 Bez zmian schematu danych i API usług; aktualizacja z `v1.9.3` jest bezpieczna.
