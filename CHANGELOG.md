@@ -1,9 +1,10 @@
 # Changelog
 
-## v1.9.4-beta.1 (2026-10-01) — prerelease: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
+## v1.9.4 (2026-10-01) — stabilne: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
 
-Wydanie **prerelease**. Bez zmian schematu danych i API usług; aktualizacja z
-`v1.9.3` jest bezpieczna. Szczegóły audytu i świadomie odłożone punkty:
+Wydanie **stabilne** (poprzedzone buildem weryfikacyjnym `v1.9.4-beta.1`).
+Bez zmian schematu danych i API usług; aktualizacja z `v1.9.3` jest bezpieczna.
+Szczegóły audytu i świadomie odłożone punkty:
 [`docs/BUGHUNT_2026-10-01.md`](docs/BUGHUNT_2026-10-01.md).
 
 - **Powiadomienie „Pulpit Rozliczeń gotowy” już nie wraca po restarcie**
