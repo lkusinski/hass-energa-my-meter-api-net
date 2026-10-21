@@ -51,7 +51,17 @@ def mock_device_info():
 
 
 def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
-    """Verify that EnergaBillForecastSensor switches to hourly_profile_wal when storage has >=7d history."""
+    """EnergaBillForecastSensor uses the coordinator's pre-computed WAL result.
+
+    v1.9.5: the sensor no longer computes the profile inline (that read SQLite on
+    the event loop and took ~8-10 s). The coordinator computes it in an executor
+    (``_async_update_profile_forecasts``) and caches it in
+    ``_profile_forecast_cache``; the sensor only reads that cache.
+    """
+    from custom_components.energa_mobile.projections.forecast import (
+        HourlyProfileForecaster,
+    )
+
     coord = MagicMock()
     coord.data = [{"meter_point_id": 1340026, "meter_serial": "10000002", "tariff": "G12w"}]
     coord._mtd = {
@@ -66,8 +76,7 @@ def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
     }
     coord._rce_cache = 0.25
 
-    # Mock storage returning 14 days of hourly canonical readings
-    storage = MagicMock()
+    # 14 days of hourly canonical readings
     readings = []
     base_dt = datetime.now(timezone.utc) - timedelta(days=14)
     for i in range(14 * 24):
@@ -82,7 +91,23 @@ def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
                 export_kwh=Decimal("0.5"),
             )
         )
-    storage.get_readings.return_value = readings
+
+    # The coordinator computes the profile in its executor and caches the result.
+    today = date.today()
+    month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
+    forecaster = HourlyProfileForecaster(readings=readings, tariff_code="G12w")
+    result = forecaster.forecast_month(
+        current_date=today,
+        mtd_readings=[r for r in readings if r.interval_start_utc >= month_start_utc],
+        tariff_options=mock_entry.options,
+        rce_price=0.25,
+        warehouse_kwh=0.0,
+        is_old_system=False,
+    )
+    coord._profile_forecast_cache = {"1340026": result}
+
+    # Storage must NOT be touched by the sensor (no event-loop blocking).
+    storage = MagicMock()
     coord.storage = storage
 
     sensor = EnergaBillForecastSensor(
@@ -106,6 +131,42 @@ def test_forecast_sensor_uses_wal_profile(mock_entry, mock_device_info):
     assert isinstance(attrs["forecast_payable_pln"], float)
     assert isinstance(attrs["bill_breakdown"], dict)
     assert attrs["bill_breakdown"]["do_zaplaty"] == attrs["forecast_payable_pln"]
+    # v1.9.5 regression guard: no synchronous SQLite read on the event loop.
+    storage.get_readings.assert_not_called()
+
+
+def test_forecast_sensor_empty_cache_does_not_block(mock_entry, mock_device_info):
+    """v1.9.5: without a cached WAL result the sensor falls back to MTD/rolling
+    WITHOUT calling ``storage.get_readings`` (which used to block ~8-10 s)."""
+    coord = MagicMock()
+    coord.data = [{"meter_point_id": 1340026, "meter_serial": "10000002", "tariff": "G12w"}]
+    coord._mtd = {
+        "1340026": {"import": 50.0, "export": 20.0, "import_1": 30.0,
+                    "import_2": 20.0, "export_1": 15.0, "export_2": 5.0}
+    }
+    coord._meter_totals = {
+        "1340026": {"import": 120.0, "export": 40.0, "import_1": 70.0,
+                    "import_2": 50.0, "export_1": 25.0, "export_2": 15.0}
+    }
+    coord._monthly = {"1340026": {}}
+    coord._rolling_365 = {"1340026": {"_coverage_days": 0}}
+    coord._rce_cache = 0.25
+    coord._profile_forecast_cache = {}  # empty -> no WAL result yet
+    storage = MagicMock()
+    coord.storage = storage
+
+    sensor = EnergaBillForecastSensor(
+        coordinator=coord,
+        meter_id="1340026",
+        device_info=mock_device_info,
+        entry=mock_entry,
+        has_zones=True,
+        serial="10000002",
+    )
+
+    val = sensor.native_value
+    assert val is not None
+    storage.get_readings.assert_not_called()
 
 
 def test_bill_sensor_uses_product_rates_for_old_system():

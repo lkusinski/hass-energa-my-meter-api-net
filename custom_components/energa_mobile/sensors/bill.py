@@ -333,39 +333,14 @@ class EnergaBillForecastSensor(CoordinatorEntity, SensorEntity):
             )
         except (ValueError, TypeError):
             bill_mtd = None
-        # Pre-computed hourly profile forecast from coordinator's executor thread (v1.6.9)
+        # Pre-computed hourly profile forecast from the coordinator's executor thread
+        # (v1.6.9). v1.9.5: NIE liczymy profilu synchronicznie w ``native_value`` —
+        # ``get_readings`` na dużej bazie kanonicznej blokował pętlę zdarzeń ok. 8–10 s
+        # (HA logował „Updating state ... took N seconds"). Koordynator wylicza profil
+        # w executorze (``_async_update_profile_forecasts``); tutaj tylko go czytamy,
+        # a przy pustym cache korzystamy z metody MTD/rolling poniżej (bez blokowania).
         cache = getattr(self.coordinator, "_profile_forecast_cache", None)
         profile_res = cache.get(str(self._meter_id)) if isinstance(cache, dict) else None
-        if profile_res is None:
-            storage = getattr(self.coordinator, "storage", None)
-            if storage:
-                try:
-                    from ..projections.forecast import HourlyProfileForecaster
-                    canonical_readings = storage.get_readings(
-                        ppe_id=str(self._meter_id),
-                        resolution="1h",
-                    )
-                    if canonical_readings:
-                        forecaster = HourlyProfileForecaster(
-                            readings=canonical_readings,
-                            tariff_code=self._meter_tariff(),
-                        )
-                        if forecaster.history_days_count >= 7:
-                            month_start_utc = datetime(today.year, today.month, 1, 0, 0, tzinfo=timezone.utc)
-                            mtd_readings = [
-                                r for r in canonical_readings
-                                if r.interval_start_utc >= month_start_utc
-                            ]
-                            profile_res = forecaster.forecast_month(
-                                current_date=today,
-                                mtd_readings=mtd_readings,
-                                tariff_options=opts,
-                                rce_price=rce,
-                                warehouse_kwh=self._warehouse_cover() if old_system else 0.0,
-                                is_old_system=old_system,
-                            )
-                except Exception as pf_err:
-                    _LOGGER.debug("Profile forecaster fallback failed: %s", pf_err)
 
         days_in_month = _cal.monthrange(today.year, today.month)[1]
         elapsed = min(max(today.day, 1), days_in_month)

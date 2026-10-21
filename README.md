@@ -8,9 +8,9 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-805_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-818_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.3](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.3) (stabilne)** — kanoniczna tożsamość odczytów i baza godzinowa z `kwh_source`, fixy issue #4 (setup timeout na dużej bazie) i issue #5 (multi-meter `agreementPoints`, klikalny przycisk „Przelicz okres", nazwy z portalu w DeviceInfo), scalenie silnika FIFO (golden testy), poprawki danych godzinowych (dedup rejestru, autokonsumpcja, profil dobowy) oraz higiena unload/reload. Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.4](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.4) (stabilne)** — kanoniczna tożsamość odczytów i baza godzinowa z `kwh_source`, fixy issue #4 (setup timeout na dużej bazie) i issue #5 (multi-meter `agreementPoints`, klikalny przycisk „Przelicz okres", nazwy z portalu w DeviceInfo), scalenie silnika FIFO (golden testy), poprawki danych godzinowych (dedup rejestru, autokonsumpcja, profil dobowy) oraz higiena unload/reload. Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5
