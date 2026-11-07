@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.9.5 (2026-11-07) — stabilna: luki rejestrów OSD, wykrywanie pierwszej daty i event-loop
+
+Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
+`v1.9.4` jest bezpieczna.
+
+- **Luki w statystykach spóźnionych rejestrów (issue #7, PR #8)** (`coordinator.py`).
+  Smart fetch startował wyłącznie od watermarku importu, więc gdy eksport (lub
+  druga strefa G12W) publikował dane później, brakujące godziny wypadały poza
+  okno pobierania. Start liczymy teraz od najstarszego watermarku wszystkich
+  rejestrów (import/eksport/strefy), z limitem cofnięcia 48 h; deduplikacja
+  nadal filtruje już zaimportowane punkty. Luki starsze niż 48 h wymagają
+  ręcznego importu (świadomy limit obciążenia API).
+- **Pewniejsze wykrywanie pierwszej daty odczytu** (`api.py`). Skan roku
+  zaczyna się od końca roku/dzisiaj (wcześniej tylko 1 lipca i 15 stycznia,
+  co przy danych startujących 2–14 lipca zwracało `None`), a skan miesiąca
+  sprawdza ostatni dzień — poprawnie wykrywa aktywację np. 29–31 dnia.
+- **Prognoza rachunku nie blokuje pętli zdarzeń** (`sensors/bill.py`, commit `69a5d85`).
+  `native_value` nie czyta już synchronicznie całej bazy kanonicznej
+  (`get_readings`, ok. 8–10 s na dużej bazie); korzysta z cache profilu
+  wyliczanego w executorze, a przy pustym cache z MTD/rolling.
+- **Dokumentacja sensorów zużycia domu** (`README.md`). Poprawne nazwy
+  `sensor.energa_<numer>_realne_zuzycie_domu_dzis` / `_mtd` (issue #6, PR #8).
+- **Testy:** 823 passed, 1 skipped; lint `ruff E,F,I` czysty.
+
+- **Wydanie:** 1.9.5, stabilne.
+
 ## v1.9.4 (2026-10-01) — stabilna: bug hunt po v1.9.3 (alerty, diagnostyka, ceny per-licznik, spójność statystyk)
 
 Wydanie **stabilne** (poprzedzone buildem weryfikacyjnym `v1.9.4-beta.1`).
