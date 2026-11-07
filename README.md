@@ -8,7 +8,7 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-818_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-823_passed-brightgreen)
 
 **Najnowsze wydanie: [v1.9.4](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.4) (stabilne)** — kanoniczna tożsamość odczytów i baza godzinowa z `kwh_source`, fixy issue #4 (setup timeout na dużej bazie) i issue #5 (multi-meter `agreementPoints`, klikalny przycisk „Przelicz okres", nazwy z portalu w DeviceInfo), scalenie silnika FIFO (golden testy), poprawki danych godzinowych (dedup rejestru, autokonsumpcja, profil dobowy) oraz higiena unload/reload. Stabilna pozostaje [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
@@ -281,7 +281,8 @@ Szczegółowe opracowania poszczególnych modułów systemu:
 | `sensor.energa_<numer>_bank_wirtualny_pln` | `monetary` / `PLN` | Stan depozytu prosumenckiego w nowym systemie (Net-billing). |
 | `sensor.energa_<numer>_magazyn_poziom` | `battery` / `%` | Procentowy poziom napełnienia magazynu energii (od 3 miesięcy historii). |
 | `sensor.energa_<numer>_autokonsumpcja_dzis` | `energy` / `kWh` | Autokonsumpcja PV z precyzyjną godzinową synchronizacją. |
-| `sensor.energa_<numer>_zuzycie_domu_dzis` | `energy` / `kWh` | Rzeczywiste łączne zużycie energii przez budynek (pobór + autokonsumpcja). |
+| `sensor.energa_<numer>_realne_zuzycie_domu_dzis` | `energy` / `kWh` | Rzeczywiste łączne zużycie energii przez budynek (pobór + autokonsumpcja), godzinowo zsynchronizowane z PV. |
+| `sensor.energa_<numer>_realne_zuzycie_domu_mtd` | `energy` / `kWh` | Rzeczywiste łączne zużycie domu od początku miesiąca. |
 | `sensor.energa_<numer>_dotychczasowy_rachunek` | `PLN` | Kwota rachunku MTD brutto od początku miesiąca do chwili obecnej. |
 | `sensor.energa_<numer>_prognoza_rachunku` | `PLN` | Autonomiczna prognoza rachunku brutto na koniec miesiąca z wygładzaniem wczesnomiesięcznym. |
 | `sensor.energa_<numer>_rcem_auto` | `PLN/kWh` | Oficjalna rynkowa cena RCEm pobierana automatycznie z PSE. |

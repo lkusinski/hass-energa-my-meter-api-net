@@ -38,6 +38,7 @@ from .settlement import reset_aware_delta
 _LOGGER = logging.getLogger(__name__)
 
 TIMEZONE = ZoneInfo("Europe/Warsaw")
+_MAX_SMART_CATCHUP = timedelta(hours=48)
 
 
 class EnergaCoordinator(DataUpdateCoordinator):
@@ -65,6 +66,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
         self._rce_current_record = None
         self._hourly_stats: dict = {}  # {meter_id: {"import_1": [...], "import_2": [...], ...}}
         self._pre_fetched_stats: dict = {}  # {entity_id: {"sum": x, "start": dt}}
+        self._last_register_stats: dict = {}  # {meter_id: {suffix: {"sum": x, "start": dt}}}
         self._meter_totals: dict = {}  # {meter_id: {"import_1": x, "import_2": y, ...}}
         self._rce_cache: float | None = None
         self._rce_last_fetch = None
@@ -288,6 +290,28 @@ class EnergaCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
+    def _smart_start_from_registers(self, meter_id: str, now: datetime):
+        """Return fetch start from the earliest per-register watermark."""
+        from homeassistant.util import dt as dt_util
+
+        register_stats = self._last_register_stats.get(meter_id) or {}
+        starts = []
+        for stat in register_stats.values():
+            start = (stat or {}).get("start")
+            if start is None:
+                continue
+            if isinstance(start, (int, float)):
+                start = dt_util.utc_from_timestamp(start).astimezone(TIMEZONE)
+            elif start.tzinfo is None:
+                start = start.replace(tzinfo=TIMEZONE)
+            else:
+                start = start.astimezone(TIMEZONE)
+            starts.append(start)
+        if not starts:
+            return None
+        earliest = max(min(starts), now - _MAX_SMART_CATCHUP)
+        return earliest + timedelta(hours=1)
+
     async def _get_smart_start_date(self, meter_id: str, has_zones: bool = False):
         """Get start_date based on last imported statistic."""
         from datetime import datetime as dt_datetime
@@ -299,6 +323,15 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
         tz = ZoneInfo("Europe/Warsaw")
         now = dt_datetime.now(tz)
+
+        register_start = self._smart_start_from_registers(meter_id, now)
+        if register_start is not None:
+            _LOGGER.debug(
+                "Smart fetch for %s: earliest register watermark, start=%s",
+                meter_id,
+                register_start,
+            )
+            return register_start
         # v1.0.1: fresh startup fallback must be 1 day (today + yesterday),
         # never 30 days — a 30-day fetch takes >75s and exceeds HA's 60s setup watchdog.
         # Background auto-backfill handles the full 730-day history asynchronously.
@@ -418,6 +451,8 @@ class EnergaCoordinator(DataUpdateCoordinator):
         else:
             suffixes = ["import", "export"]
 
+        self._last_register_stats[meter_id] = {}
+
         for suffix in suffixes:
             unique_id = f"energa_{meter_id}_{suffix}_stats"
 
@@ -446,6 +481,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
                     if entity_id in last_stats and last_stats[entity_id]:
                         self._pre_fetched_stats[entity_id] = last_stats[entity_id][0]
+                        self._last_register_stats[meter_id][suffix] = last_stats[entity_id][0]
                         _LOGGER.debug(
                             "Pre-fetched stats for %s: sum=%.3f",
                             entity_id,
