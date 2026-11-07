@@ -702,20 +702,24 @@ class EnergaAPI:
         start_year = window_start.year
         end_year = today.year
 
-        # Year level: ascending probe July 1 (max 3 probes for 2-year window)
+        # Year level: probe late in the year first (a year with any data must
+        # have data near its end), then fall back to July and January probes.
         first_year = None
         for y in range(start_year, end_year + 1):
-            probe = datetime(y, 7, 1, tzinfo=tz)
-            # Clamp probe inside window
-            if probe < window_start:
-                probe = datetime(y, window_start.month, 15, tzinfo=tz) if y == start_year else probe
-            if await has_data_for_day(probe):
-                first_year = y
-                break
-            # Also try Jan probe if July empty (e.g. prosumer started in Feb)
-            probe_jan = datetime(y, 1, 15, tzinfo=tz)
-            if probe_jan >= window_start and await has_data_for_day(probe_jan):
-                first_year = y
+            probes = [
+                today if y == end_year else datetime(y, 12, 15, tzinfo=tz),
+                datetime(y, 7, 1, tzinfo=tz),
+                datetime(y, 1, 15, tzinfo=tz),
+            ]
+            for probe in probes:
+                if probe < window_start:
+                    probe = datetime(y, window_start.month, 15, tzinfo=tz)
+                if probe < window_start or probe > today:
+                    continue
+                if await has_data_for_day(probe):
+                    first_year = y
+                    break
+            if first_year is not None:
                 break
         if first_year is None:
             return None
@@ -732,9 +736,15 @@ class EnergaAPI:
             if await has_data_for_day(probe):
                 first_month = m
                 break
-            # Also check late month (e.g. day 28) in case meter was activated in second half of month
-            probe_late = datetime(first_year, m, 28, tzinfo=tz)
-            if probe_late <= today and await has_data_for_day(probe_late):
+            # Also check the last day of month in case activation was late
+            if m == 12:
+                last_day = 31
+            else:
+                last_day = (datetime(first_year, m + 1, 1, tzinfo=tz) - timedelta(days=1)).day
+            probe_late = datetime(first_year, m, last_day, tzinfo=tz)
+            if probe_late > today:
+                probe_late = today
+            if probe_late >= window_start and await has_data_for_day(probe_late):
                 first_month = m
                 break
         if first_month is None:

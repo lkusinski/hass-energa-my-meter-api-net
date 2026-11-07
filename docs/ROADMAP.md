@@ -21,7 +21,7 @@ Integracja posiada w pełni przetestowany i zweryfikowany na 5 środowiskach pro
 * ✅ Precyzyjne bilansowanie wirtualnego magazynu FIFO (Net-metering 0.8 / 0.7 z izolacją stref L1/L2).
 * ✅ Obsługa depozytu prosumenckiego Net-billing z oficjalnymi cenami rynkowymi RCEm PSE.
 * ✅ Autonomiczny pulpit `/energa-rachunek` z adaptacją do profilu instalacji (G11, G12, Net-billing).
-* ✅ 818 zautomatyzowanych testów jednostkowych (`pytest tests`; 1 skipped).
+* ✅ 823 zautomatyzowanych testów jednostkowych (`pytest tests`; 1 skipped).
 * ✅ Kanoniczna tożsamość odczytów i baza jako źródło godzinowe z `kwh_source` (v1.9.3).
 
 ### 📌 Zadania do wdrożenia przy okazji najbliższego wydania (Backlog UX & Sensors):
