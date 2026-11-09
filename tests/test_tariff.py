@@ -266,6 +266,13 @@ class TestG11Invoice:
         assert res["excise"] == 10.80
         assert res["sale_total"] == round(1320.01 + 32.36, 2)
 
+    def test_excise_note_is_generic_when_added(self):
+        # The same flag is used by net-billing (nakładka) and old
+        # net-metering (gross import), so the note must not say "net-billing".
+        res = compute_bill(100.0, 0.0, 0.0, 0.0, add_excise=True)
+        assert res["excise_added"] is True
+        assert "net-billing" not in res["excise_note"]
+
     def test_capacity_bracket_matches_invoice(self):
         # Invoice annual use 7312 kWh -> top bracket 24.05 (2 x 24.05).
         assert capacity_for_annual_use(7312.0) == 24.05

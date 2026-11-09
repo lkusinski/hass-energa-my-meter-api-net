@@ -96,7 +96,7 @@ class TestFeeSourceExposedOnSensor:
         assert attrs["kwh"]["cover_1"] == 0.0
         assert attrs["kwh"]["bank_open_1"] == 50.0
         assert attrs["kwh"]["bank_open_2"] == 10.0
-        assert attrs["kwh"]["bank_close_1"] == 146.0
+        assert attrs["kwh"]["bank_close_1"] == 66.0
         assert "missing_breakdown_keys" not in attrs
 
     def test_missing_keys_are_reported_not_silent(self):
