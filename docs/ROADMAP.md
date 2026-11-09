@@ -5,7 +5,7 @@
 ---
 
 ## 📑 Spis Treści
-1. [Status Obecny (Wersja v1.9.5)](#1-status-obecny)
+1. [Status Obecny (Wersja v1.9.6)](#1-status-obecny)
 2. [Obszar 1: Wizualizacja i Nowoczesny UX Lovelace](#2-obszar-1-wizualizacja-i-nowoczesny-ux-lovelace)
 3. [Obszar 2: Sensory Decyzyjne i Gotowe Automatyzacje (Blueprints)](#3-obszar-2-sensory-decyzyjne-i-gotowe-automatyzacje-blueprints)
 4. [Obszar 3: Dynamiczne Ceny PSE, BESS i Arbitraż Energetyczny](#4-obszar-3-dynamiczne-ceny-pse-bess-i-arbitraż-energetyczny)

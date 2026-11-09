@@ -8,9 +8,9 @@
 [![HACS](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 ![API](https://img.shields.io/badge/data_source-Native_REST_API-blue)
 ![Architecture](https://img.shields.io/badge/storage-SQLite_WAL_Canonical-green)
-![Tests](https://img.shields.io/badge/tests-823_passed-brightgreen)
+![Tests](https://img.shields.io/badge/tests-828_passed-brightgreen)
 
-**Najnowsze wydanie: [v1.9.5](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.5) (stabilne)** — domykanie luk statystyk spóźnionych rejestrów OSD (issue #7), pewniejsze wykrywanie pierwszej daty odczytu oraz prognoza rachunku bez blokowania pętli zdarzeń. Stabilne pozostają [v1.9.4](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.4) i [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
+**Najnowsze wydanie: [v1.9.6](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.6) (stabilne)** — kalkulator okresowy net-meteringu credituje bieżący eksport do pokrycia importu (issue #9), poprawny `bank_close`, neutralna etykieta akcyzy i wyciszone ostrzeżenie RCEm. Stabilne pozostają [v1.9.5](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.5), [v1.9.4](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.4) i [v1.9.2](https://github.com/lkusinski/hass-energa-my-meter-api-net/releases/tag/v1.9.2). Skąd ±0,66 zł vs faktura: [docs/ROZNICA_L2_OSD.md](docs/ROZNICA_L2_OSD.md). Migracja z ergo5: [docs/MIGRACJA_ergo5.md](docs/MIGRACJA_ergo5.md).
 
 > [!NOTE]
 > ### 💡 O projekcie: Samodzielna wersja PRO a podstawowa integracja ergo5

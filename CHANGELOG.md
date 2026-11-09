@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.9.6 (2026-11-09) — stabilna: kalkulator net-meteringu (issue #9)
+
+Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
+`v1.9.5` jest bezpieczna.
+
+- **Kalkulator okresowy net-meteringu (issue #9, PR #10)** (`core/verification.py`).
+  Bieżący eksport jest creditowany do magazynu (`saldo_minus × opust`) i pokrywa
+  import w tym samym okresie także przy `bank_open = 0`; `bank_close` liczy się
+  z eksportu godzinowo zbilansowanego, nie fizycznego. Dla danych z issue:
+  09–10.2026 → 715,2 kWh do rozliczenia i `bank_close = 0`; 07–08.2026 →
+  ~234 kWh i `bank_close = 0`.
+- **Akcyza w net-meteringu** (`tariff.py`) — `excise_note` nie sugeruje już
+  net-billingu; akcyza pozostaje realną pozycją od poboru brutto (zgodnie
+  z wzorcową fakturą FES/00042).
+- **RCEm w net-meteringu** (`services.py`) — ostrzeżenie o braku tabeli PSE nie
+  jest już doklejane do wyniku net-meteringu, bo RCEm nie służy tam do wyceny.
+- **Testy:** 828 passed, 1 skipped; lint `ruff E,F,I` czysty.
+
+- **Wydanie:** 1.9.6, stabilne.
+
 ## v1.9.5 (2026-11-07) — stabilna: luki rejestrów OSD, wykrywanie pierwszej daty i event-loop
 
 Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
