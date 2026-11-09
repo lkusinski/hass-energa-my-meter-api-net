@@ -510,6 +510,7 @@ def compute_bill(
     excise_day: float = 0.0,
     excise_night: float = 0.0,
     add_excise: bool = False,
+    abonament_months: int | None = None,
 ) -> dict:
     """Full monthly bill from meter flows.
 
@@ -522,6 +523,8 @@ def compute_bill(
         rcem: invoiced monthly market price (volume-weighted, PSE table).
         fees: fee table (defaults to G12W_DEFAULT_FEES).
         months: how many monthly fixed fees to include.
+        abonament_months: optional override for the abonament count only
+            (some invoices bill a different number than ``months``).
         cover_day/night: kWh covered by the virtual warehouse (old
             net-metering only; energy charge drops, excise and
             distribution stay on the FULL import).
@@ -590,7 +593,8 @@ def compute_bill(
     # Fixed monthly lines, each rounded to grosze (the invoice prints them
     # separately: abonament / sieciowa stała / mocowa). ``distr_fixed`` is
     # kept as their sum for backward compatibility.
-    line_abonament = _r2(f["abonament"] * months)
+    abonament_count = max(0, int(abonament_months)) if abonament_months is not None else months
+    line_abonament = _r2(f["abonament"] * abonament_count)
     line_grid_fixed = _r2(f["grid_fixed"] * months)
     line_capacity = _r2(f["capacity"] * months)
     line_fixed = _r2(line_abonament + line_grid_fixed + line_capacity)

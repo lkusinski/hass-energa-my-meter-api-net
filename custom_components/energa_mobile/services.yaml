@@ -230,6 +230,18 @@ verify_period:
         number:
           min: 0
           step: "any"
+    abonament_months:
+      name: Abonament months
+      description: >-
+        Optional override for the number of abonament charges only (other
+        fixed fees still use the period months). Useful when the seller bills
+        a different abonament count than the period length (issue #9: 2-month
+        period, 1 abonament on the invoice).
+      required: false
+      selector:
+        number:
+          min: 0
+          step: 1
 
 clear_period:
   name: Clear period

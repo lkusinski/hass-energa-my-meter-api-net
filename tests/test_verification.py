@@ -300,9 +300,9 @@ class TestWisniowaNetMeteringOpeningBank:
         assert res["warnings"] == []
         assert res["old_system"] is True
         assert res["system"] == "net_metering"
-        # bank close = open + hourly-netted export*opust - cover
-        assert res["kwh"]["bank_close_1"] == round(500.0 + 63.0 * 0.8 - 83.0, 3)
-        assert res["kwh"]["bank_close_2"] == round(500.0 + 20.0 * 0.8 - 342.0, 3)
+        # bank close = open + hourly-netted export*opust (whole kWh) - cover
+        assert res["kwh"]["bank_close_1"] == round(500.0 + 50.0 - 83.0, 3)
+        assert res["kwh"]["bank_close_2"] == round(500.0 + 16.0 - 342.0, 3)
 
     def test_fixed_lines_are_split_but_sum_to_distr_fixed(self):
         hourly = _hourly((83, 37, 63), (342, 30, 20))
@@ -360,18 +360,18 @@ class TestIssue9NetMeteringCurrentExport:
         res = self._invoice(992.491, 346.098, 1033.608)
         assert res["kwh"]["saldo_plus_1"] == pytest.approx(992.491)
         assert res["kwh"]["saldo_minus_1"] == pytest.approx(346.098)
-        # 346 kWh * 0,8 credited, covering import (992 - 276,8 = 715,2).
-        assert res["kwh"]["cover_1"] == pytest.approx(276.8)
+        # 346 x 0,8 = 276,8 -> 277 kWh credited (invoice), 992 - 277 = 715.
+        assert res["kwh"]["cover_1"] == pytest.approx(277.0)
         assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
-        assert res["sale_energy_day"] == pytest.approx(round(715.2 * 0.6114, 2))
+        assert res["sale_energy_day"] == pytest.approx(round(715.0 * 0.6114, 2))
         assert res["coverage_unknown"] is False
 
     def test_july_august_2026_matches_invoice_kwh(self):
         # 01.07-31.08.2026: salda +767,572 / -667,735 -> 234 kWh billable.
         res = self._invoice(767.572, 667.735, 900.0)
-        assert res["kwh"]["cover_1"] == pytest.approx(534.4)
+        assert res["kwh"]["cover_1"] == pytest.approx(534.0)
         assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
-        assert res["sale_energy_day"] == pytest.approx(round(233.6 * 0.6114, 2))
+        assert res["sale_energy_day"] == pytest.approx(round(234.0 * 0.6114, 2))
 
     def test_export_surplus_stays_in_the_warehouse(self):
         # 100 kWh import, 300 kWh hourly-netted export -> 240 credited,
@@ -379,6 +379,60 @@ class TestIssue9NetMeteringCurrentExport:
         res = self._invoice(100.0, 300.0, 130.0)
         assert res["kwh"]["cover_1"] == pytest.approx(100.0)
         assert res["kwh"]["bank_close_1"] == pytest.approx(140.0)
+
+
+class TestIssue9InvoiceReconciliation:
+    """Issue #9 invoices (G11, net-metering 0.8) reproduced to the grosz."""
+
+    FEES = {
+        "energy_day": 0.5018,
+        "energy_night": 0.0,
+        "excise_mwh": 5.0,
+        "trade_fee": 0.0,
+        "abonament": 0.70,
+        "grid_fixed": 11.77,
+        "grid_var_day": 0.3485,
+        "grid_var_night": 0.0,
+        "quality": 0.0332,
+        "oze": 0.0073,
+        "cogen": 0.0030,
+        "capacity": 24.05,
+    }
+
+    def _invoice(self, plus: float, minus: float, gross_import: float, **kwargs):
+        hourly = _hourly((plus, gross_import - plus, minus))
+        return build_period_invoice(
+            hourly,
+            fees=self.FEES,
+            rcem=0.34568,
+            months=2,
+            old_system=True,
+            bank_open_1=0.0,
+            bank_open_2=0.0,
+            prosumer_coefficient=0.8,
+            tariff="G11",
+            **kwargs,
+        )
+
+    def test_july_august_matches_invoice_to_grosz(self):
+        res = self._invoice(767.572, 667.735, 863.618)
+        assert res["kwh"]["cover_1"] == pytest.approx(534.0)
+        assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
+        assert res["excise_day"] == pytest.approx(3.15)  # 0,630 MWh
+        assert res["netto"] == pytest.approx(290.84)
+        assert res["vat"] == pytest.approx(66.89)
+        assert res["brutto"] == pytest.approx(357.73)
+
+    def test_september_october_matches_invoice_with_abonament_override(self):
+        res = self._invoice(
+            992.491, 346.098, 1033.608, abonament_months=1
+        )
+        assert res["kwh"]["cover_1"] == pytest.approx(277.0)
+        assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
+        assert res["excise_day"] == pytest.approx(1.60)  # 0,319 MWh
+        assert res["distr_abonament"] == pytest.approx(0.70)
+        assert res["netto"] == pytest.approx(715.86, abs=0.02)
+        assert res["brutto"] == pytest.approx(880.51, abs=0.02)
 
 
 class TestFullInvoiceFieldSet:
