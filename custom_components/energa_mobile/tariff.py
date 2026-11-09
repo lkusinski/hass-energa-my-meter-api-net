@@ -534,13 +534,14 @@ def compute_bill(
             total in ``deposit_pln`` (opening + generated) should pass it too
             so ``deposit_open`` is reported correctly.
         excise_day/night: kWh on which excise is charged — the "nakładka"
-            (gross import - salda dodatnie) for net-billing. Informational
-            when ``add_excise`` is False.
-        add_excise: net-billing only — excise (5 PLN/MWh) is a REAL,
-            separately invoiced line added to the net total (verified on
-            Agrestowa 07-08.2026: 0,35 / 0,31 PLN). For G11 consumers and
-            old net-metering the 5 PLN/MWh is already inside the energy
-            price, so it stays informational.
+            (gross import - salda dodatnie) for net-billing, or gross import
+            for old net-metering. Informational when ``add_excise`` is False.
+        add_excise: prosumer excise (5 PLN/MWh) is a REAL, separately
+            invoiced line added to the net total for net-billing (Agrestowa
+            07-08.2026: 0,35 / 0,31 PLN) and old net-metering (Wiśniowa
+            FES/00042: 0,60 / 1,86 PLN, gross import base). For G11 consumers
+            the 5 PLN/MWh is already inside the energy price, so it stays
+            informational.
 
     Returns dict with every invoice line (net PLN) plus totals and
     ``do_zaplaty`` (gross payable).
@@ -627,7 +628,7 @@ def compute_bill(
         "excise_night": line_excise_night,
         "excise_added": bool(add_excise),
         "excise_note": (
-            "doliczana do netto (net-billing)"
+            "doliczana do netto (akcyza 5 PLN/MWh)"
             if add_excise
             else "informacyjnie — akcyza jest już w cenie energii (G11/net-metering)"
         ),

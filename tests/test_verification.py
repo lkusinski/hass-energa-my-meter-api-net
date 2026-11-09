@@ -6,11 +6,14 @@ series through the full salda -> invoice pipeline and assert the same
 results to the grosz.
 """
 
+import pytest
+
 from custom_components.energa_mobile.core.verification import (
     build_period_invoice,
     has_two_zones,
 )
 from custom_components.energa_mobile.tariff import (
+    G11_DEFAULT_FEES,
     G12W_DEFAULT_FEES,
     fees_from_options,
 )
@@ -297,9 +300,9 @@ class TestWisniowaNetMeteringOpeningBank:
         assert res["warnings"] == []
         assert res["old_system"] is True
         assert res["system"] == "net_metering"
-        # bank close = open + export*opust - cover
-        assert res["kwh"]["bank_close_1"] == round(500.0 + 100.0 * 0.8 - 83.0, 3)
-        assert res["kwh"]["bank_close_2"] == round(500.0 + 50.0 * 0.8 - 342.0, 3)
+        # bank close = open + hourly-netted export*opust - cover
+        assert res["kwh"]["bank_close_1"] == round(500.0 + 63.0 * 0.8 - 83.0, 3)
+        assert res["kwh"]["bank_close_2"] == round(500.0 + 20.0 * 0.8 - 342.0, 3)
 
     def test_fixed_lines_are_split_but_sum_to_distr_fixed(self):
         hourly = _hourly((83, 37, 63), (342, 30, 20))
@@ -332,6 +335,50 @@ class TestWisniowaNetMeteringOpeningBank:
         import json
 
         json.dumps(res)
+
+
+class TestIssue9NetMeteringCurrentExport:
+    """Issue #9: current-period export must cover import when bank_open = 0."""
+
+    def _invoice(self, plus: float, minus: float, gross_import: float):
+        overlap = gross_import - plus
+        hourly = _hourly((plus, overlap, minus))
+        return build_period_invoice(
+            hourly,
+            fees=G11_DEFAULT_FEES,
+            rcem=0.34568,
+            months=2,
+            old_system=True,
+            bank_open_1=0.0,
+            bank_open_2=0.0,
+            prosumer_coefficient=0.8,
+            tariff="G11",
+        )
+
+    def test_september_october_2026_matches_invoice_kwh(self):
+        # 01.09-31.10.2026: salda +992,491 / -346,098, import fiz. 1033,608.
+        res = self._invoice(992.491, 346.098, 1033.608)
+        assert res["kwh"]["saldo_plus_1"] == pytest.approx(992.491)
+        assert res["kwh"]["saldo_minus_1"] == pytest.approx(346.098)
+        # 346 kWh * 0,8 credited, covering import (992 - 276,8 = 715,2).
+        assert res["kwh"]["cover_1"] == pytest.approx(276.8)
+        assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
+        assert res["sale_energy_day"] == pytest.approx(round(715.2 * 0.6114, 2))
+        assert res["coverage_unknown"] is False
+
+    def test_july_august_2026_matches_invoice_kwh(self):
+        # 01.07-31.08.2026: salda +767,572 / -667,735 -> 234 kWh billable.
+        res = self._invoice(767.572, 667.735, 900.0)
+        assert res["kwh"]["cover_1"] == pytest.approx(534.4)
+        assert res["kwh"]["bank_close_1"] == pytest.approx(0.0)
+        assert res["sale_energy_day"] == pytest.approx(round(233.6 * 0.6114, 2))
+
+    def test_export_surplus_stays_in_the_warehouse(self):
+        # 100 kWh import, 300 kWh hourly-netted export -> 240 credited,
+        # 100 used now, 140 carried into the next period.
+        res = self._invoice(100.0, 300.0, 130.0)
+        assert res["kwh"]["cover_1"] == pytest.approx(100.0)
+        assert res["kwh"]["bank_close_1"] == pytest.approx(140.0)
 
 
 class TestFullInvoiceFieldSet:

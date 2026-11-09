@@ -444,6 +444,50 @@ class TestServiceSourceSelection:
         assert res["kwh"]["saldo_plus_1"] == 100.0
 
     @pytest.mark.asyncio
+    async def test_rcem_warning_is_suppressed_for_net_metering(self):
+        """Issue #9: RCEm is unused in net-metering, so its warning is noise."""
+        api = MagicMock()
+        coordinator = _coordinator()
+        coordinator.data[0].update(
+            {"tariff": "G11", "is_prosumer": True, "total_minus": 1.0}
+        )
+        hass = _service_hass(coordinator, api)
+        entry = hass.config_entries.async_entries.return_value[0]
+        entry.options = {CONF_PROSUMER_COEFFICIENT: 0.8}
+
+        with (
+            patch(
+                "custom_components.energa_mobile.services._collect_meter_hourly",
+                new=AsyncMock(
+                    return_value={
+                        "import_1": {0: 100.0},
+                        "export_1": {3600: 50.0},
+                    }
+                ),
+            ),
+            patch(
+                "custom_components.energa_mobile.services._resolve_period_rcem",
+                new=AsyncMock(
+                    return_value=(None, {}, "pse_table", ["Brak RCEm PSE"])
+                ),
+            ),
+        ):
+            res = await async_verify_period_data(
+                hass,
+                {
+                    "start": "2026-08-01",
+                    "end": "2026-08-31",
+                    "entry_id": "entry_1",
+                    "meter_id": "1",
+                    "bank_open_1": 0.0,
+                },
+            )
+
+        assert res["old_system"] is True
+        assert "RCEm" not in " ".join(res.get("warnings") or [])
+        assert res["kwh"]["cover_1"] == 40.0
+
+    @pytest.mark.asyncio
     async def test_falls_back_to_recorder_when_api_empty(self):
         api = MagicMock()
         api.async_get_hourly_range = AsyncMock(return_value={})

@@ -2166,7 +2166,9 @@ async def async_verify_period_data(
         if deposit_warnings:
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + deposit_warnings
-        if rcem_warnings:
+        if rcem_warnings and not old_system:
+            # Net-metering does not value energy with RCEm; a PSE table
+            # warning would only be noise there (issue #9).
             invoice.setdefault("warnings", [])
             invoice["warnings"] = list(invoice["warnings"]) + rcem_warnings
         if kwh_warnings:

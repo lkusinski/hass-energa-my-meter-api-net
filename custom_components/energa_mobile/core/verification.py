@@ -482,13 +482,22 @@ def build_period_invoice(
         0.0, float(cover_night or 0.0)
     ) > 0.0
 
+    export_credit_1 = 0.0
+    export_credit_2 = 0.0
     if old_system:
         cover_day = max(0.0, float(cover_day or 0.0))
         cover_night = max(0.0, float(cover_night or 0.0))
+        # Current-period hourly-netted export is credited to the warehouse
+        # immediately (opust), so it can cover this period's import even when
+        # bank_open is 0 (issue #9). Whole-kWh per zone, like the invoice.
+        export_credit_1 = float(round(float(saldos.get("saldo_minus_1", 0.0)))) * coefficient
+        export_credit_2 = float(round(float(saldos.get("saldo_minus_2", 0.0)))) * coefficient
         if bank_known:
             # Warehouse covers up to the hourly-netted positive balance.
-            cover_day = max(cover_day, min(bank_1, import_day))
-            cover_night = max(cover_night, min(bank_2, import_night))
+            available_day = bank_1 + export_credit_1
+            available_night = bank_2 + export_credit_2
+            cover_day = max(cover_day, min(available_day, import_day))
+            cover_night = max(cover_night, min(available_night, import_night))
         elif explicit_cover:
             coverage_unknown = False
         else:
@@ -548,17 +557,15 @@ def build_period_invoice(
     kwh["cover_1"] = round(cover_day, 3)
     kwh["cover_2"] = round(cover_night, 3)
     if old_system:
-        gross_export_1 = _sum_series(hourly.get("export_1"))
-        gross_export_2 = _sum_series(hourly.get("export_2"))
         kwh["bank_open_1"] = bank_1 if bank_known else None
         kwh["bank_open_2"] = bank_2 if bank_known else None
         kwh["bank_close_1"] = (
-            round(max(0.0, bank_1 + gross_export_1 * coefficient - cover_day), 3)
+            round(max(0.0, bank_1 + export_credit_1 - cover_day), 3)
             if bank_known
             else None
         )
         kwh["bank_close_2"] = (
-            round(max(0.0, bank_2 + gross_export_2 * coefficient - cover_night), 3)
+            round(max(0.0, bank_2 + export_credit_2 - cover_night), 3)
             if bank_known
             else None
         )
