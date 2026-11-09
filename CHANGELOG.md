@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.9.7 (2026-11-09) — stabilna: faktury net-meteringu (issue #9)
+
+Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
+`v1.9.6` jest bezpieczna.
+
+- **Zaokrąglanie skorygowanego eksportu net-meteringu (issue #9, PR #11)**
+  (`core/verification.py`). Skorygowana suma sald ujemnych jest zaokrąglana do
+  całych kWh, jak na fakturze: 668 × 0,8 → **534 kWh**, 346 × 0,8 → **277 kWh**
+  (saldo bieżące 234 / 715 kWh).
+- **Akcyza net-meteringu od „nakładki”** (`core/verification.py`). Podstawa to
+  `pobór brutto − energia rozliczona` (864−234 = **630 kWh**; 1034−715 =
+  **319 kWh**), a nie cały pobór. Nota na fakturze (od poboru brutto) pozostaje
+  informacyjna.
+- **`abonament_months`** (`services.py`, `tariff.py`, `services.yaml`) —
+  opcjonalny parametr usługi `verify_period` do faktur z inną liczbą abonamentów
+  niż liczba miesięcy okresu (np. 09–10.2026: abonament tylko za wrzesień).
+  Domyślnie bez zmian — abonament za każdy miesiąc okresu.
+- **Testy fakturowe:** 07–08.2026 → **290,84 / 66,89 / 357,73 zł** co do grosza;
+  09–10.2026 z `abonament_months=1` → **715,87 / 164,65 / 880,52 zł** (różnica
+  0,01 zł z miesięcznych zaokrągleń kogeneracji).
+- **Testy:** 830 passed, 1 skipped; lint `ruff E,F,I` czysty.
+
+- **Wydanie:** 1.9.7, stabilne.
+
 ## v1.9.6 (2026-11-09) — stabilna: kalkulator net-meteringu (issue #9)
 
 Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
