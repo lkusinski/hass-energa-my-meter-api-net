@@ -487,6 +487,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 vol.Optional("deposit_open_pln"): vol.Coerce(float),
                 vol.Optional("rcem_deposit_pln"): vol.Coerce(float),
                 vol.Optional("rcem_generated_pln"): vol.Coerce(float),
+                vol.Optional("abonament_months"): vol.Coerce(int),
             }
         ),
         supports_response=SupportsResponse.ONLY,
@@ -1806,6 +1807,12 @@ async def async_verify_period_data(
     override_bank_1 = _optional_float("bank_open_1")
     override_bank_2 = _optional_float("bank_open_2")
     override_deposit = _optional_float("deposit_open_pln")
+    override_abonament_months = None
+    if data.get("abonament_months") is not None:
+        try:
+            override_abonament_months = int(data["abonament_months"])
+        except (ValueError, TypeError):
+            override_abonament_months = None
     # Deposit-generated RCEm override: the seller may credit the deposit with
     # the market price of a different month than the energy. Accept both an
     # explicit ``rcem_deposit_pln`` and the legacy alias ``rcem_generated_pln``.
@@ -2156,6 +2163,7 @@ async def async_verify_period_data(
             prosumer_coefficient=coefficient,
             tariff=meter.get("tariff"),
             is_prosumer=prosumer,
+            abonament_months=override_abonament_months,
         )
         rate_warnings = fee_warnings(
             entry_options, meter.get("tariff"), old_system=product_system

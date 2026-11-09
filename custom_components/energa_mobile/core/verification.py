@@ -372,6 +372,7 @@ def build_period_invoice(
     prosumer_coefficient: float | None = None,
     tariff: str | None = None,
     is_prosumer: bool = True,
+    abonament_months: int | None = None,
 ) -> dict:
     """Build the full invoice breakdown for one meter and one period.
 
@@ -403,6 +404,10 @@ def build_period_invoice(
             ``coverage_unknown=True`` and a warning, but is still returned.
         prosumer_coefficient: opust used to refresh the warehouse (display).
         tariff: tariff string recorded in the result.
+        abonament_months: optional override for the number of abonament
+            charges when the seller bills a different count than the period
+            months (e.g. issue #9 invoice: 2-month period, 1 abonament).
+            The remaining fixed fees still use ``months``.
 
     Returns:
         Invoice dict (net PLN lines) with the hourly ``kwh`` bases plus
@@ -453,6 +458,7 @@ def build_period_invoice(
             excise_day=bases["excise_day"],
             excise_night=bases["excise_night"],
             add_excise=bases["add_excise"],
+            abonament_months=abonament_months,
         )
         kwh = {key: float(saldos.get(key, 0.0)) for key in PERIOD_KWH_KEYS}
         kwh["gross_import_1"] = float(saldos.get("gross_1", 0.0))
@@ -489,9 +495,15 @@ def build_period_invoice(
         cover_night = max(0.0, float(cover_night or 0.0))
         # Current-period hourly-netted export is credited to the warehouse
         # immediately (opust), so it can cover this period's import even when
-        # bank_open is 0 (issue #9). Whole-kWh per zone, like the invoice.
-        export_credit_1 = float(round(float(saldos.get("saldo_minus_1", 0.0)))) * coefficient
-        export_credit_2 = float(round(float(saldos.get("saldo_minus_2", 0.0)))) * coefficient
+        # bank_open is 0 (issue #9). The seller prints whole-kWh figures, so
+        # round the corrected export to kWh before netting it (invoice
+        # 09-10.2026: 346 x 0,8 = 276,8 -> 277 kWh; 07-08: 668 x 0,8 -> 534).
+        export_credit_1 = float(
+            round(float(round(float(saldos.get("saldo_minus_1", 0.0)))) * coefficient)
+        )
+        export_credit_2 = float(
+            round(float(round(float(saldos.get("saldo_minus_2", 0.0)))) * coefficient)
+        )
         if bank_known:
             # Warehouse covers up to the hourly-netted positive balance.
             available_day = bank_1 + export_credit_1
@@ -534,6 +546,19 @@ def build_period_invoice(
         deposit_generated = _round2(float(bases["export"]) * deposit_price * 1.23)
         deposit_total = _round2(deposit_open_calc + deposit_generated)
 
+    excise_day = float(bases["excise_day"])
+    excise_night = float(bases["excise_night"])
+    if old_system and is_prosumer:
+        # Energa's net-metering invoice charges excise on physical import minus
+        # the energy actually billed after warehouse coverage (the printed
+        # "nakładka" on FES: 864 - 234 = 630 kWh; 1034 - 715 = 319 kWh).
+        excise_day = float(
+            round(max(0.0, excise_day - max(0.0, import_day - cover_day)))
+        )
+        excise_night = float(
+            round(max(0.0, excise_night - max(0.0, import_night - cover_night)))
+        )
+
     res = compute_bill(
         import_day=bases["import_day"],
         import_night=bases["import_night"],
@@ -545,9 +570,10 @@ def build_period_invoice(
         cover_night=cover_night,
         deposit_pln=deposit_total,
         deposit_generated=deposit_generated,
-        excise_day=bases["excise_day"],
-        excise_night=bases["excise_night"],
+        excise_day=excise_day,
+        excise_night=excise_night,
         add_excise=bases["add_excise"],
+        abonament_months=abonament_months,
     )
 
     kwh = {key: float(saldos.get(key, 0.0)) for key in PERIOD_KWH_KEYS}
