@@ -622,5 +622,82 @@ def test_bill_warehouse_cover_matches_bank_engine_fifo():
     assert cover_n == min(detail["bank_kwh_l2"], 200.0)
 
 
+def test_multizone_meter_has_total_and_per_zone_mtd_sensors():
+    """Multi-zone tariffs (G12, G12w) must have total MTD (energy_import) as well as zones."""
+    from unittest.mock import MagicMock
+
+    from custom_components.energa_mobile.sensors.bill import EnergaBillComponentSensor
+
+    meter_id = "10000020"
+    device_info = MagicMock()
+    entry = MagicMock()
+    coord = MagicMock()
+    coord._mtd = {
+        meter_id: {
+            "import": 150.0,
+            "export": 200.0,
+            "import_1": 100.0,
+            "import_2": 50.0,
+            "export_1": 120.0,
+            "export_2": 80.0,
+            "saldo_plus_1": 100.0,
+            "saldo_plus_2": 50.0,
+            "saldo_minus_1": 120.0,
+            "saldo_minus_2": 80.0,
+            "gross_1": 100.0,
+            "gross_2": 50.0,
+        }
+    }
+    coord.data = [{"meter_point_id": meter_id, "tariff": "G12W"}]
+    coord._meter_tariff.return_value = "G12W"
+    coord._rce_cache = 0.25
+
+    total_sensor = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id=meter_id,
+        device_info=device_info,
+        entry=entry,
+        component_key="energy_import",
+        name="Pobór Energii MTD",
+        icon="mdi:transmission-tower",
+        unit="kWh",
+        has_zones=True,
+        serial=meter_id,
+    )
+    assert total_sensor._attr_unique_id == f"energa_{meter_id}_mtd_energy_import"
+    assert total_sensor.native_value == 150.0
+
+    zone1_sensor = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id=meter_id,
+        device_info=device_info,
+        entry=entry,
+        component_key="energy_import_1",
+        name="Pobór Energii Strefa 1 MTD",
+        icon="mdi:transmission-tower",
+        unit="kWh",
+        has_zones=True,
+        serial=meter_id,
+    )
+    assert zone1_sensor._attr_unique_id == f"energa_{meter_id}_mtd_energy_import_1"
+    assert zone1_sensor.native_value == 100.0
+
+    zone2_sensor = EnergaBillComponentSensor(
+        coordinator=coord,
+        meter_id=meter_id,
+        device_info=device_info,
+        entry=entry,
+        component_key="energy_import_2",
+        name="Pobór Energii Strefa 2 MTD",
+        icon="mdi:transmission-tower",
+        unit="kWh",
+        has_zones=True,
+        serial=meter_id,
+    )
+    assert zone2_sensor._attr_unique_id == f"energa_{meter_id}_mtd_energy_import_2"
+    assert zone2_sensor.native_value == 50.0
+
+
+
 
 

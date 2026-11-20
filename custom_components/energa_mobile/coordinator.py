@@ -626,6 +626,7 @@ class EnergaCoordinator(DataUpdateCoordinator):
 
         from datetime import timezone
         from decimal import Decimal
+        from functools import partial
 
         from .autoconsumption import compute_autoconsumption_summary
         from .core.readings.models import IntervalReading
@@ -657,12 +658,15 @@ class EnergaCoordinator(DataUpdateCoordinator):
             readings: list[IntervalReading] = []
             if self.storage:
                 try:
-                    readings = self.storage.get_readings(
-                        ppe_id=ppe_id,
-                        start_utc=start_month,
-                        end_utc=now,
-                        resolution="1h",
-                        meter_id=meter_id,
+                    readings = await self.hass.async_add_executor_job(
+                        partial(
+                            self.storage.get_readings,
+                            ppe_id=ppe_id,
+                            start_utc=start_month,
+                            end_utc=now,
+                            resolution="1h",
+                            meter_id=meter_id,
+                        )
                     )
                 except Exception as err:
                     _LOGGER.debug("Error getting readings from storage for %s: %s", meter_id, err)

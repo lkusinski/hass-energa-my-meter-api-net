@@ -623,7 +623,41 @@ async def async_setup_entry(
             )
 
 
-            # MTD energy volume breakdown sensors (v1.0.8)
+            # MTD energy volume breakdown sensors (v1.0.8, v1.9.8)
+            # Always register total MTD energy metrics (Pobór / Oddanie MTD in kWh)
+            sensors.append(
+                EnergaBillComponentSensor(
+                    coordinator=coordinator,
+                    meter_id=meter_id,
+                    device_info=device_info,
+                    entry=entry,
+                    component_key="energy_import",
+                    name="Pobór Energii MTD",
+                    icon="mdi:transmission-tower",
+                    unit="kWh",
+                    device_class=SensorDeviceClass.ENERGY,
+                    has_zones=has_zones,
+                    serial=serial,
+                )
+            )
+            if is_export_prosumer(meter):
+                sensors.append(
+                    EnergaBillComponentSensor(
+                        coordinator=coordinator,
+                        meter_id=meter_id,
+                        device_info=device_info,
+                        entry=entry,
+                        component_key="energy_export",
+                        name="Oddanie Energii MTD",
+                        icon="mdi:solar-power",
+                        unit="kWh",
+                        device_class=SensorDeviceClass.ENERGY,
+                        has_zones=has_zones,
+                        serial=serial,
+                    )
+                )
+
+            # For multi-zone tariffs (G12, G12w), also register per-zone breakdowns
             if has_zones:
                 sensors.append(
                     EnergaBillComponentSensor(
@@ -679,38 +713,6 @@ async def async_setup_entry(
                             entry=entry,
                             component_key="energy_export_2",
                             name="Oddanie Energii Strefa 2 MTD",
-                            icon="mdi:solar-power",
-                            unit="kWh",
-                            device_class=SensorDeviceClass.ENERGY,
-                            has_zones=has_zones,
-                            serial=serial,
-                        )
-                    )
-            else:
-                sensors.append(
-                    EnergaBillComponentSensor(
-                        coordinator=coordinator,
-                        meter_id=meter_id,
-                        device_info=device_info,
-                        entry=entry,
-                        component_key="energy_import",
-                        name="Pobór Energii MTD",
-                        icon="mdi:transmission-tower",
-                        unit="kWh",
-                        device_class=SensorDeviceClass.ENERGY,
-                        has_zones=has_zones,
-                        serial=serial,
-                    )
-                )
-                if is_export_prosumer(meter):
-                    sensors.append(
-                        EnergaBillComponentSensor(
-                            coordinator=coordinator,
-                            meter_id=meter_id,
-                            device_info=device_info,
-                            entry=entry,
-                            component_key="energy_export",
-                            name="Oddanie Energii MTD",
                             icon="mdi:solar-power",
                             unit="kWh",
                             device_class=SensorDeviceClass.ENERGY,

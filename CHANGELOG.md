@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.9.8 (2026-11-20) — stabilna: sumaryczny pobór MTD dla taryf strefowych, ukrycie sensorów technicznych, fix I/O i bazy
+
+Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z
+`v1.9.7` jest bezpieczna.
+
+- **Sumaryczny Pobór i Oddanie MTD dla taryf strefowych (`sensor.py`).**
+  W taryfach wielostrefowych (G12, G12w) obok rozbicia per strefa rejestrowany
+  jest teraz również sumaryczny sensor `Pobór Energii MTD` (`component_key="energy_import"`)
+  oraz dla prosumentów `Oddanie Energii MTD` (`component_key="energy_export"`).
+  Użytkownik ma bezpośredni podgląd całomiesięcznego wolumenu energii (kWh) obok
+  kwoty rachunku w PLN.
+- **Ukrycie technicznych sensorów statystyk (`sensors/live.py`, gałąź `hide-technical-stats-sensors`).**
+  `_attr_entity_registry_visible_default = False` dla `EnergaStatisticsSensor`
+  i `EnergaCostStatisticsSensor`. Sensory zasilające Panel Energia i bazę LTS
+  działają w tle, nie zaśmiecając kart urządzeń statusem `nieznany`.
+- **Eliminacja blokującego SQLite I/O w pętli zdarzeń (`coordinator.py`).**
+  W `async_update_autoconsumption` odczyt `get_readings` z bazy SQLite został
+  przeniesiony do puli wątków wykonawczych (`async_add_executor_job`), zapobiegając
+  blokowaniu pętli zdarzeń asynchronicznych (MainThread).
+- **Zwalnianie zasobów bazy in-memory (`storage/sqlite/database.py`).**
+  Dodano jawną metodę `close()` oraz destruktor `__del__()` w `CanonicalStorage`,
+  zamykające połączenie `:memory:`. Wyeliminowano 37 ostrzeżeń `ResourceWarning`
+  podczas testów.
+- **Testy:** 832 passed, 1 skipped; lint `ruff E,F,I,B` czysty.
+
+- **Wydanie:** 1.9.8, stabilne.
+
 ## v1.9.7 (2026-11-09) — stabilna: faktury net-meteringu (issue #9)
 
 Wydanie **stabilne**. Bez zmian schematu danych i API usług; aktualizacja z

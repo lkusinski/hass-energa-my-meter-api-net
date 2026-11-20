@@ -211,6 +211,18 @@ class CanonicalStorage:
             self._mem_conn.row_factory = sqlite3.Row
         self._init_db()
 
+    def close(self) -> None:
+        """Close in-memory connection if open."""
+        if self._mem_conn is not None:
+            try:
+                self._mem_conn.close()
+            except Exception:
+                pass
+            self._mem_conn = None
+
+    def __del__(self) -> None:
+        self.close()
+
     @contextmanager
     def _connection(self) -> Generator[sqlite3.Connection, None, None]:
         if self._mem_conn is not None:

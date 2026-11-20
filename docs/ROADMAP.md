@@ -27,13 +27,12 @@ Integracja posiada w pełni przetestowany i zweryfikowany na 5 środowiskach pro
 ### 📌 Zadania do wdrożenia przy okazji najbliższego wydania (Backlog UX & Sensors):
 * [x] **Kompatybilność testów jednostkowych na platformie Windows (Issue #3):**
   * Zastąpienie `NamedTemporaryFile` przez standardową fixture pytestową `tmp_path` w testach bazy SQLite, eliminując błąd blokady plików (`PermissionError`) na Windowsie.
-* [ ] **Sumaryczny pobór MTD dla taryf strefowych (`sensor.energa_{serial}_pobor_energii_mtd`):**
+* [x] **Sumaryczny pobór MTD dla taryf strefowych (`sensor.energa_{serial}_pobor_energii_mtd`):**
   * Obecnie w G12/G12w tworzone są osobne sensory `Pobór Energii Strefa 1 MTD` i `Strefa 2 MTD`.
-  * Dodać także sumaryczny sensor poboru w kWh dla całego miesiąca (biorący wartość z `mtd_import_kwh`), aby użytkownik miał obok siebie `Pobór Energii MTD` (kWh) oraz `Dotychczasowy Rachunek` (PLN).
-* [ ] **Domyślne ukrycie technicznych sensorów statystyk (`_attr_entity_registry_visible_default = False`):**
+  * Dodano także sumaryczny sensor poboru w kWh dla całego miesiąca (biorący wartość z `mtd_import_kwh`), aby użytkownik miał obok siebie `Pobór Energii MTD` (kWh) oraz `Dotychczasowy Rachunek` (PLN).
+* [x] **Domyślne ukrycie technicznych sensorów statystyk (`_attr_entity_registry_visible_default = False`):**
   * Dla sensorów `EnergaStatisticsSensor` i `EnergaCostStatisticsSensor` (`Panel Energia...`).
-  * Zapobiegnie to wyświetlaniu mylącego statusu `nieznany` na kartach urządzeń w interfejsie HA, zachowując pełne działanie w tle dla bazy LTS i oficjalnego Panelu Energia.
-  * **Gotowe na gałęzi `feature/hide-technical-stats-sensors`** (commit `2a4c34a`, poza `main` celowo) — do scalenia jako początek kolejnego wydania (1.9.4 / 1.10).
+  * Zapobiega wyświetlaniu mylącego statusu `nieznany` na kartach urządzeń w interfejsie HA, zachowując pełne działanie w tle dla bazy LTS i oficjalnego Panelu Energia (z gałęzi `feature/hide-technical-stats-sensors`).
 
 ---
 
